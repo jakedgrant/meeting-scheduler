@@ -26,6 +26,9 @@ struct CreatePollView: View {
     @State var rangeStartTime = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
     @State var rangeEndTime = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
 
+    // Multi-date picker for all-day events
+    @State var selectedDates = Set<DateComponents>()
+
     var body: some View {
         
         NavigationStack {
@@ -45,31 +48,45 @@ struct CreatePollView: View {
                 }
 
                 Section("Time Options") {
-                    Toggle("Use date range selector", isOn: $useDateRange)
-
-                    if useDateRange {
+                    if isAllDay {
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Add Date Range")
+                            Text("Select Days")
                                 .font(.headline)
 
-                            DatePicker("Start Date", selection: $rangeStartDate, in: startOfToday()..., displayedComponents: .date)
+                            MultiDatePicker("Days", selection: $selectedDates)
 
-                            DatePicker("End Date", selection: $rangeEndDate, in: startOfToday()..., displayedComponents: .date)
+                            Button(action: addSelectedDates) {
+                                Label("Add Selected Days", systemImage: "calendar.badge.plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(selectedDates.isEmpty)
+                        }
+                        .padding(.vertical, 8)
+                    } else {
+                        Toggle("Use date range selector", isOn: $useDateRange)
 
-                            if !isAllDay {
+                        if useDateRange {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Add Date Range")
+                                    .font(.headline)
+
+                                DatePicker("Start Date", selection: $rangeStartDate, in: startOfToday()..., displayedComponents: .date)
+
+                                DatePicker("End Date", selection: $rangeEndDate, in: startOfToday()..., displayedComponents: .date)
+
                                 DatePicker("Start Time", selection: $rangeStartTime, displayedComponents: .hourAndMinute)
                                     .datePickerStyle(.compact)
 
                                 DatePicker("End Time", selection: $rangeEndTime, displayedComponents: .hourAndMinute)
                                     .datePickerStyle(.compact)
-                            }
 
-                            Button(action: addDateRange) {
-                                Label("Add Date Range", systemImage: "calendar.badge.plus")
+                                Button(action: addDateRange) {
+                                    Label("Add Date Range", systemImage: "calendar.badge.plus")
+                                }
+                                .buttonStyle(.borderedProminent)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .padding(.vertical, 8)
                         }
-                        .padding(.vertical, 8)
                     }
 
                     ForEach($timeOptions) { $option in
@@ -138,6 +155,26 @@ struct CreatePollView: View {
 
     private func addTimeOption() {
         timeOptions.append(TimeOption())
+    }
+
+    private func addSelectedDates() {
+        let calendar = Calendar.current
+
+        // Convert DateComponents to Date objects and create TimeOptions
+        for dateComponents in selectedDates {
+            if let date = calendar.date(from: dateComponents) {
+                let newOption = TimeOption(
+                    date: date,
+                    startTime: calendar.date(bySettingHour: 0, minute: 0, second: 0, of: date) ?? date,
+                    endTime: calendar.date(bySettingHour: 23, minute: 59, second: 0, of: date) ?? date
+                )
+                timeOptions.append(newOption)
+            }
+        }
+
+        // Clear selected dates
+        selectedDates.removeAll()
+        errorMessage = nil
     }
 
     private func addDateRange() {
