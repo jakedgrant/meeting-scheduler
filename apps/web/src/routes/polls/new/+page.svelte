@@ -83,8 +83,12 @@
 			currentDate.setDate(currentDate.getDate() + 1);
 		}
 
-		// Add all new options to the list
-		timeOptions = [...timeOptions, ...newOptions];
+		// Add all new options to the list and sort chronologically
+		timeOptions = [...timeOptions, ...newOptions].sort((a, b) => {
+			const dateA = new Date(`${a.date}T${a.startTime}`);
+			const dateB = new Date(`${b.date}T${b.startTime}`);
+			return dateA.getTime() - dateB.getTime();
+		});
 
 		// Reset the range fields
 		rangeStartDate = '';

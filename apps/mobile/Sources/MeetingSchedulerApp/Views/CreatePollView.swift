@@ -172,6 +172,16 @@ struct CreatePollView: View {
             }
         }
 
+        // Sort chronologically by date and start time
+        timeOptions.sort { option1, option2 in
+            let date1 = calendar.startOfDay(for: option1.date)
+            let date2 = calendar.startOfDay(for: option2.date)
+            if date1 != date2 {
+                return date1 < date2
+            }
+            return option1.startTime < option2.startTime
+        }
+
         // Clear selected dates
         selectedDates.removeAll()
         errorMessage = nil
@@ -211,6 +221,16 @@ struct CreatePollView: View {
             )
             timeOptions.append(newOption)
             currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+        }
+
+        // Sort chronologically by date and start time
+        timeOptions.sort { option1, option2 in
+            let date1 = calendar.startOfDay(for: option1.date)
+            let date2 = calendar.startOfDay(for: option2.date)
+            if date1 != date2 {
+                return date1 < date2
+            }
+            return option1.startTime < option2.startTime
         }
 
         // Reset the range fields
