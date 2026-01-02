@@ -144,7 +144,7 @@ public final class AuthService: NSObject {
 
     // MARK: - Profile Updates
 
-    public func updateProfile(displayName: String?, timezone: String?) async throws {
+    public func updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) async throws {
         guard let userId = currentUser?.id else {
             throw AuthError.notAuthenticated
         }
@@ -152,6 +152,9 @@ public final class AuthService: NSObject {
         var updates: [String: AnyJSON] = [:]
         if let displayName = displayName {
             updates["display_name"] = .string(displayName)
+        }
+        if let avatarUrl = avatarUrl {
+            updates["avatar_url"] = .string(avatarUrl)
         }
         if let timezone = timezone {
             updates["timezone"] = .string(timezone)
@@ -216,7 +219,7 @@ extension AuthService: ASAuthorizationControllerDelegate {
                         .joined(separator: " ")
 
                     if !displayName.isEmpty {
-                        try? await updateProfile(displayName: displayName, timezone: nil)
+                        try? await updateProfile(displayName: displayName, avatarUrl: nil, timezone: nil)
                     }
                 }
 

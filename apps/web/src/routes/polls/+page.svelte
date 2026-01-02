@@ -96,6 +96,7 @@
 		<div class="logo">Meeting Scheduler</div>
 		<div class="user-menu">
 			<span>{$profile?.display_name || $user?.email}</span>
+			<a href="/settings" class="settings-link">Settings</a>
 			<button onclick={handleSignOut}>Sign Out</button>
 		</div>
 	</header>
@@ -211,6 +212,20 @@
 		display: flex;
 		align-items: center;
 		gap: 1rem;
+	}
+
+	.user-menu .settings-link {
+		padding: 0.5rem 1rem;
+		background: transparent;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		text-decoration: none;
+		color: inherit;
+		transition: background 0.2s;
+	}
+
+	.user-menu .settings-link:hover {
+		background: #f5f5f5;
 	}
 
 	.user-menu button {
