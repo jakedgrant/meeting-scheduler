@@ -24,15 +24,15 @@ struct PollListView: View {
             }
             .navigationTitle("My Polls")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { showJoinByCode = true }) {
-                        Label("Join Poll", systemImage: "arrow.down.circle")
-                    }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button(action: handleCreatePoll) {
-                        Image(systemName: "plus")
-                    }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    
+                        Button(action: { showJoinByCode = true }) {
+                            Label("Join Poll", systemImage: "arrow.down.circle")
+                        }
+                    
+                        Button(action: handleCreatePoll) {
+                            Label("Create Poll", systemImage: "plus")
+                        }
                 }
             }
             .sheet(isPresented: $showCreatePoll) {

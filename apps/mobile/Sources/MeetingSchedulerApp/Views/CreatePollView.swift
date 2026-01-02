@@ -121,16 +121,21 @@ struct CreatePollView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button{
                         dismiss()
+                    } label: {
+                        Label("Cancel", systemImage: "xmark")
                     }
                     .disabled(isLoading)
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
-                        createPoll()
+                ToolbarItem(placement: .primaryAction) {
+                    Button(action: createPoll) {
+                        Label("Create Poll", systemImage: "checkmark")
                     }
+                    #if os(iOS)
+                    .buttonStyle(.glassProminent)
+                    #endif
                     .disabled(title.isEmpty || isLoading)
                 }
             }
