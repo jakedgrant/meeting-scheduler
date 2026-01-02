@@ -13,6 +13,7 @@
 	let title = $state('');
 	let description = $state('');
 	let location = $state('');
+	let isAllDay = $state(false);
 	let loading = $state(false);
 	let error = $state('');
 
@@ -108,8 +109,9 @@
 
 			// Add time options
 			const formattedOptions = validTimeOptions.map((opt) => ({
-				start_time: new Date(`${opt.date}T${opt.startTime}`).toISOString(),
-				end_time: new Date(`${opt.date}T${opt.endTime}`).toISOString()
+				start_time: new Date(`${opt.date}T${isAllDay ? '00:00' : opt.startTime}`).toISOString(),
+				end_time: new Date(`${opt.date}T${isAllDay ? '23:59' : opt.endTime}`).toISOString(),
+				is_all_day: isAllDay
 			}));
 
 			await addTimeOptions(poll.id, formattedOptions);
@@ -232,6 +234,18 @@
 					disabled={loading}
 				/>
 			</div>
+
+			<div class="form-group checkbox-group">
+				<label>
+					<input
+						type="checkbox"
+						bind:checked={isAllDay}
+						disabled={loading}
+					/>
+					All-day events
+				</label>
+				<p class="help-text">Time options will be for entire days instead of specific time ranges</p>
+			</div>
 		</div>
 
 		<div class="form-section">
@@ -252,69 +266,71 @@
 							{/each}
 						</select>
 
-						<div class="time-input-group">
-							<button
-								type="button"
-								class="spinner-btn"
-								onclick={() => adjustTime(option.id, 'startTime', 'up')}
-								disabled={loading}
-								title="Increase start time"
-							>
-								&#9650;
-							</button>
-							<select
-								value={option.startTime}
-								onchange={(e) => updateTimeOption(option.id, 'startTime', e.currentTarget.value)}
-								disabled={loading}
-								class="time-select"
-							>
-								{#each timePickerOptions as timeOpt}
-									<option value={timeOpt}>{timeOpt}</option>
-								{/each}
-							</select>
-							<button
-								type="button"
-								class="spinner-btn"
-								onclick={() => adjustTime(option.id, 'startTime', 'down')}
-								disabled={loading}
-								title="Decrease start time"
-							>
-								&#9660;
-							</button>
-						</div>
+						{#if !isAllDay}
+							<div class="time-input-group">
+								<button
+									type="button"
+									class="spinner-btn"
+									onclick={() => adjustTime(option.id, 'startTime', 'up')}
+									disabled={loading}
+									title="Increase start time"
+								>
+									&#9650;
+								</button>
+								<select
+									value={option.startTime}
+									onchange={(e) => updateTimeOption(option.id, 'startTime', e.currentTarget.value)}
+									disabled={loading}
+									class="time-select"
+								>
+									{#each timePickerOptions as timeOpt}
+										<option value={timeOpt}>{timeOpt}</option>
+									{/each}
+								</select>
+								<button
+									type="button"
+									class="spinner-btn"
+									onclick={() => adjustTime(option.id, 'startTime', 'down')}
+									disabled={loading}
+									title="Decrease start time"
+								>
+									&#9660;
+								</button>
+							</div>
 
-						<span class="time-separator">to</span>
+							<span class="time-separator">to</span>
 
-						<div class="time-input-group">
-							<button
-								type="button"
-								class="spinner-btn"
-								onclick={() => adjustTime(option.id, 'endTime', 'up')}
-								disabled={loading}
-								title="Increase end time"
-							>
-								&#9650;
-							</button>
-							<select
-								value={option.endTime}
-								onchange={(e) => updateTimeOption(option.id, 'endTime', e.currentTarget.value)}
-								disabled={loading}
-								class="time-select"
-							>
-								{#each getValidEndTimeOptions(option.startTime) as timeOpt}
-									<option value={timeOpt}>{timeOpt}</option>
-								{/each}
-							</select>
-							<button
-								type="button"
-								class="spinner-btn"
-								onclick={() => adjustTime(option.id, 'endTime', 'down')}
-								disabled={loading}
-								title="Decrease end time"
-							>
-								&#9660;
-							</button>
-						</div>
+							<div class="time-input-group">
+								<button
+									type="button"
+									class="spinner-btn"
+									onclick={() => adjustTime(option.id, 'endTime', 'up')}
+									disabled={loading}
+									title="Increase end time"
+								>
+									&#9650;
+								</button>
+								<select
+									value={option.endTime}
+									onchange={(e) => updateTimeOption(option.id, 'endTime', e.currentTarget.value)}
+									disabled={loading}
+									class="time-select"
+								>
+									{#each getValidEndTimeOptions(option.startTime) as timeOpt}
+										<option value={timeOpt}>{timeOpt}</option>
+									{/each}
+								</select>
+								<button
+									type="button"
+									class="spinner-btn"
+									onclick={() => adjustTime(option.id, 'endTime', 'down')}
+									disabled={loading}
+									title="Decrease end time"
+								>
+									&#9660;
+								</button>
+							</div>
+						{/if}
 
 						<button
 							type="button"
@@ -558,5 +574,24 @@
 	.btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.checkbox-group label {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		cursor: pointer;
+		font-weight: 500;
+	}
+
+	.checkbox-group input[type='checkbox'] {
+		width: auto;
+		cursor: pointer;
+	}
+
+	.help-text {
+		margin: 0.5rem 0 0 1.75rem;
+		font-size: 0.875rem;
+		color: #666;
 	}
 </style>

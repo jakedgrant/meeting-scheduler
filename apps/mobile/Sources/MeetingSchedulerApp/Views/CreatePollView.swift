@@ -14,6 +14,7 @@ struct CreatePollView: View {
     @State var title = ""
     @State var description = ""
     @State var location = ""
+    @State var isAllDay = false
     @State var timeOptions: [TimeOption] = [TimeOption()]
     @State var isLoading = false
     @State var errorMessage: String?
@@ -28,13 +29,19 @@ struct CreatePollView: View {
                     TextField("Description (optional)", text: $description, axis: .vertical)
                         .lineLimit(3...6)
                     TextField("Location (optional)", text: $location)
+
+                    Toggle("All-day events", isOn: $isAllDay)
+                }
+                .onChange(of: isAllDay) { _, _ in
+                    // Reset time options when toggling all-day mode
+                    // This ensures the UI updates properly
                 }
 
                 Section("Time Options") {
-                    
+
                     ForEach($timeOptions) { $option in
-                        
-                        TimeOptionView(option: $option)
+
+                        TimeOptionView(option: $option, isAllDay: isAllDay)
                             .swipeActions(edge: .trailing) {
                                 if timeOptions.count > 1 {
                                     Button(role: .destructive) {
@@ -108,34 +115,45 @@ struct CreatePollView: View {
                 )
 
                 // Add time options
-                let options = timeOptions.map { option -> (start: Date, end: Date) in
+                let options = timeOptions.map { option -> (start: Date, end: Date, isAllDay: Bool) in
                     let calendar = Calendar.current
 
-                    // Combine date with start time
-                    let startComponents = calendar.dateComponents([.hour, .minute], from: option.startTime)
-                    let start = calendar.date(bySettingHour: startComponents.hour ?? 9,
+                    let start: Date
+                    let end: Date
+
+                    if isAllDay {
+                        // For all-day events, use 00:00 as start and 23:59 as end
+                        start = calendar.date(bySettingHour: 0, minute: 0, second: 0, of: option.date) ?? option.date
+                        end = calendar.date(bySettingHour: 23, minute: 59, second: 0, of: option.date) ?? option.date
+                    } else {
+                        // Combine date with start time
+                        let startComponents = calendar.dateComponents([.hour, .minute], from: option.startTime)
+                        start = calendar.date(bySettingHour: startComponents.hour ?? 9,
                                               minute: startComponents.minute ?? 0,
                                               second: 0,
                                               of: option.date) ?? option.date
 
-                    // Combine date with end time
-                    let endComponents = calendar.dateComponents([.hour, .minute], from: option.endTime)
-                    let end = calendar.date(bySettingHour: endComponents.hour ?? 10,
+                        // Combine date with end time
+                        let endComponents = calendar.dateComponents([.hour, .minute], from: option.endTime)
+                        end = calendar.date(bySettingHour: endComponents.hour ?? 10,
                                             minute: endComponents.minute ?? 0,
                                             second: 0,
                                             of: option.date) ?? option.date
+                    }
 
-                    return (start: start, end: end)
+                    return (start: start, end: end, isAllDay: isAllDay)
                 }
 
-                // Validate that end time is after start time for all options
-                for option in options {
-                    if option.end <= option.start {
-                        await MainActor.run {
-                            errorMessage = "End time must be after start time for all time options"
-                            isLoading = false
+                // Validate that end time is after start time for all options (only if not all-day)
+                if !isAllDay {
+                    for option in options {
+                        if option.end <= option.start {
+                            await MainActor.run {
+                                errorMessage = "End time must be after start time for all time options"
+                                isLoading = false
+                            }
+                            return
                         }
-                        return
                     }
                 }
 
@@ -154,17 +172,21 @@ struct CreatePollView: View {
 }
 
 struct TimeOptionView: View {
-    
+
     @Binding var option: TimeOption
-    
+    let isAllDay: Bool
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            
+
             DatePicker("Date", selection: $option.date, in: startOfToday()..., displayedComponents: .date)
-            DatePicker("Start", selection: $option.startTime, in: getStartTimeRange(for: option.date), displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
-            DatePicker("End", selection: $option.endTime, in: getEndTimeRange(for: option.startTime), displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
+
+            if !isAllDay {
+                DatePicker("Start", selection: $option.startTime, in: getStartTimeRange(for: option.date), displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.compact)
+                DatePicker("End", selection: $option.endTime, in: getEndTimeRange(for: option.startTime), displayedComponents: .hourAndMinute)
+                    .datePickerStyle(.compact)
+            }
         }
     }
     
