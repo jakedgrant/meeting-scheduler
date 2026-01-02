@@ -31,8 +31,8 @@ struct CreatePollView: View {
                 Section("Time Options") {
                     ForEach($timeOptions) { $option in
                         VStack(alignment: .leading, spacing: 8) {
-                            DatePicker("Date", selection: $option.date, displayedComponents: .date)
-                            DatePicker("Start", selection: $option.startTime, displayedComponents: .hourAndMinute)
+                            DatePicker("Date", selection: $option.date, in: startOfToday()..., displayedComponents: .date)
+                            DatePicker("Start", selection: $option.startTime, in: getStartTimeRange(for: option.date), displayedComponents: .hourAndMinute)
                                 .datePickerStyle(.compact)
                                 .environment(\.minuteInterval, 15)
                                 .onChange(of: option.startTime) { oldValue, newValue in
@@ -53,7 +53,7 @@ struct CreatePollView: View {
                                         }
                                     }
                                 }
-                            DatePicker("End", selection: $option.endTime, displayedComponents: .hourAndMinute)
+                            DatePicker("End", selection: $option.endTime, in: getEndTimeRange(for: option.startTime), displayedComponents: .hourAndMinute)
                                 .datePickerStyle(.compact)
                                 .environment(\.minuteInterval, 15)
                         }
@@ -101,6 +101,53 @@ struct CreatePollView: View {
             }
             .interactiveDismissDisabled(isLoading)
         }
+    }
+
+    // Helper functions for date ranges
+    private func startOfToday() -> Date {
+        let calendar = Calendar.current
+        return calendar.startOfDay(for: Date())
+    }
+
+    private func getStartTimeRange(for date: Date) -> ClosedRange<Date> {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let selectedDay = calendar.startOfDay(for: date)
+
+        // Create a date representing the start of the day (00:00)
+        let dayStart = calendar.startOfDay(for: date)
+
+        // Create a date representing the end of the day (23:59)
+        let dayEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: date) ?? date
+
+        // If the selected date is today, start from current time
+        if selectedDay == today {
+            let now = Date()
+            // Round up to next 15-minute interval
+            let components = calendar.dateComponents([.hour, .minute], from: now)
+            let currentMinutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+            let roundedMinutes = ((currentMinutes / 15) + 1) * 15
+            let roundedHour = roundedMinutes / 60
+            let roundedMinute = roundedMinutes % 60
+
+            if let roundedTime = calendar.date(bySettingHour: roundedHour, minute: roundedMinute, second: 0, of: date) {
+                return roundedTime...dayEnd
+            }
+        }
+
+        return dayStart...dayEnd
+    }
+
+    private func getEndTimeRange(for startTime: Date) -> ClosedRange<Date> {
+        let calendar = Calendar.current
+
+        // End time must be at least 15 minutes after start time
+        let minEndTime = calendar.date(byAdding: .minute, value: 15, to: startTime) ?? startTime
+
+        // End of the same day as start time
+        let dayEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: startTime) ?? startTime
+
+        return minEndTime...dayEnd
     }
 
     private func addTimeOption() {
