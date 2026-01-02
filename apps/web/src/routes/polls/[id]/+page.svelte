@@ -306,12 +306,9 @@
 				{:else}
 					<ul class="participants-list">
 						{#each $currentPollParticipants as participant}
-							{@const participantProfile = participant.user_id
-								? { display_name: $profile?.display_name }
-								: null}
 							<li>
 								<span class="participant-name">
-									{participantProfile?.display_name || participant.anonymous_name || 'Anonymous'}
+									{participant.profiles?.display_name || participant.anonymous_name || 'Anonymous'}
 								</span>
 								{#if participant.user_id === $user?.id}
 									<span class="you-badge">You</span>

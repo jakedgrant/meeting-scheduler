@@ -83,6 +83,9 @@ export interface PollParticipant {
   access_token: string
   created_at: string
   updated_at: string
+  profiles?: {
+    display_name: string | null
+  } | null
 }
 
 export interface AvailabilityResponse {

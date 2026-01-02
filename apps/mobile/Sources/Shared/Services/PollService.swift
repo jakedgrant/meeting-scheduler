@@ -169,7 +169,7 @@ public final class PollService {
         do {
             let response: [PollParticipant] = try await supabase
                 .from("poll_participants")
-                .select()
+                .select("*, profiles(display_name)")
                 .eq("poll_id", value: pollId.uuidString)
                 .execute()
                 .value

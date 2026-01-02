@@ -122,6 +122,15 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
     public let accessToken: UUID
     public let createdAt: Date
     public var updatedAt: Date
+    public var profiles: ParticipantProfile?
+
+    public struct ParticipantProfile: Codable, Sendable {
+        public let displayName: String?
+
+        enum CodingKeys: String, CodingKey {
+            case displayName = "display_name"
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -132,10 +141,11 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
         case accessToken = "access_token"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case profiles
     }
 
     public var displayName: String {
-        anonymousName ?? "Anonymous"
+        profiles?.displayName ?? anonymousName ?? "Anonymous"
     }
 
     public init(
@@ -146,7 +156,8 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
         anonymousEmail: String? = nil,
         accessToken: UUID = UUID(),
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        profiles: ParticipantProfile? = nil
     ) {
         self.id = id
         self.pollId = pollId
@@ -156,6 +167,7 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
         self.accessToken = accessToken
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.profiles = profiles
     }
 }
 
