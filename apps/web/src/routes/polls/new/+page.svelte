@@ -109,6 +109,39 @@
 	}
 
 	const dateOptions = getDateOptions();
+
+	// Generate time options in 15-minute increments
+	function getTimeOptions(): string[] {
+		const options = [];
+		for (let hour = 0; hour < 24; hour++) {
+			for (let minute = 0; minute < 60; minute += 15) {
+				const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+				options.push(timeStr);
+			}
+		}
+		return options;
+	}
+
+	const timePickerOptions = getTimeOptions();
+
+	// Helper functions for spinner buttons
+	function incrementTime(time: string, minutes: number): string {
+		const [hours, mins] = time.split(':').map(Number);
+		const totalMinutes = hours * 60 + mins + minutes;
+		const newHours = Math.floor((totalMinutes / 60) % 24);
+		const newMins = totalMinutes % 60;
+		return `${newHours.toString().padStart(2, '0')}:${newMins.toString().padStart(2, '0')}`;
+	}
+
+	function adjustTime(id: string, field: 'startTime' | 'endTime', direction: 'up' | 'down') {
+		const option = timeOptions.find((opt) => opt.id === id);
+		if (!option) return;
+
+		const currentTime = option[field];
+		const minutes = direction === 'up' ? 15 : -15;
+		const newTime = incrementTime(currentTime, minutes);
+		updateTimeOption(id, field, newTime);
+	}
 </script>
 
 <div class="create-poll">
@@ -177,21 +210,69 @@
 							{/each}
 						</select>
 
-						<input
-							type="time"
-							value={option.startTime}
-							onchange={(e) => updateTimeOption(option.id, 'startTime', e.currentTarget.value)}
-							disabled={loading}
-						/>
+						<div class="time-input-group">
+							<button
+								type="button"
+								class="spinner-btn"
+								onclick={() => adjustTime(option.id, 'startTime', 'up')}
+								disabled={loading}
+								title="Increase start time"
+							>
+								&#9650;
+							</button>
+							<select
+								value={option.startTime}
+								onchange={(e) => updateTimeOption(option.id, 'startTime', e.currentTarget.value)}
+								disabled={loading}
+								class="time-select"
+							>
+								{#each timePickerOptions as timeOpt}
+									<option value={timeOpt}>{timeOpt}</option>
+								{/each}
+							</select>
+							<button
+								type="button"
+								class="spinner-btn"
+								onclick={() => adjustTime(option.id, 'startTime', 'down')}
+								disabled={loading}
+								title="Decrease start time"
+							>
+								&#9660;
+							</button>
+						</div>
 
 						<span class="time-separator">to</span>
 
-						<input
-							type="time"
-							value={option.endTime}
-							onchange={(e) => updateTimeOption(option.id, 'endTime', e.currentTarget.value)}
-							disabled={loading}
-						/>
+						<div class="time-input-group">
+							<button
+								type="button"
+								class="spinner-btn"
+								onclick={() => adjustTime(option.id, 'endTime', 'up')}
+								disabled={loading}
+								title="Increase end time"
+							>
+								&#9650;
+							</button>
+							<select
+								value={option.endTime}
+								onchange={(e) => updateTimeOption(option.id, 'endTime', e.currentTarget.value)}
+								disabled={loading}
+								class="time-select"
+							>
+								{#each timePickerOptions as timeOpt}
+									<option value={timeOpt}>{timeOpt}</option>
+								{/each}
+							</select>
+							<button
+								type="button"
+								class="spinner-btn"
+								onclick={() => adjustTime(option.id, 'endTime', 'down')}
+								disabled={loading}
+								title="Decrease end time"
+							>
+								&#9660;
+							</button>
+						</div>
 
 						<button
 							type="button"
@@ -313,14 +394,51 @@
 		flex-wrap: wrap;
 	}
 
-	.time-option select {
+	.time-option > select {
 		flex: 1;
 		min-width: 150px;
 	}
 
-	.time-option input[type='time'] {
+	.time-input-group {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		background: #f8f9fa;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		padding: 0.25rem;
+	}
+
+	.time-select {
 		width: auto;
+		min-width: 80px;
 		padding: 0.5rem;
+		border: none;
+		background: white;
+		border-radius: 4px;
+	}
+
+	.spinner-btn {
+		background: white;
+		border: 1px solid #ddd;
+		border-radius: 4px;
+		cursor: pointer;
+		padding: 0.25rem 0.5rem;
+		font-size: 0.75rem;
+		color: #666;
+		line-height: 1;
+		transition: all 0.2s;
+	}
+
+	.spinner-btn:hover:not(:disabled) {
+		background: #007bff;
+		color: white;
+		border-color: #007bff;
+	}
+
+	.spinner-btn:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
 	}
 
 	.time-separator {

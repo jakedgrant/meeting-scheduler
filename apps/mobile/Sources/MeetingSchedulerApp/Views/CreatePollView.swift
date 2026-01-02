@@ -33,7 +33,11 @@ struct CreatePollView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             DatePicker("Date", selection: $option.date, displayedComponents: .date)
                             DatePicker("Start", selection: $option.startTime, displayedComponents: .hourAndMinute)
+                                .datePickerStyle(.compact)
+                                .environment(\.minuteInterval, 15)
                             DatePicker("End", selection: $option.endTime, displayedComponents: .hourAndMinute)
+                                .datePickerStyle(.compact)
+                                .environment(\.minuteInterval, 15)
                         }
                         .swipeActions(edge: .trailing) {
                             if timeOptions.count > 1 {
