@@ -44,13 +44,23 @@ export async function loadSubscription() {
     }
 
     // Load from Supabase (source of truth for subscription status)
-    const { data: subData } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .single()
+    try {
+      const { data: subData, error } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .single()
 
-    subscription.set(subData as Subscription | null)
+      if (error && error.code !== 'PGRST116') {
+        // PGRST116 is "no rows returned" which is normal for users without a subscription
+        console.error('Subscription query error:', error)
+      }
+      subscription.set(subData as Subscription | null)
+    } catch (subErr) {
+      console.error('Failed to query subscriptions table:', subErr)
+      // Continue without subscription data - it's optional
+      subscription.set(null)
+    }
 
     // Also get RevenueCat customer info for purchase flows
     const info = await getCustomerInfo()

@@ -14,9 +14,9 @@ struct PollListView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if pollService.isLoading && pollService.myPolls.isEmpty {
+                if pollService.isLoading && pollService.createdPolls.isEmpty && pollService.joinedPolls.isEmpty {
                     ProgressView("Loading polls...")
-                } else if pollService.myPolls.isEmpty {
+                } else if pollService.createdPolls.isEmpty && pollService.joinedPolls.isEmpty {
                     emptyState
                 } else {
                     pollList
@@ -70,9 +70,25 @@ struct PollListView: View {
     }
 
     private var pollList: some View {
-        List(pollService.myPolls) { poll in
-            NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                PollRowView(poll: poll)
+        List {
+            if !pollService.createdPolls.isEmpty {
+                Section("My Polls") {
+                    ForEach(pollService.createdPolls) { poll in
+                        NavigationLink(destination: PollDetailView(pollId: poll.id)) {
+                            PollRowView(poll: poll)
+                        }
+                    }
+                }
+            }
+
+            if !pollService.joinedPolls.isEmpty {
+                Section("Polls I Joined") {
+                    ForEach(pollService.joinedPolls) { poll in
+                        NavigationLink(destination: PollDetailView(pollId: poll.id)) {
+                            PollRowView(poll: poll)
+                        }
+                    }
+                }
             }
         }
     }

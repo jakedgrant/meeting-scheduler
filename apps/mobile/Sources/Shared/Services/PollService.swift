@@ -1,12 +1,20 @@
 import Foundation
 import Supabase
 
+// Response structure for get_user_participated_polls RPC
+private struct ParticipatedPollsResponse: Decodable {
+    let created_polls: [Poll]
+    let joined_polls: [Poll]
+}
+
 @MainActor
 @Observable
 public final class PollService {
     public static let shared = PollService()
 
     public private(set) var myPolls: [Poll] = []
+    public private(set) var createdPolls: [Poll] = []
+    public private(set) var joinedPolls: [Poll] = []
     public private(set) var isLoading = false
 
     private let supabase = SupabaseService.shared.client
@@ -16,23 +24,24 @@ public final class PollService {
     // MARK: - Load Polls
 
     public func loadMyPolls() async {
-        guard let userId = AuthService.shared.currentUser?.id else { return }
+        guard AuthService.shared.currentUser != nil else { return }
 
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let response: [Poll] = try await supabase
-                .from("polls")
-                .select()
-                .eq("creator_id", value: userId.uuidString)
-                .order("created_at", ascending: false)
+            let response: ParticipatedPollsResponse = try await supabase
+                .rpc("get_user_participated_polls")
                 .execute()
                 .value
 
-            myPolls = response
+            createdPolls = response.created_polls
+            joinedPolls = response.joined_polls
+            myPolls = createdPolls + joinedPolls
         } catch {
             print("Failed to load polls: \(error)")
+            createdPolls = []
+            joinedPolls = []
         }
     }
 

@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user, profile, signOut } from '$lib/stores/auth';
-	import { polls, pollsLoading, loadMyPolls, loadPollByCode } from '$lib/stores/polls';
+	import { polls, createdPolls, joinedPolls, pollsLoading, loadMyPolls, loadPollByCode } from '$lib/stores/polls';
 	import { subscription, loadSubscription, getMaxActivePolls } from '$lib/stores/subscription';
 
 	let joinCode = $state('');
@@ -17,7 +17,10 @@
 
 	onMount(() => {
 		loadMyPolls();
-		loadSubscription();
+		// Load subscription separately without blocking poll display
+		loadSubscription().catch((err) => {
+			console.error('Failed to load subscription:', err);
+		});
 	});
 
 	async function handleSignOut() {
@@ -134,29 +137,52 @@
 
 		{#if $pollsLoading}
 			<div class="loading">Loading polls...</div>
-		{:else if $polls.length === 0}
+		{:else if $createdPolls.length === 0 && $joinedPolls.length === 0}
 			<div class="empty-state">
 				<h2>No polls yet</h2>
 				<p>Create your first poll to start scheduling meetings.</p>
 				<a href="/polls/new" class="btn primary">Create Your First Poll</a>
 			</div>
 		{:else}
-			<div class="polls-grid">
-				{#each $polls as poll}
-					<a href="/polls/{poll.id}" class="poll-card">
-						<div class="poll-header">
-							<h3>{poll.title}</h3>
-							<span class="badge {getStatusBadgeClass(poll.status)}">{poll.status}</span>
-						</div>
-						{#if poll.description}
-							<p class="poll-description">{poll.description}</p>
-						{/if}
-						<div class="poll-meta">
-							<span>Created {formatDate(poll.created_at)}</span>
-						</div>
-					</a>
-				{/each}
-			</div>
+			{#if $createdPolls.length > 0}
+				<h2 class="section-header">My Polls</h2>
+				<div class="polls-grid">
+					{#each $createdPolls as poll}
+						<a href="/polls/{poll.id}" class="poll-card">
+							<div class="poll-header">
+								<h3>{poll.title}</h3>
+								<span class="badge {getStatusBadgeClass(poll.status)}">{poll.status}</span>
+							</div>
+							{#if poll.description}
+								<p class="poll-description">{poll.description}</p>
+							{/if}
+							<div class="poll-meta">
+								<span>Created {formatDate(poll.created_at)}</span>
+							</div>
+						</a>
+					{/each}
+				</div>
+			{/if}
+
+			{#if $joinedPolls.length > 0}
+				<h2 class="section-header">Polls I Joined</h2>
+				<div class="polls-grid">
+					{#each $joinedPolls as poll}
+						<a href="/polls/{poll.id}" class="poll-card">
+							<div class="poll-header">
+								<h3>{poll.title}</h3>
+								<span class="badge {getStatusBadgeClass(poll.status)}">{poll.status}</span>
+							</div>
+							{#if poll.description}
+								<p class="poll-description">{poll.description}</p>
+							{/if}
+							<div class="poll-meta">
+								<span>Created {formatDate(poll.created_at)}</span>
+							</div>
+						</a>
+					{/each}
+				</div>
+			{/if}
 		{/if}
 	</main>
 </div>
@@ -214,6 +240,12 @@
 
 	.page-header h1 {
 		margin: 0;
+	}
+
+	.section-header {
+		margin: 2rem 0 1rem;
+		font-size: 1.25rem;
+		font-weight: 600;
 	}
 
 	.join-by-code {

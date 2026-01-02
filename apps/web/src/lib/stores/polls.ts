@@ -5,6 +5,8 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 
 // Poll stores
 export const polls = writable<Poll[]>([])
+export const createdPolls = writable<Poll[]>([])
+export const joinedPolls = writable<Poll[]>([])
 export const currentPoll = writable<Poll | null>(null)
 export const currentPollTimeOptions = writable<PollTimeOption[]>([])
 export const currentPollParticipants = writable<PollParticipant[]>([])
@@ -13,10 +15,12 @@ export const pollsLoading = writable(false)
 
 let realtimeChannel: RealtimeChannel | null = null
 
-// Load user's polls
-export async function loadMyPolls() {
+// Load user's polls (both created and participated)
+export async function loadParticipatedPolls() {
   const currentUser = get(user)
   if (!currentUser) {
+    createdPolls.set([])
+    joinedPolls.set([])
     polls.set([])
     return
   }
@@ -24,19 +28,26 @@ export async function loadMyPolls() {
   pollsLoading.set(true)
 
   try {
-    const { data, error } = await supabase
-      .from('polls')
-      .select('*')
-      .eq('creator_id', currentUser.id)
-      .order('created_at', { ascending: false })
+    const { data, error } = await supabase.rpc('get_user_participated_polls')
 
     if (error) throw error
-    polls.set(data as Poll[])
+
+    const created = data?.created_polls || []
+    const joined = data?.joined_polls || []
+
+    createdPolls.set(created as Poll[])
+    joinedPolls.set(joined as Poll[])
+    polls.set([...(created as Poll[]), ...(joined as Poll[])])
   } catch (err) {
     console.error('Failed to load polls:', err)
   } finally {
     pollsLoading.set(false)
   }
+}
+
+// Legacy function for backward compatibility
+export async function loadMyPolls() {
+  return loadParticipatedPolls()
 }
 
 // Load a poll by share code
