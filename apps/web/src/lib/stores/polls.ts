@@ -79,10 +79,10 @@ export async function loadPoll(pollId: string) {
     if (timeError) throw timeError
     currentPollTimeOptions.set(timeOptions as PollTimeOption[])
 
-    // Load participants
+    // Load participants with their profiles
     const { data: participants, error: partError } = await supabase
       .from('poll_participants')
-      .select('*')
+      .select('*, profiles(display_name)')
       .eq('poll_id', pollId)
 
     if (partError) throw partError
@@ -153,7 +153,7 @@ function setupRealtimeForPoll(pollId: string) {
 async function loadPollParticipants(pollId: string) {
   const { data, error } = await supabase
     .from('poll_participants')
-    .select('*')
+    .select('*, profiles(display_name)')
     .eq('poll_id', pollId)
 
   if (!error && data) {
