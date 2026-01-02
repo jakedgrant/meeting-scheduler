@@ -127,14 +127,15 @@ public final class PollService {
         }
     }
 
-    public func addTimeOptions(pollId: UUID, options: [(start: Date, end: Date)]) async throws -> [PollTimeOption] {
+    public func addTimeOptions(pollId: UUID, options: [(start: Date, end: Date, isAllDay: Bool)]) async throws -> [PollTimeOption] {
         let formatter = ISO8601DateFormatter()
 
         let insertData: [[String: AnyJSON]] = options.map { option in
             [
                 "poll_id": .string(pollId.uuidString),
                 "start_time": .string(formatter.string(from: option.start)),
-                "end_time": .string(formatter.string(from: option.end))
+                "end_time": .string(formatter.string(from: option.end)),
+                "is_all_day": .bool(option.isAllDay)
             ]
         }
 

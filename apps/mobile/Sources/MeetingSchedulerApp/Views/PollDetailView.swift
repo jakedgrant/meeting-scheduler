@@ -329,9 +329,15 @@ struct TimeOptionRow: View {
                 VStack(alignment: .leading) {
                     Text(option.startTime, style: .date)
                         .font(.headline)
-                    Text("\(option.startTime, style: .time) - \(option.endTime, style: .time)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if option.isAllDay {
+                        Text("All day")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("\(option.startTime, style: .time) - \(option.endTime, style: .time)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Spacer()

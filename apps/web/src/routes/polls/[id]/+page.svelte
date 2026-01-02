@@ -249,7 +249,13 @@
 						<div class="time-option-card">
 							<div class="time-info">
 								<div class="date">{formatted.date}</div>
-								<div class="time">{formatted.time} - {endFormatted.time}</div>
+								<div class="time">
+									{#if option.is_all_day}
+										All day
+									{:else}
+										{formatted.time} - {endFormatted.time}
+									{/if}
+								</div>
 							</div>
 
 							<div class="response-stats">
