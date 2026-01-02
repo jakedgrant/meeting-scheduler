@@ -123,6 +123,17 @@ struct CreatePollView: View {
                     return (start: start, end: end)
                 }
 
+                // Validate that end time is after start time for all options
+                for option in options {
+                    if option.end <= option.start {
+                        await MainActor.run {
+                            errorMessage = "End time must be after start time for all time options"
+                            isLoading = false
+                        }
+                        return
+                    }
+                }
+
                 _ = try await PollService.shared.addTimeOptions(pollId: poll.id, options: options)
 
                 await MainActor.run {

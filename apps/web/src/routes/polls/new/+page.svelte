@@ -45,6 +45,15 @@
 		timeOptions = timeOptions.map((opt) => (opt.id === id ? { ...opt, [field]: value } : opt));
 	}
 
+	// Helper function to check if end time is before or equal to start time
+	function isInvalidTimeRange(startTime: string, endTime: string): boolean {
+		const [startHour, startMin] = startTime.split(':').map(Number);
+		const [endHour, endMin] = endTime.split(':').map(Number);
+		const startMinutes = startHour * 60 + startMin;
+		const endMinutes = endHour * 60 + endMin;
+		return endMinutes <= startMinutes;
+	}
+
 	async function handleSubmit() {
 		if (!title.trim()) {
 			error = 'Please enter a poll title';
@@ -54,6 +63,15 @@
 		const validTimeOptions = timeOptions.filter((opt) => opt.date && opt.startTime && opt.endTime);
 		if (validTimeOptions.length === 0) {
 			error = 'Please add at least one time option';
+			return;
+		}
+
+		// Check for invalid time ranges
+		const invalidOption = validTimeOptions.find((opt) =>
+			isInvalidTimeRange(opt.startTime, opt.endTime)
+		);
+		if (invalidOption) {
+			error = 'End time must be after start time for all time options';
 			return;
 		}
 
@@ -284,6 +302,9 @@
 							&times;
 						</button>
 					</div>
+			{#if option.startTime && option.endTime && isInvalidTimeRange(option.startTime, option.endTime)}
+				<div class="time-error">End time must be after start time</div>
+			{/if}
 				{/each}
 			</div>
 
@@ -332,6 +353,13 @@
 		padding: 0.75rem;
 		border-radius: 6px;
 		margin-bottom: 1rem;
+	}
+
+	.time-error {
+		color: #c00;
+		font-size: 0.875rem;
+		margin-top: 0.25rem;
+		width: 100%;
 	}
 
 	.form-section {
