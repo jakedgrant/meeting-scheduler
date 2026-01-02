@@ -5,6 +5,7 @@ struct SettingsView: View {
     @State var authService = AuthService.shared
     @State var purchaseService = PurchaseService.shared
     @State var showPaywall = false
+    @State var showProfileEdit = false
     @State var isSigningOut = false
 
     var body: some View {
@@ -12,25 +13,56 @@ struct SettingsView: View {
             List {
                 // Profile Section
                 Section {
-                    HStack(spacing: 12) {
-                        Circle()
-                            .fill(Color.blue.opacity(0.2))
-                            .frame(width: 50, height: 50)
-                            .overlay {
-                                Text(initials)
-                                    .font(.headline)
-                                    .foregroundStyle(.blue)
+                    Button {
+                        showProfileEdit = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            if let avatarUrl = authService.profile?.avatarUrl,
+                               !avatarUrl.isEmpty,
+                               let url = URL(string: avatarUrl) {
+                                AsyncImage(url: url) { image in
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Circle()
+                                        .fill(Color.blue.opacity(0.2))
+                                        .overlay {
+                                            Text(initials)
+                                                .font(.headline)
+                                                .foregroundStyle(.blue)
+                                        }
+                                }
+                                .frame(width: 50, height: 50)
+                                .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(Color.blue.opacity(0.2))
+                                    .frame(width: 50, height: 50)
+                                    .overlay {
+                                        Text(initials)
+                                            .font(.headline)
+                                            .foregroundStyle(.blue)
+                                    }
                             }
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(displayName)
-                                .font(.headline)
-                            Text(authService.currentUser?.email ?? "")
-                                .font(.caption)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(displayName)
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                                Text(authService.currentUser?.email ?? "")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
                                 .foregroundStyle(.secondary)
+                                .font(.caption)
                         }
+                        .padding(.vertical, 4)
                     }
-                    .padding(.vertical, 4)
                 }
 
                 // Subscription Section
@@ -92,6 +124,9 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
+            }
+            .sheet(isPresented: $showProfileEdit) {
+                ProfileEditView()
             }
         }
     }
