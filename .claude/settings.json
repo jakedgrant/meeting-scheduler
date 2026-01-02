@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "apple-platform-build-tools@apple-platform-build-tools": true
+  }
+}

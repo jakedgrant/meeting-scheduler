@@ -1,0 +1,74 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+.svelte-kit/
+.vercel/
+.output/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+
+# Supabase
+supabase/.branches/
+supabase/.temp/
+
+# iOS/macOS
+*.xcworkspace
+*.xcodeproj
+xcuserdata/
+DerivedData/
+.build/
+Packages/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+Pods/
+
+# Android
+*.apk
+*.ap_
+*.aab
+.gradle/
+local.properties
+*.iml
+.cxx/
+
+# Skip
+.skip/
+
+# Secrets (never commit)
+*.p8
+*.p12
+*.pem
+**/google-services.json
+**/GoogleService-Info.plist

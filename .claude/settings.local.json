@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm create:*)",
+      "Bash(npm --version:*)",
+      "Bash(npm create svelte:*)",
+      "Bash(supabase --version:*)",
+      "Bash(supabase link:*)",
+      "Bash(supabase db push:*)",
+      "Bash(supabase functions deploy:*)",
+      "Bash(npm run check:*)",
+      "Bash(skip:*)",
+      "Bash(swift package:*)",
+      "Bash(swift build:*)",
+      "Bash(xcodebuild:*)",
+      "WebFetch(domain:supabase.com)"
+    ]
+  }
+}
