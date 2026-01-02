@@ -35,6 +35,24 @@ struct CreatePollView: View {
                             DatePicker("Start", selection: $option.startTime, displayedComponents: .hourAndMinute)
                                 .datePickerStyle(.compact)
                                 .environment(\.minuteInterval, 15)
+                                .onChange(of: option.startTime) { oldValue, newValue in
+                                    // Auto-adjust end time if start time becomes >= end time
+                                    let calendar = Calendar.current
+                                    let startHour = calendar.component(.hour, from: newValue)
+                                    let startMinute = calendar.component(.minute, from: newValue)
+                                    let endHour = calendar.component(.hour, from: option.endTime)
+                                    let endMinute = calendar.component(.minute, from: option.endTime)
+
+                                    let startMinutes = startHour * 60 + startMinute
+                                    let endMinutes = endHour * 60 + endMinute
+
+                                    if endMinutes <= startMinutes {
+                                        // Set end time to start time + 15 minutes
+                                        if let newEndTime = calendar.date(byAdding: .minute, value: 15, to: newValue) {
+                                            option.endTime = newEndTime
+                                        }
+                                    }
+                                }
                             DatePicker("End", selection: $option.endTime, displayedComponents: .hourAndMinute)
                                 .datePickerStyle(.compact)
                                 .environment(\.minuteInterval, 15)

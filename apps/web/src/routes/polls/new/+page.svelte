@@ -42,7 +42,18 @@
 	}
 
 	function updateTimeOption(id: string, field: keyof TimeOption, value: string) {
-		timeOptions = timeOptions.map((opt) => (opt.id === id ? { ...opt, [field]: value } : opt));
+		timeOptions = timeOptions.map((opt) => {
+			if (opt.id !== id) return opt;
+
+			const updated = { ...opt, [field]: value };
+
+			// Auto-adjust end time if start time is changed to be >= end time
+			if (field === 'startTime' && isInvalidTimeRange(value, updated.endTime)) {
+				updated.endTime = incrementTime(value, 15);
+			}
+
+			return updated;
+		});
 	}
 
 	// Helper function to check if end time is before or equal to start time
@@ -52,6 +63,11 @@
 		const startMinutes = startHour * 60 + startMin;
 		const endMinutes = endHour * 60 + endMin;
 		return endMinutes <= startMinutes;
+	}
+
+	// Get valid end time options (only times after the start time)
+	function getValidEndTimeOptions(startTime: string): string[] {
+		return timePickerOptions.filter((time) => !isInvalidTimeRange(startTime, time));
 	}
 
 	async function handleSubmit() {
@@ -158,6 +174,14 @@
 		const currentTime = option[field];
 		const minutes = direction === 'up' ? 15 : -15;
 		const newTime = incrementTime(currentTime, minutes);
+
+		// For end time, prevent going to or before start time
+		if (field === 'endTime' && direction === 'down') {
+			if (isInvalidTimeRange(option.startTime, newTime)) {
+				return; // Don't allow adjustment
+			}
+		}
+
 		updateTimeOption(id, field, newTime);
 	}
 </script>
@@ -277,7 +301,7 @@
 								disabled={loading}
 								class="time-select"
 							>
-								{#each timePickerOptions as timeOpt}
+								{#each getValidEndTimeOptions(option.startTime) as timeOpt}
 									<option value={timeOpt}>{timeOpt}</option>
 								{/each}
 							</select>
@@ -302,9 +326,6 @@
 							&times;
 						</button>
 					</div>
-			{#if option.startTime && option.endTime && isInvalidTimeRange(option.startTime, option.endTime)}
-				<div class="time-error">End time must be after start time</div>
-			{/if}
 				{/each}
 			</div>
 
@@ -354,14 +375,6 @@
 		border-radius: 6px;
 		margin-bottom: 1rem;
 	}
-
-	.time-error {
-		color: #c00;
-		font-size: 0.875rem;
-		margin-top: 0.25rem;
-		width: 100%;
-	}
-
 	.form-section {
 		background: white;
 		border-radius: 8px;
