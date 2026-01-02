@@ -3,14 +3,14 @@ import Shared
 
 struct ProfileEditView: View {
     @State var authService = AuthService.shared
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.dismiss) var dismiss
 
-    @State private var displayName: String = ""
-    @State private var avatarUrl: String = ""
-    @State private var timezone: String = "UTC"
-    @State private var isSaving = false
-    @State private var errorMessage: String?
-    @State private var showSuccessAlert = false
+    @State var displayName: String = ""
+    @State var avatarUrl: String = ""
+    @State var timezone: String = "UTC"
+    @State var isSaving = false
+    @State var errorMessage: String?
+    @State var showSuccessAlert = false
 
     // Common timezones
     private let timezones = [

@@ -93,7 +93,9 @@ struct PollDetailView: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button(action: {
+                                #if os(iOS)
                                 UIPasteboard.general.string = poll.shareCode
+                                #endif
                             }) {
                                 Label("Copy", systemImage: "doc.on.doc")
                                     .font(.caption)
