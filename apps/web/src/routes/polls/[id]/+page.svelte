@@ -12,6 +12,7 @@
 		loadPoll,
 		cleanupPollRealtime,
 		updatePollStatus,
+		setSelectedFinalDate,
 		joinPoll,
 		submitAvailability
 	} from '$lib/stores/polls';
@@ -36,6 +37,25 @@
 	// Copy button states
 	let codeCopied = $state(false);
 	let linkCopied = $state(false);
+
+	// Final date selection
+	let selectingFinalDate = $state(false);
+
+	// Sort time options by availability (# available, then # maybe)
+	let sortedTimeOptions = $derived(
+		[...$currentPollTimeOptions].sort((a, b) => {
+			const statsA = getResponsesForTimeOption(a.id);
+			const statsB = getResponsesForTimeOption(b.id);
+
+			// First, sort by available count (descending)
+			if (statsB.available !== statsA.available) {
+				return statsB.available - statsA.available;
+			}
+
+			// If available counts are equal, sort by maybe count (descending)
+			return statsB.maybe - statsA.maybe;
+		})
+	);
 
 	onMount(() => {
 		if (pollId) loadPoll(pollId);
@@ -148,6 +168,22 @@
 			linkCopied = false;
 		}, 2000);
 	}
+
+	async function selectFinalDate(timeOption: typeof $currentPollTimeOptions[0]) {
+		if (!confirm('Set this as the final meeting time? All participants will be notified.')) {
+			return;
+		}
+
+		selectingFinalDate = true;
+		try {
+			await setSelectedFinalDate(pollId, timeOption.start_time, timeOption.end_time);
+		} catch (err) {
+			console.error('Failed to set final date:', err);
+			alert('Failed to set final date. Please try again.');
+		} finally {
+			selectingFinalDate = false;
+		}
+	}
 </script>
 
 <div class="poll-detail">
@@ -205,6 +241,55 @@
 							Copy Link
 						{/if}
 					</button>
+				</div>
+			</div>
+		{/if}
+
+		{#if $currentPoll.selected_start_time && $currentPoll.selected_end_time}
+			{@const selectedFormatted = formatDateTime($currentPoll.selected_start_time)}
+			{@const selectedEndFormatted = formatDateTime($currentPoll.selected_end_time)}
+			<div class="final-date-display">
+				<h2>Final Meeting Time Selected</h2>
+				<div class="final-date-card">
+					<div class="final-date-info">
+						<div class="date">{selectedFormatted.date}</div>
+						<div class="time">{selectedFormatted.time} - {selectedEndFormatted.time}</div>
+					</div>
+				</div>
+			</div>
+		{:else if isCreator && $currentPoll.status === 'closed'}
+			<div class="final-date-selection">
+				<h2>Select Final Meeting Time</h2>
+				<p class="selection-prompt">Choose the best time based on availability:</p>
+				<div class="time-options-list">
+					{#each sortedTimeOptions as option}
+						{@const formatted = formatDateTime(option.start_time)}
+						{@const endFormatted = formatDateTime(option.end_time)}
+						{@const stats = getResponsesForTimeOption(option.id)}
+
+						<div class="time-option-card selectable" onclick={() => selectFinalDate(option)}>
+							<div class="time-info">
+								<div class="date">{formatted.date}</div>
+								<div class="time">
+									{#if option.is_all_day}
+										All day
+									{:else}
+										{formatted.time} - {endFormatted.time}
+									{/if}
+								</div>
+							</div>
+
+							<div class="response-stats">
+								<span class="stat available" title="Available">{stats.available}</span>
+								<span class="stat maybe" title="Maybe">{stats.maybe}</span>
+								<span class="stat unavailable" title="Unavailable">{stats.unavailable}</span>
+							</div>
+
+							<button class="select-btn" disabled={selectingFinalDate}>
+								{selectingFinalDate ? 'Selecting...' : 'Select'}
+							</button>
+						</div>
+					{/each}
 				</div>
 			</div>
 		{/if}
@@ -670,6 +755,79 @@
 	}
 
 	.btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.final-date-display,
+	.final-date-selection {
+		background: white;
+		border-radius: 8px;
+		padding: 1.5rem;
+		margin: 1.5rem 0;
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+	}
+
+	.final-date-display h2,
+	.final-date-selection h2 {
+		margin: 0 0 1rem;
+		font-size: 1.25rem;
+		color: #333;
+	}
+
+	.final-date-card {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		border-radius: 8px;
+		padding: 1.5rem;
+		color: white;
+	}
+
+	.final-date-info .date {
+		font-size: 1.5rem;
+		font-weight: 600;
+		margin-bottom: 0.5rem;
+	}
+
+	.final-date-info .time {
+		font-size: 1.125rem;
+		opacity: 0.95;
+	}
+
+	.selection-prompt {
+		margin: 0 0 1rem;
+		color: #666;
+		font-size: 0.875rem;
+	}
+
+	.time-option-card.selectable {
+		cursor: pointer;
+		transition: all 0.2s ease;
+		border: 2px solid #eee;
+	}
+
+	.time-option-card.selectable:hover {
+		border-color: #667eea;
+		box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+		transform: translateY(-1px);
+	}
+
+	.select-btn {
+		padding: 0.5rem 1rem;
+		background: #667eea;
+		color: white;
+		border: none;
+		border-radius: 6px;
+		font-size: 0.875rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: background 0.2s;
+	}
+
+	.select-btn:hover:not(:disabled) {
+		background: #5568d3;
+	}
+
+	.select-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
 	}
