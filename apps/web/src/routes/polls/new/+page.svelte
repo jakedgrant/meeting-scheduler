@@ -14,6 +14,7 @@
 	let description = $state('');
 	let location = $state('');
 	let isAllDay = $state(false);
+	let useDateRange = $state(false);
 	let loading = $state(false);
 	let error = $state('');
 
@@ -29,6 +30,12 @@
 		{ id: crypto.randomUUID(), date: '', startTime: '09:00', endTime: '10:00' }
 	]);
 
+	// Date range fields
+	let rangeStartDate = $state('');
+	let rangeEndDate = $state('');
+	let rangeStartTime = $state('09:00');
+	let rangeEndTime = $state('10:00');
+
 	function addTimeOption() {
 		timeOptions = [
 			...timeOptions,
@@ -40,6 +47,55 @@
 		if (timeOptions.length > 1) {
 			timeOptions = timeOptions.filter((opt) => opt.id !== id);
 		}
+	}
+
+	function addDateRange() {
+		if (!rangeStartDate || !rangeEndDate) {
+			error = 'Please select both start and end dates for the range';
+			return;
+		}
+
+		const startDate = new Date(rangeStartDate);
+		const endDate = new Date(rangeEndDate);
+
+		if (startDate > endDate) {
+			error = 'Start date must be before or equal to end date';
+			return;
+		}
+
+		// Validate time range if not all-day
+		if (!isAllDay && isInvalidTimeRange(rangeStartTime, rangeEndTime)) {
+			error = 'End time must be after start time';
+			return;
+		}
+
+		// Generate time options for each date in the range
+		const newOptions: TimeOption[] = [];
+		const currentDate = new Date(startDate);
+
+		while (currentDate <= endDate) {
+			newOptions.push({
+				id: crypto.randomUUID(),
+				date: currentDate.toISOString().split('T')[0],
+				startTime: rangeStartTime,
+				endTime: rangeEndTime
+			});
+			currentDate.setDate(currentDate.getDate() + 1);
+		}
+
+		// Add all new options to the list and sort chronologically
+		timeOptions = [...timeOptions, ...newOptions].sort((a, b) => {
+			const dateA = new Date(`${a.date}T${a.startTime}`);
+			const dateB = new Date(`${b.date}T${b.startTime}`);
+			return dateA.getTime() - dateB.getTime();
+		});
+
+		// Reset the range fields
+		rangeStartDate = '';
+		rangeEndDate = '';
+		rangeStartTime = '09:00';
+		rangeEndTime = '10:00';
+		error = '';
 	}
 
 	function updateTimeOption(id: string, field: keyof TimeOption, value: string) {
@@ -251,6 +307,129 @@
 		<div class="form-section">
 			<h2>Time Options</h2>
 			<p class="hint">Add the time slots participants can choose from.</p>
+
+			<div class="form-group checkbox-group">
+				<label>
+					<input
+						type="checkbox"
+						bind:checked={useDateRange}
+						disabled={loading}
+					/>
+					Use date range selector
+				</label>
+				<p class="help-text">Quickly add multiple days with the same time slots</p>
+			</div>
+
+			{#if useDateRange}
+				<div class="date-range-selector">
+					<h3>Add Date Range</h3>
+					<div class="range-inputs">
+						<div class="range-row">
+							<div class="range-field">
+								<label for="range-start-date">Start Date</label>
+								<select
+									id="range-start-date"
+									bind:value={rangeStartDate}
+									disabled={loading}
+								>
+									<option value="">Select start date</option>
+									{#each dateOptions as dateOpt}
+										<option value={dateOpt.value}>{dateOpt.label}</option>
+									{/each}
+								</select>
+							</div>
+							<div class="range-field">
+								<label for="range-end-date">End Date</label>
+								<select
+									id="range-end-date"
+									bind:value={rangeEndDate}
+									disabled={loading}
+								>
+									<option value="">Select end date</option>
+									{#each dateOptions as dateOpt}
+										<option value={dateOpt.value}>{dateOpt.label}</option>
+									{/each}
+								</select>
+							</div>
+						</div>
+
+						{#if !isAllDay}
+							<div class="range-row">
+								<div class="range-field">
+									<label for="range-start-time">Start Time</label>
+									<div class="time-input-group">
+										<button
+											type="button"
+											class="spinner-btn"
+											onclick={() => { rangeStartTime = incrementTime(rangeStartTime, 15); }}
+											disabled={loading}
+											title="Increase start time"
+										>
+											&#9650;
+										</button>
+										<select
+											id="range-start-time"
+											bind:value={rangeStartTime}
+											disabled={loading}
+											class="time-select"
+										>
+											{#each timePickerOptions as timeOpt}
+												<option value={timeOpt}>{timeOpt}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="spinner-btn"
+											onclick={() => { rangeStartTime = incrementTime(rangeStartTime, -15); }}
+											disabled={loading}
+											title="Decrease start time"
+										>
+											&#9660;
+										</button>
+									</div>
+								</div>
+								<div class="range-field">
+									<label for="range-end-time">End Time</label>
+									<div class="time-input-group">
+										<button
+											type="button"
+											class="spinner-btn"
+											onclick={() => { rangeEndTime = incrementTime(rangeEndTime, 15); }}
+											disabled={loading}
+											title="Increase end time"
+										>
+											&#9650;
+										</button>
+										<select
+											id="range-end-time"
+											bind:value={rangeEndTime}
+											disabled={loading}
+											class="time-select"
+										>
+											{#each getValidEndTimeOptions(rangeStartTime) as timeOpt}
+												<option value={timeOpt}>{timeOpt}</option>
+											{/each}
+										</select>
+										<button
+											type="button"
+											class="spinner-btn"
+											onclick={() => { rangeEndTime = incrementTime(rangeEndTime, -15); }}
+											disabled={loading}
+											title="Decrease end time"
+										>
+											&#9660;
+										</button>
+									</div>
+								</div>
+							</div>
+						{/if}
+
+						<button type="button" class="btn primary add-range-btn" onclick={addDateRange} disabled={loading}>
+							Add Date Range
+						</button>
+					</div>
+				</div>
+			{/if}
 
 			<div class="time-options">
 				{#each timeOptions as option (option.id)}
@@ -593,5 +772,46 @@
 		margin: 0.5rem 0 0 1.75rem;
 		font-size: 0.875rem;
 		color: #666;
+	}
+
+	.date-range-selector {
+		background: #f8f9fa;
+		border: 1px solid #e0e0e0;
+		border-radius: 8px;
+		padding: 1rem;
+		margin-bottom: 1rem;
+	}
+
+	.date-range-selector h3 {
+		margin: 0 0 1rem;
+		font-size: 1rem;
+		color: #333;
+	}
+
+	.range-inputs {
+		display: flex;
+		flex-direction: column;
+		gap: 1rem;
+	}
+
+	.range-row {
+		display: flex;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
+	.range-field {
+		flex: 1;
+		min-width: 200px;
+	}
+
+	.range-field label {
+		font-size: 0.875rem;
+		margin-bottom: 0.25rem;
+	}
+
+	.add-range-btn {
+		align-self: flex-start;
+		margin-top: 0.5rem;
 	}
 </style>

@@ -15,9 +15,19 @@ struct CreatePollView: View {
     @State var description = ""
     @State var location = ""
     @State var isAllDay = false
+    @State var useDateRange = false
     @State var timeOptions: [TimeOption] = [TimeOption()]
     @State var isLoading = false
     @State var errorMessage: String?
+
+    // Date range fields
+    @State var rangeStartDate = Date()
+    @State var rangeEndDate = Date()
+    @State var rangeStartTime = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
+    @State var rangeEndTime = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
+
+    // Multi-date picker for all-day events
+    @State var selectedDates = Set<DateComponents>()
 
     var body: some View {
         
@@ -38,6 +48,46 @@ struct CreatePollView: View {
                 }
 
                 Section("Time Options") {
+                    if isAllDay {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Select Days")
+                                .font(.headline)
+
+                            MultiDatePicker("Days", selection: $selectedDates)
+
+                            Button("Add Selected Days", systemImage: "calendar.badge.plus") {
+                                addSelectedDates()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(selectedDates.isEmpty)
+                        }
+                        .padding(.vertical, 8)
+                    } else {
+                        Toggle("Use date range selector", isOn: $useDateRange)
+
+                        if useDateRange {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Add Date Range")
+                                    .font(.headline)
+
+                                DatePicker("Start Date", selection: $rangeStartDate, in: startOfToday()..., displayedComponents: .date)
+
+                                DatePicker("End Date", selection: $rangeEndDate, in: startOfToday()..., displayedComponents: .date)
+
+                                DatePicker("Start Time", selection: $rangeStartTime, displayedComponents: .hourAndMinute)
+                                    .datePickerStyle(.compact)
+
+                                DatePicker("End Time", selection: $rangeEndTime, displayedComponents: .hourAndMinute)
+                                    .datePickerStyle(.compact)
+
+                                Button(action: addDateRange) {
+                                    Label("Add Date Range", systemImage: "calendar.badge.plus")
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                            .padding(.vertical, 8)
+                        }
+                    }
 
                     ForEach($timeOptions) { $option in
 
@@ -71,16 +121,19 @@ struct CreatePollView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
                     }
                     .disabled(isLoading)
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Create") {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Create Poll", systemImage: "checkmark") {
                         createPoll()
                     }
+                    #if os(iOS)
+                    .buttonStyle(.glassProminent)
+                    #endif
                     .disabled(title.isEmpty || isLoading)
                 }
             }
@@ -97,8 +150,98 @@ struct CreatePollView: View {
 
     
 
+    // Helper function for date ranges
+    private func startOfToday() -> Date {
+        let calendar = Calendar.current
+        return calendar.startOfDay(for: Date())
+    }
+
     private func addTimeOption() {
         timeOptions.append(TimeOption())
+    }
+
+    private func addSelectedDates() {
+        let calendar = Calendar.current
+
+        // Convert DateComponents to Date objects and create TimeOptions
+        for dateComponents in selectedDates {
+            if let date = calendar.date(from: dateComponents) {
+                let newOption = TimeOption(
+                    date: date,
+                    startTime: calendar.date(bySettingHour: 0, minute: 0, second: 0, of: date) ?? date,
+                    endTime: calendar.date(bySettingHour: 23, minute: 59, second: 0, of: date) ?? date
+                )
+                timeOptions.append(newOption)
+            }
+        }
+
+        // Sort chronologically by date and start time
+        timeOptions.sort { option1, option2 in
+            let date1 = calendar.startOfDay(for: option1.date)
+            let date2 = calendar.startOfDay(for: option2.date)
+            if date1 != date2 {
+                return date1 < date2
+            }
+            return option1.startTime < option2.startTime
+        }
+
+        // Clear selected dates
+        selectedDates.removeAll()
+        errorMessage = nil
+    }
+
+    private func addDateRange() {
+        let calendar = Calendar.current
+        let startDay = calendar.startOfDay(for: rangeStartDate)
+        let endDay = calendar.startOfDay(for: rangeEndDate)
+
+        // Validate date range
+        guard startDay <= endDay else {
+            errorMessage = "Start date must be before or equal to end date"
+            return
+        }
+
+        // Validate time range if not all-day
+        if !isAllDay {
+            let startComponents = calendar.dateComponents([.hour, .minute], from: rangeStartTime)
+            let endComponents = calendar.dateComponents([.hour, .minute], from: rangeEndTime)
+            let startMinutes = (startComponents.hour ?? 0) * 60 + (startComponents.minute ?? 0)
+            let endMinutes = (endComponents.hour ?? 0) * 60 + (endComponents.minute ?? 0)
+
+            if endMinutes <= startMinutes {
+                errorMessage = "End time must be after start time"
+                return
+            }
+        }
+
+        // Generate time options for each date in the range
+        var currentDate = startDay
+        while currentDate <= endDay {
+            let newOption = TimeOption(
+                date: currentDate,
+                startTime: rangeStartTime,
+                endTime: rangeEndTime
+            )
+            timeOptions.append(newOption)
+            currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate) ?? currentDate
+        }
+
+        // Sort chronologically by date and start time
+        timeOptions.sort { option1, option2 in
+            let date1 = calendar.startOfDay(for: option1.date)
+            let date2 = calendar.startOfDay(for: option2.date)
+            if date1 != date2 {
+                return date1 < date2
+            }
+            return option1.startTime < option2.startTime
+        }
+
+        // Reset the range fields
+        rangeStartDate = Date()
+        rangeEndDate = Date()
+        rangeStartTime = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: Date()) ?? Date()
+        rangeEndTime = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: Date()) ?? Date()
+        errorMessage = nil
     }
 
     private func createPoll() {
