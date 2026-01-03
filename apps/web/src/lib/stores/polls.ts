@@ -208,7 +208,8 @@ export async function createPoll(poll: {
       title: poll.title,
       description: poll.description,
       location: poll.location,
-      timezone: poll.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+      timezone: poll.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      status: 'active'
     })
     .select()
     .single()

@@ -39,12 +39,8 @@ struct PollDetailView: View {
             if isCreator, let poll = poll {
                 
                 ToolbarItemGroup(placement: .primaryAction) {
-                    
-                    if poll.status == .draft {
-                        Button("Publish Poll", systemImage: "") {
-                            updateStatus(.active)
-                        }
-                    } else if poll.status == .active {
+
+                    if poll.status == .active {
                         Button("Close Poll", systemImage: "xmark.square") {
                             updateStatus(.closed)
                         }
