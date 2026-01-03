@@ -101,12 +101,12 @@
 	{#if !timeOption}
 		<div class="loading">Loading...</div>
 	{:else}
+		{@const formatted = formatDateTime(timeOption.start_time)}
+		{@const endFormatted = formatDateTime(timeOption.end_time)}
 		<header>
 			<button class="back-link" onclick={goBack}>&larr; Back to Poll</button>
 			<h1>Responses for Time Option</h1>
 			<div class="time-option-info">
-				{@const formatted = formatDateTime(timeOption.start_time)}
-				{@const endFormatted = formatDateTime(timeOption.end_time)}
 				<div class="date">{formatted.date}</div>
 				<div class="time">
 					{#if timeOption.is_all_day}
