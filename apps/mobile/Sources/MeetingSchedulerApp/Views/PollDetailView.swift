@@ -47,8 +47,10 @@ struct PollDetailView: View {
                         }
                     }
 
-                    Button("Share", systemImage: "square.and.arrow.up") {
-                        sharePoll()
+                    if poll.status == .active {
+                        Button("Share", systemImage: "square.and.arrow.up") {
+                            sharePoll()
+                        }
                     }
                 }
             }
@@ -87,7 +89,7 @@ struct PollDetailView: View {
             }
 
             // Share Code
-            if poll.status == .active || isCreator {
+            if poll.status == .active {
                 Section {
                     VStack(spacing: 8) {
                         HStack {
