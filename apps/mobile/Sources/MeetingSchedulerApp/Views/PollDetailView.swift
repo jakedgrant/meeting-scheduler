@@ -37,23 +37,21 @@ struct PollDetailView: View {
         #endif
         .toolbar {
             if isCreator, let poll = poll {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        if poll.status == .draft {
-                            Button("Publish Poll") {
-                                updateStatus(.active)
-                            }
-                        } else if poll.status == .active {
-                            Button("Close Poll") {
-                                updateStatus(.closed)
-                            }
+                
+                ToolbarItemGroup(placement: .primaryAction) {
+                    
+                    if poll.status == .draft {
+                        Button("Publish Poll", systemImage: "") {
+                            updateStatus(.active)
                         }
-
-                        Button("Share", systemImage: "square.and.arrow.up") {
-                            sharePoll()
+                    } else if poll.status == .active {
+                        Button("Close Poll", systemImage: "xmark.square") {
+                            updateStatus(.closed)
                         }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
+                    }
+                    
+                    Button("Share", systemImage: "square.and.arrow.up") {
+                        sharePoll()
                     }
                 }
             }

@@ -26,13 +26,13 @@ struct PollListView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     
-                        Button(action: { showJoinByCode = true }) {
-                            Label("Join Poll", systemImage: "arrow.down.circle")
-                        }
+                    Button("Join Poll", systemImage: "arrow.down.circle") {
+                        showJoinByCode = true
+                    }
                     
-                        Button(action: handleCreatePoll) {
-                            Label("Create Poll", systemImage: "plus")
-                        }
+                    Button("Create Poll", systemImage: "plus") {
+                        handleCreatePoll()
+                    }
                 }
             }
             .sheet(isPresented: $showCreatePoll) {
@@ -131,7 +131,7 @@ struct PollListView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button("Cancel", systemImage: "xmark") {
                         showJoinByCode = false
                         joinCode = ""
                         joinError = nil

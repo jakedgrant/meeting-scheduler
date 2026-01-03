@@ -55,8 +55,8 @@ struct CreatePollView: View {
 
                             MultiDatePicker("Days", selection: $selectedDates)
 
-                            Button(action: addSelectedDates) {
-                                Label("Add Selected Days", systemImage: "calendar.badge.plus")
+                            Button("Add Selected Days", systemImage: "calendar.badge.plus") {
+                                addSelectedDates()
                             }
                             .buttonStyle(.borderedProminent)
                             .disabled(selectedDates.isEmpty)
@@ -121,17 +121,15 @@ struct CreatePollView: View {
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button{
+                    Button("Cancel", systemImage: "xmark") {
                         dismiss()
-                    } label: {
-                        Label("Cancel", systemImage: "xmark")
                     }
                     .disabled(isLoading)
                 }
 
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: createPoll) {
-                        Label("Create Poll", systemImage: "checkmark")
+                    Button("Create Poll", systemImage: "checkmark") {
+                        createPoll()
                     }
                     #if os(iOS)
                     .buttonStyle(.glassProminent)
