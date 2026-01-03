@@ -49,9 +49,11 @@ struct PollDetailView: View {
                             updateStatus(.closed)
                         }
                     }
-                    
-                    Button("Share", systemImage: "square.and.arrow.up") {
-                        sharePoll()
+
+                    if poll.status == .active || poll.status == .draft {
+                        Button("Share", systemImage: "square.and.arrow.up") {
+                            sharePoll()
+                        }
                     }
                 }
             }
