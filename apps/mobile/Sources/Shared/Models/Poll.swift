@@ -79,7 +79,7 @@ public struct Poll: Codable, Identifiable, Sendable {
     }
 }
 
-public struct PollTimeOption: Codable, Identifiable, Sendable {
+public struct PollTimeOption: Codable, Identifiable, Sendable, Hashable {
     public let id: UUID
     public let pollId: UUID
     public let startTime: Date
