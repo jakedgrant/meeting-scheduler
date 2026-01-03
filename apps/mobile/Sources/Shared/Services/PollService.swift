@@ -93,7 +93,8 @@ public final class PollService {
             "title": .string(title),
             "description": description.map { .string($0) } ?? .null,
             "location": location.map { .string($0) } ?? .null,
-            "timezone": .string(timezone)
+            "timezone": .string(timezone),
+            "status": .string(PollStatus.active.rawValue)
         ]
 
         let response: Poll = try await supabase

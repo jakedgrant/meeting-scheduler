@@ -39,17 +39,13 @@ struct PollDetailView: View {
             if isCreator, let poll = poll {
                 
                 ToolbarItemGroup(placement: .primaryAction) {
-                    
-                    if poll.status == .draft {
-                        Button("Publish Poll", systemImage: "") {
-                            updateStatus(.active)
-                        }
-                    } else if poll.status == .active {
+
+                    if poll.status == .active {
                         Button("Close Poll", systemImage: "xmark.square") {
                             updateStatus(.closed)
                         }
                     }
-                    
+
                     Button("Share", systemImage: "square.and.arrow.up") {
                         sharePoll()
                     }
@@ -82,7 +78,7 @@ struct PollDetailView: View {
             }
 
             // Share Code
-            if poll.status == .active || (poll.status == .draft && isCreator) {
+            if poll.status == .active || isCreator {
                 Section {
                     VStack(spacing: 8) {
                         HStack {

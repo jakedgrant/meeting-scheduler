@@ -126,10 +126,6 @@
 		}
 	}
 
-	async function activatePoll() {
-		await updatePollStatus(pollId, 'active');
-	}
-
 	async function closePoll() {
 		await updatePollStatus(pollId, 'closed');
 	}
@@ -170,9 +166,7 @@
 				</div>
 				{#if isCreator}
 					<div class="creator-actions">
-						{#if $currentPoll.status === 'draft'}
-							<button class="btn primary" onclick={activatePoll}>Publish Poll</button>
-						{:else if $currentPoll.status === 'active'}
+						{#if $currentPoll.status === 'active'}
 							<button class="btn secondary" onclick={closePoll}>Close Poll</button>
 						{/if}
 					</div>
@@ -186,7 +180,7 @@
 			{/if}
 		</header>
 
-		{#if $currentPoll.status === 'active' || ($currentPoll.status === 'draft' && isCreator)}
+		{#if $currentPoll.status === 'active' || isCreator}
 			<div class="share-section">
 				<p>Share this poll with participants:</p>
 				<div class="share-code-display">
