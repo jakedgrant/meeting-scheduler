@@ -127,7 +127,9 @@
 	}
 
 	async function closePoll() {
-		await updatePollStatus(pollId, 'closed');
+		if (confirm('Are you sure you want to close this poll? Once closed, participants will no longer be able to submit or modify their availability.')) {
+			await updatePollStatus(pollId, 'closed');
+		}
 	}
 
 	function copyShareCode() {
