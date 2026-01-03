@@ -186,7 +186,7 @@
 			{/if}
 		</header>
 
-		{#if $currentPoll.status === 'active' || ($currentPoll.status === 'draft' && isCreator)}
+		{#if $currentPoll.status === 'active'}
 			<div class="share-section">
 				<p>Share this poll with participants:</p>
 				<div class="share-code-display">
