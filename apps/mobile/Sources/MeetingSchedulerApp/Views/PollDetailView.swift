@@ -16,6 +16,7 @@ struct PollDetailView: View {
     @State var localResponses: [UUID: AvailabilityStatus] = [:]
     @State var isLoading = true
     @State var isSaving = false
+    @State var showClosePollAlert = false
 
     private var isCreator: Bool {
         poll?.creatorId == AuthService.shared.currentUser?.id
@@ -42,7 +43,7 @@ struct PollDetailView: View {
 
                     if poll.status == .active {
                         Button("Close Poll", systemImage: "xmark.square") {
-                            updateStatus(.closed)
+                            showClosePollAlert = true
                         }
                     }
 
@@ -54,6 +55,14 @@ struct PollDetailView: View {
         }
         .task {
             await loadPollData()
+        }
+        .alert("Close Poll", isPresented: $showClosePollAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Close Poll", role: .destructive) {
+                updateStatus(.closed)
+            }
+        } message: {
+            Text("Are you sure you want to close this poll? Once closed, participants will no longer be able to submit or modify their availability.")
         }
     }
 
