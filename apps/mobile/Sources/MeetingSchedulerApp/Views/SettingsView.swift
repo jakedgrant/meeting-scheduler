@@ -4,6 +4,7 @@ import Shared
 struct SettingsView: View {
     @State var authService = AuthService.shared
     @State var purchaseService = PurchaseService.shared
+    @State var calendarService = CalendarService.shared
     @State var showPaywall = false
     @State var showProfileEdit = false
     @State var isSigningOut = false
@@ -90,6 +91,34 @@ struct SettingsView: View {
 
                     Button("Restore Purchases") {
                         restorePurchases()
+                    }
+                }
+
+                // Calendar Integration Section
+                Section("Calendar Integration") {
+                    Toggle(isOn: Binding(
+                        get: { calendarService.isEnabled },
+                        set: { enabled in
+                            Task {
+                                await calendarService.setEnabled(enabled)
+                            }
+                        }
+                    )) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Auto-mark Conflicts")
+                            Text("Automatically mark times when you're busy")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if calendarService.isEnabled {
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Connected to Apple Calendar")
+                                .font(.caption)
+                        }
                     }
                 }
 

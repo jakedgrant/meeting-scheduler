@@ -16,6 +16,7 @@
 		joinPoll,
 		submitAvailability
 	} from '$lib/stores/polls';
+	import { calendarEnabled, calendarConflicts, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
 
 	const pollId = $derived($page.params.id as string);
@@ -76,6 +77,15 @@
 				responseMap[r.time_option_id] = r.status;
 			});
 			localResponses = responseMap;
+		}
+	});
+
+	// Check for calendar conflicts when poll loads and calendar is enabled
+	$effect(() => {
+		if ($calendarEnabled && $currentPollTimeOptions.length > 0) {
+			(async () => {
+				await checkCalendarConflicts($currentPollTimeOptions);
+			})();
 		}
 	});
 
@@ -351,10 +361,16 @@
 						{@const endFormatted = formatDateTime(option.end_time)}
 						{@const stats = getResponsesForTimeOption(option.id)}
 						{@const myResponse = localResponses[option.id]}
+						{@const hasCalendarConflict = $calendarConflicts.has(option.id)}
 
 						<div class="time-option-card">
 							<div class="time-info">
-								<div class="date">{formatted.date}</div>
+								<div class="time-header">
+									<div class="date">{formatted.date}</div>
+									{#if hasCalendarConflict}
+										<span class="calendar-badge">📅 Busy</span>
+									{/if}
+								</div>
 								<div class="time">
 									{#if option.is_all_day}
 										All day
@@ -639,6 +655,21 @@
 
 	.time-info .date {
 		font-weight: 500;
+	}
+
+	.time-header {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.calendar-badge {
+		background: #fff3cd;
+		color: #856404;
+		font-size: 0.75rem;
+		padding: 0.25rem 0.5rem;
+		border-radius: 4px;
+		white-space: nowrap;
 	}
 
 	.time-info .time {
