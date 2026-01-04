@@ -17,6 +17,7 @@ struct PollDetailView: View {
     @State var isLoading = true
     @State var isSaving = false
     @State var showClosePollAlert = false
+    @State var selectedTimeOption: PollTimeOption?
 
     private var isCreator: Bool {
         poll?.creatorId == AuthService.shared.currentUser?.id
@@ -65,6 +66,9 @@ struct PollDetailView: View {
             }
         } message: {
             Text("Are you sure you want to close this poll? Once closed, participants will no longer be able to submit or modify their availability.")
+        }
+        .navigationDestination(item: $selectedTimeOption) { timeOption in
+            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
         }
     }
 
@@ -128,15 +132,20 @@ struct PollDetailView: View {
             // Time Options
             Section("Time Options") {
                 ForEach(timeOptions) { option in
-                    TimeOptionRow(
-                        option: option,
-                        responses: responsesForOption(option.id),
-                        myResponse: localResponses[option.id],
-                        canRespond: myParticipant != nil && poll.status == .active,
-                        onResponseChange: { status in
-                            localResponses[option.id] = status
-                        }
-                    )
+                    Button {
+                        selectedTimeOption = option
+                    } label: {
+                        TimeOptionRow(
+                            option: option,
+                            responses: responsesForOption(option.id),
+                            myResponse: localResponses[option.id],
+                            canRespond: myParticipant != nil && poll.status == .active,
+                            onResponseChange: { status in
+                                localResponses[option.id] = status
+                            }
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
