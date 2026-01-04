@@ -17,10 +17,46 @@ struct PollDetailView: View {
     @State var isLoading = true
     @State var isSaving = false
     @State var showClosePollAlert = false
+    @State var showSelectFinalDateAlert = false
+    @State var finalTimeOption: PollTimeOption?
+    @State var isSelectingFinalDate = false
     @State var selectedTimeOption: PollTimeOption?
 
     private var isCreator: Bool {
         poll?.creatorId == AuthService.shared.currentUser?.id
+    }
+
+    private var sortedTimeOptions: [PollTimeOption] {
+        timeOptions.sorted { optionA, optionB in
+            let statsA = responsesForOption(optionA.id)
+            let statsB = responsesForOption(optionB.id)
+
+            // First, sort by available count (descending)
+            if statsB.available != statsA.available {
+                return statsB.available < statsA.available
+            }
+
+            // If available counts are equal, sort by maybe count (descending)
+            return statsB.maybe < statsA.maybe
+        }
+    }
+
+    private var formattedSelectedOption: String {
+        guard let option = finalTimeOption else { return "" }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMMM d, yyyy"
+        let dateStr = dateFormatter.string(from: option.startTime)
+
+        if option.isAllDay {
+            return dateStr
+        } else {
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "h:mma"
+            let startTime = timeFormatter.string(from: option.startTime)
+            let endTime = timeFormatter.string(from: option.endTime)
+            return "\(dateStr) \(startTime) - \(endTime)"
+        }
     }
 
     var body: some View {
@@ -66,6 +102,14 @@ struct PollDetailView: View {
             }
         } message: {
             Text("Are you sure you want to close this poll? Once closed, participants will no longer be able to submit or modify their availability.")
+        }
+        .alert("Select Final Date", isPresented: $showSelectFinalDateAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Confirm", role: .destructive) {
+                selectFinalDate()
+            }
+        } message: {
+            Text("Set \(formattedSelectedOption) as the final meeting time? All participants will be notified.")
         }
         .navigationDestination(item: $selectedTimeOption) { timeOption in
             TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
@@ -126,6 +170,103 @@ struct PollDetailView: View {
                     }
                 } header: {
                     Text("Share")
+                }
+            }
+
+            // Final Date Display
+            if let selectedStart = poll.selectedStartTime,
+               let selectedEnd = poll.selectedEndTime {
+                Section {
+                    VStack(spacing: 12) {
+                        Text("Final Meeting Time Selected")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "calendar")
+                                    .foregroundStyle(.white)
+                                Text(selectedStart, style: .date)
+                                    .font(.title3)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.white)
+                            }
+
+                            if timeOptions.first(where: { $0.isAllDay }) == nil {
+                                HStack {
+                                    Image(systemName: "clock")
+                                        .foregroundStyle(.white)
+                                    Text("\(selectedStart, style: .time) - \(selectedEnd, style: .time)")
+                                        .font(.body)
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.4, green: 0.49, blue: 0.92), Color(red: 0.46, green: 0.29, blue: 0.64)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                }
+            } else if isCreator && poll.status == .closed {
+                // Final Date Selection (for organizers only)
+                Section {
+                    VStack(spacing: 12) {
+                        Text("Select Final Meeting Time")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Text("Choose the best time based on availability:")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        ForEach(sortedTimeOptions) { option in
+                            Button {
+                                finalTimeOption = option
+                                showSelectFinalDateAlert = true
+                            } label: {
+                                HStack(spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(option.startTime, style: .date)
+                                            .font(.headline)
+                                            .foregroundStyle(.primary)
+
+                                        if option.isAllDay {
+                                            Text("All day")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text("\(option.startTime, style: .time) - \(option.endTime, style: .time)")
+                                                .font(.subheadline)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    let stats = responsesForOption(option.id)
+                                    HStack(spacing: 8) {
+                                        ResponseCount(count: stats.available, status: .available)
+                                        ResponseCount(count: stats.maybe, status: .maybe)
+                                        ResponseCount(count: stats.unavailable, status: .unavailable)
+                                    }
+
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isSelectingFinalDate)
+                        }
+                    }
                 }
             }
 
@@ -286,6 +427,27 @@ struct PollDetailView: View {
             responses = await PollService.shared.loadResponses(participantIds: participantIds)
 
             isSaving = false
+        }
+    }
+
+    private func selectFinalDate() {
+        guard let option = finalTimeOption else { return }
+
+        isSelectingFinalDate = true
+
+        Task {
+            do {
+                try await PollService.shared.setSelectedFinalDate(
+                    pollId: pollId,
+                    startTime: option.startTime,
+                    endTime: option.endTime
+                )
+                // Reload poll to get updated selected dates
+                poll = await PollService.shared.loadPoll(id: pollId)
+            } catch {
+                print("Failed to set final date: \(error)")
+            }
+            isSelectingFinalDate = false
         }
     }
 

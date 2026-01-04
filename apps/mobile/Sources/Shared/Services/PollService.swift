@@ -62,9 +62,9 @@ public final class PollService {
         }
     }
 
-    public func loadPollByCode(_ code: String) async -> Poll? {
+    public func loadPollByCode(_ code: String) async -> PollLookupResponse? {
         do {
-            let response: [Poll] = try await supabase
+            let response: [PollLookupResponse] = try await supabase
                 .rpc("get_poll_by_code", params: ["code": AnyJSON.string(code.uppercased())])
                 .execute()
                 .value
@@ -162,6 +162,25 @@ public final class PollService {
         // Update local state
         if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
             myPolls[index].status = status
+        }
+    }
+
+    public func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws {
+        let formatter = ISO8601DateFormatter()
+
+        try await supabase
+            .from("polls")
+            .update([
+                "selected_start_time": AnyJSON.string(formatter.string(from: startTime)),
+                "selected_end_time": AnyJSON.string(formatter.string(from: endTime))
+            ])
+            .eq("id", value: pollId.uuidString)
+            .execute()
+
+        // Update local state
+        if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
+            myPolls[index].selectedStartTime = startTime
+            myPolls[index].selectedEndTime = endTime
         }
     }
 

@@ -262,6 +262,29 @@ export async function updatePollStatus(pollId: string, status: Poll['status']) {
   currentPoll.update(p => p ? { ...p, status } : null)
 }
 
+// Set selected final date for a poll
+export async function setSelectedFinalDate(pollId: string, startTime: string, endTime: string) {
+  const { error } = await supabase
+    .from('polls')
+    .update({
+      selected_start_time: startTime,
+      selected_end_time: endTime
+    })
+    .eq('id', pollId)
+
+  if (error) {
+    console.error('Failed to set selected final date:', error)
+    throw error
+  }
+
+  // Update local state
+  currentPoll.update(p => p ? {
+    ...p,
+    selected_start_time: startTime,
+    selected_end_time: endTime
+  } : null)
+}
+
 // Join a poll as a participant
 export async function joinPoll(pollId: string, name?: string, email?: string): Promise<PollParticipant | null> {
   const currentUser = get(user)
