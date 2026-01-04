@@ -188,12 +188,14 @@ struct PollDetailView: View {
                                     .foregroundStyle(.white)
                             }
 
-                            HStack {
-                                Image(systemName: "clock")
-                                    .foregroundStyle(.white)
-                                Text("\(selectedStart, style: .time) - \(selectedEnd, style: .time)")
-                                    .font(.body)
-                                    .foregroundStyle(.white)
+                            if timeOptions.first(where: { $0.isAllDay }) == nil {
+                                HStack {
+                                    Image(systemName: "clock")
+                                        .foregroundStyle(.white)
+                                    Text("\(selectedStart, style: .time) - \(selectedEnd, style: .time)")
+                                        .font(.body)
+                                        .foregroundStyle(.white)
+                                }
                             }
                         }
                         .padding()
@@ -257,6 +259,7 @@ struct PollDetailView: View {
                                 }
                                 .padding(.vertical, 8)
                             }
+                            .buttonStyle(.plain)
                             .disabled(isSelectingFinalDate)
                         }
                     }

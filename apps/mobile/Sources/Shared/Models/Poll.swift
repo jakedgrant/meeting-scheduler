@@ -13,6 +13,27 @@ public enum AvailabilityStatus: String, Codable, Sendable {
     case unavailable
 }
 
+public struct PollLookupResponse: Codable, Identifiable, Sendable {
+    public let id: UUID
+    public let title: String
+    public var description: String?
+    public var location: String?
+    public var status: PollStatus
+    public let creatorId: UUID
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let shareCode: String
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case creatorId = "creator_id"
+        case title, description, location, status
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case shareCode = "share_code"
+    }
+}
+
 public struct Poll: Codable, Identifiable, Sendable {
     public let id: UUID
     public let creatorId: UUID

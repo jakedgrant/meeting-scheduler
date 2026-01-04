@@ -62,9 +62,9 @@ public final class PollService {
         }
     }
 
-    public func loadPollByCode(_ code: String) async -> Poll? {
+    public func loadPollByCode(_ code: String) async -> PollLookupResponse? {
         do {
-            let response: [Poll] = try await supabase
+            let response: [PollLookupResponse] = try await supabase
                 .rpc("get_poll_by_code", params: ["code": AnyJSON.string(code.uppercased())])
                 .execute()
                 .value
@@ -171,8 +171,8 @@ public final class PollService {
         try await supabase
             .from("polls")
             .update([
-                "selected_start_time": .string(formatter.string(from: startTime)),
-                "selected_end_time": .string(formatter.string(from: endTime))
+                "selected_start_time": AnyJSON.string(formatter.string(from: startTime)),
+                "selected_end_time": AnyJSON.string(formatter.string(from: endTime))
             ])
             .eq("id", value: pollId.uuidString)
             .execute()
