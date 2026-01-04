@@ -353,22 +353,28 @@
 						{@const myResponse = localResponses[option.id]}
 
 						<div class="time-option-card">
-							<div class="time-info">
-								<div class="date">{formatted.date}</div>
-								<div class="time">
-									{#if option.is_all_day}
-										All day
-									{:else}
-										{formatted.time} - {endFormatted.time}
-									{/if}
+							<button
+								class="time-info-button"
+								onclick={() => goto(`/polls/${pollId}/times/${option.id}`)}
+								title="View responses for this time option"
+							>
+								<div class="time-info">
+									<div class="date">{formatted.date}</div>
+									<div class="time">
+										{#if option.is_all_day}
+											All day
+										{:else}
+											{formatted.time} - {endFormatted.time}
+										{/if}
+									</div>
 								</div>
-							</div>
 
-							<div class="response-stats">
-								<span class="stat available" title="Available">{stats.available}</span>
-								<span class="stat maybe" title="Maybe">{stats.maybe}</span>
-								<span class="stat unavailable" title="Unavailable">{stats.unavailable}</span>
-							</div>
+								<div class="response-stats">
+									<span class="stat available" title="Available">{stats.available}</span>
+									<span class="stat maybe" title="Maybe">{stats.maybe}</span>
+									<span class="stat unavailable" title="Unavailable">{stats.unavailable}</span>
+								</div>
+							</button>
 
 							{#if myParticipant && $currentPoll.status === 'active'}
 								<div class="response-buttons">
@@ -630,6 +636,23 @@
 		border: 1px solid #eee;
 		border-radius: 6px;
 		flex-wrap: wrap;
+	}
+
+	.time-info-button {
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		flex: 1;
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		text-align: left;
+		transition: opacity 0.15s;
+	}
+
+	.time-info-button:hover {
+		opacity: 0.7;
 	}
 
 	.time-info {

@@ -18,8 +18,9 @@ struct PollDetailView: View {
     @State var isSaving = false
     @State var showClosePollAlert = false
     @State var showSelectFinalDateAlert = false
-    @State var selectedTimeOption: PollTimeOption?
+    @State var finalTimeOption: PollTimeOption?
     @State var isSelectingFinalDate = false
+    @State var selectedTimeOption: PollTimeOption?
 
     private var isCreator: Bool {
         poll?.creatorId == AuthService.shared.currentUser?.id
@@ -41,7 +42,7 @@ struct PollDetailView: View {
     }
 
     private var formattedSelectedOption: String {
-        guard let option = selectedTimeOption else { return "" }
+        guard let option = finalTimeOption else { return "" }
 
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMMM d, yyyy"
@@ -109,6 +110,9 @@ struct PollDetailView: View {
             }
         } message: {
             Text("Set \(formattedSelectedOption) as the final meeting time? All participants will be notified.")
+        }
+        .navigationDestination(item: $selectedTimeOption) { timeOption in
+            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
         }
     }
 
@@ -225,7 +229,7 @@ struct PollDetailView: View {
 
                         ForEach(sortedTimeOptions) { option in
                             Button {
-                                selectedTimeOption = option
+                                finalTimeOption = option
                                 showSelectFinalDateAlert = true
                             } label: {
                                 HStack(spacing: 12) {
@@ -269,15 +273,20 @@ struct PollDetailView: View {
             // Time Options
             Section("Time Options") {
                 ForEach(timeOptions) { option in
-                    TimeOptionRow(
-                        option: option,
-                        responses: responsesForOption(option.id),
-                        myResponse: localResponses[option.id],
-                        canRespond: myParticipant != nil && poll.status == .active,
-                        onResponseChange: { status in
-                            localResponses[option.id] = status
-                        }
-                    )
+                    Button {
+                        selectedTimeOption = option
+                    } label: {
+                        TimeOptionRow(
+                            option: option,
+                            responses: responsesForOption(option.id),
+                            myResponse: localResponses[option.id],
+                            canRespond: myParticipant != nil && poll.status == .active,
+                            onResponseChange: { status in
+                                localResponses[option.id] = status
+                            }
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -422,7 +431,7 @@ struct PollDetailView: View {
     }
 
     private func selectFinalDate() {
-        guard let option = selectedTimeOption else { return }
+        guard let option = finalTimeOption else { return }
 
         isSelectingFinalDate = true
 
