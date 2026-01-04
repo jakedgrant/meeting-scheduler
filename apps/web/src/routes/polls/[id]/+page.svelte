@@ -170,7 +170,32 @@
 	}
 
 	async function selectFinalDate(timeOption: typeof $currentPollTimeOptions[0]) {
-		if (!confirm('Set this as the final meeting time? All participants will be notified.')) {
+		// Format the date for display
+		const startDate = new Date(timeOption.start_time);
+		const endDate = new Date(timeOption.end_time);
+
+		const dateStr = startDate.toLocaleDateString('en-US', {
+			month: 'long',
+			day: 'numeric',
+			year: 'numeric'
+		});
+
+		let dateTimeStr;
+		if (timeOption.is_all_day) {
+			dateTimeStr = dateStr;
+		} else {
+			const startTime = startDate.toLocaleTimeString('en-US', {
+				hour: 'numeric',
+				minute: '2-digit'
+			});
+			const endTime = endDate.toLocaleTimeString('en-US', {
+				hour: 'numeric',
+				minute: '2-digit'
+			});
+			dateTimeStr = `${dateStr} ${startTime} - ${endTime}`;
+		}
+
+		if (!confirm(`Set ${dateTimeStr} as the final meeting time? All participants will be notified.`)) {
 			return;
 		}
 

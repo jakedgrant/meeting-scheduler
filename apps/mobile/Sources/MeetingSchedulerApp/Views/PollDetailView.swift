@@ -40,6 +40,24 @@ struct PollDetailView: View {
         }
     }
 
+    private var formattedSelectedOption: String {
+        guard let option = selectedTimeOption else { return "" }
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "MMMM d, yyyy"
+        let dateStr = dateFormatter.string(from: option.startTime)
+
+        if option.isAllDay {
+            return dateStr
+        } else {
+            let timeFormatter = DateFormatter()
+            timeFormatter.dateFormat = "h:mma"
+            let startTime = timeFormatter.string(from: option.startTime)
+            let endTime = timeFormatter.string(from: option.endTime)
+            return "\(dateStr) \(startTime) - \(endTime)"
+        }
+    }
+
     var body: some View {
         Group {
             if isLoading {
@@ -90,7 +108,7 @@ struct PollDetailView: View {
                 selectFinalDate()
             }
         } message: {
-            Text("Set this as the final meeting time? All participants will be notified.")
+            Text("Set \(formattedSelectedOption) as the final meeting time? All participants will be notified.")
         }
     }
 
