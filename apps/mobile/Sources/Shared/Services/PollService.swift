@@ -165,6 +165,25 @@ public final class PollService {
         }
     }
 
+    public func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws {
+        let formatter = ISO8601DateFormatter()
+
+        try await supabase
+            .from("polls")
+            .update([
+                "selected_start_time": .string(formatter.string(from: startTime)),
+                "selected_end_time": .string(formatter.string(from: endTime))
+            ])
+            .eq("id", value: pollId.uuidString)
+            .execute()
+
+        // Update local state
+        if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
+            myPolls[index].selectedStartTime = startTime
+            myPolls[index].selectedEndTime = endTime
+        }
+    }
+
     // MARK: - Participants
 
     public func loadParticipants(pollId: UUID) async -> [PollParticipant] {
