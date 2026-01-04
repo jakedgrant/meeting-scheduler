@@ -2,7 +2,19 @@
 -- Fix RLS policies to allow participants to view closed polls
 -- ============================================
 -- Problem: Participants can't see polls after they're closed
--- Solution: Update policies to allow participants to view polls they've joined
+-- Solution: Create a helper function to check participation without recursion
+
+-- Helper function to check if a user is a participant in a poll
+-- Using SECURITY DEFINER to bypass RLS and prevent infinite recursion
+CREATE OR REPLACE FUNCTION public.is_poll_participant(poll_uuid UUID, user_uuid UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.poll_participants
+        WHERE poll_id = poll_uuid AND user_id = user_uuid
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Drop existing restrictive policies
 DROP POLICY IF EXISTS "Anyone can view active polls" ON public.polls;
@@ -16,11 +28,7 @@ CREATE POLICY "Users can view accessible polls"
     USING (
         status = 'active'
         OR creator_id = auth.uid()
-        OR EXISTS (
-            SELECT 1 FROM public.poll_participants
-            WHERE poll_participants.poll_id = polls.id
-            AND poll_participants.user_id = auth.uid()
-        )
+        OR public.is_poll_participant(id, auth.uid())
     );
 
 -- Poll Time Options: Allow viewing if poll is accessible
@@ -33,11 +41,7 @@ CREATE POLICY "Users can view time options for accessible polls"
             AND (
                 polls.status = 'active'
                 OR polls.creator_id = auth.uid()
-                OR EXISTS (
-                    SELECT 1 FROM public.poll_participants
-                    WHERE poll_participants.poll_id = polls.id
-                    AND poll_participants.user_id = auth.uid()
-                )
+                OR public.is_poll_participant(polls.id, auth.uid())
             )
         )
     );
@@ -52,11 +56,7 @@ CREATE POLICY "Users can view participants for accessible polls"
             AND (
                 polls.status = 'active'
                 OR polls.creator_id = auth.uid()
-                OR EXISTS (
-                    SELECT 1 FROM public.poll_participants pp
-                    WHERE pp.poll_id = polls.id
-                    AND pp.user_id = auth.uid()
-                )
+                OR public.is_poll_participant(polls.id, auth.uid())
             )
         )
     );
@@ -72,11 +72,7 @@ CREATE POLICY "Users can view responses for accessible polls"
             AND (
                 p.status = 'active'
                 OR p.creator_id = auth.uid()
-                OR EXISTS (
-                    SELECT 1 FROM public.poll_participants pp2
-                    WHERE pp2.poll_id = p.id
-                    AND pp2.user_id = auth.uid()
-                )
+                OR public.is_poll_participant(p.id, auth.uid())
             )
         )
     );
