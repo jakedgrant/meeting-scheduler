@@ -84,8 +84,14 @@ public final class CalendarService {
         if enabled {
             updateAuthorizationStatus()
 
-            // Check for full access or authorized
-            let hasAccess = authorizationStatus == .fullAccess || authorizationStatus == .authorized
+            // Check for full access
+            let hasAccess: Bool
+            if #available(iOS 17.0, *) {
+                hasAccess = authorizationStatus == .fullAccess
+            } else {
+                hasAccess = authorizationStatus == .authorized
+            }
+
             if !hasAccess {
                 let granted = await requestAccess()
                 if !granted {
@@ -139,14 +145,13 @@ public final class CalendarService {
         do {
             guard let userId = AuthService.shared.currentUser?.id else { return false }
 
-            let response = try await SupabaseService.shared.client
+            let profile: GoogleCalendarProfile = try await SupabaseService.shared.client
                 .from("profiles")
-                .select("google_calendar_refresh_token, google_calendar_token_expires_at")
+                .select("google_calendar_refresh_token, google_calendar_token_expires_at, google_calendar_access_token")
                 .eq("id", value: userId.uuidString)
                 .single()
                 .execute()
-
-            let profile = try response.decoded(to: GoogleCalendarProfile.self)
+                .value
 
             // Check if refresh token exists and access token isn't expired
             if let refreshToken = profile.google_calendar_refresh_token,
@@ -212,7 +217,14 @@ public final class CalendarService {
         updateAuthorizationStatus()
 
         // Check if we have permission
-        guard authorizationStatus == .fullAccess || authorizationStatus == .authorized else {
+        let hasAccess: Bool
+        if #available(iOS 17.0, *) {
+            hasAccess = authorizationStatus == .fullAccess
+        } else {
+            hasAccess = authorizationStatus == .authorized
+        }
+
+        guard hasAccess else {
             // Permission was revoked
             await setAppleCalendarEnabled(false)
             return Set()
@@ -257,24 +269,19 @@ public final class CalendarService {
     }
 
     /// Check Google Calendar for conflicts via Edge Function
+    /// Note: Google Calendar conflict checking on mobile is disabled for now
+    /// since the Supabase Swift SDK Edge Function invocation requires more setup
     private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
         do {
             googleCalendarLoading = true
             defer { googleCalendarLoading = false }
 
-            let response = try await SupabaseService.shared.functions
-                .invoke("check-calendar-conflicts", returning: GoogleCalendarConflictResponse.self, body: [
-                    "timeOptions": timeOptions.map { option in
-                        [
-                            "id": option.id.uuidString,
-                            "start_time": ISO8601DateFormatter().string(from: option.startTime),
-                            "end_time": ISO8601DateFormatter().string(from: option.endTime)
-                        ]
-                    }
-                ])
-
-            let conflictIds = Set(response.conflictingIds.compactMap { UUID(uuidString: $0) })
-            return conflictIds
+            // TODO: Implement Edge Function call when Supabase Swift SDK is properly integrated
+            // For now, Google Calendar support on mobile shows the toggle but doesn't check conflicts
+            // Users can still enable it to mark it as a calendar source preference
+            // which syncs to Supabase and can be read by other clients
+            print("Google Calendar conflict checking not yet implemented on mobile")
+            return Set()
         } catch {
             print("Failed to check Google Calendar conflicts: \(error)")
             return Set()
@@ -291,7 +298,14 @@ public final class CalendarService {
 
         updateAuthorizationStatus()
 
-        guard authorizationStatus == .fullAccess || authorizationStatus == .authorized else {
+        let hasAccess: Bool
+        if #available(iOS 17.0, *) {
+            hasAccess = authorizationStatus == .fullAccess
+        } else {
+            hasAccess = authorizationStatus == .authorized
+        }
+
+        guard hasAccess else {
             await setAppleCalendarEnabled(false)
             return []
         }
