@@ -85,12 +85,7 @@ public final class CalendarService {
             updateAuthorizationStatus()
 
             // Check for full access
-            let hasAccess: Bool
-            if #available(iOS 17.0, *) {
-                hasAccess = authorizationStatus == .fullAccess
-            } else {
-                hasAccess = authorizationStatus == .authorized
-            }
+            let hasAccess = authorizationStatus == .fullAccess
 
             if !hasAccess {
                 let granted = await requestAccess()
@@ -217,14 +212,7 @@ public final class CalendarService {
         updateAuthorizationStatus()
 
         // Check if we have permission
-        let hasAccess: Bool
-        if #available(iOS 17.0, *) {
-            hasAccess = authorizationStatus == .fullAccess
-        } else {
-            hasAccess = authorizationStatus == .authorized
-        }
-
-        guard hasAccess else {
+        guard authorizationStatus == .fullAccess else {
             // Permission was revoked
             await setAppleCalendarEnabled(false)
             return Set()
@@ -269,19 +257,32 @@ public final class CalendarService {
     }
 
     /// Check Google Calendar for conflicts via Edge Function
-    /// Note: Google Calendar conflict checking on mobile is disabled for now
-    /// since the Supabase Swift SDK Edge Function invocation requires more setup
     private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
         do {
             googleCalendarLoading = true
             defer { googleCalendarLoading = false }
 
-            // TODO: Implement Edge Function call when Supabase Swift SDK is properly integrated
-            // For now, Google Calendar support on mobile shows the toggle but doesn't check conflicts
-            // Users can still enable it to mark it as a calendar source preference
-            // which syncs to Supabase and can be read by other clients
-            print("Google Calendar conflict checking not yet implemented on mobile")
-            return Set()
+            // Build the request payload
+            let timeOptionsArray = timeOptions.map { option in
+                [
+                    "id": option.id.uuidString,
+                    "start_time": ISO8601DateFormatter().string(from: option.startTime),
+                    "end_time": ISO8601DateFormatter().string(from: option.endTime)
+                ]
+            }
+
+            let requestBody = ["timeOptions": timeOptionsArray]
+
+            // Invoke the Edge Function
+            let response: GoogleCalendarConflictResponse = try await SupabaseService.shared.client
+                .functions
+                .invoke(
+                    "check-calendar-conflicts",
+                    options: FunctionInvokeOptions(body: requestBody)
+                )
+
+            let conflictIds = Set(response.conflictingIds.compactMap { UUID(uuidString: $0) })
+            return conflictIds
         } catch {
             print("Failed to check Google Calendar conflicts: \(error)")
             return Set()
@@ -298,14 +299,7 @@ public final class CalendarService {
 
         updateAuthorizationStatus()
 
-        let hasAccess: Bool
-        if #available(iOS 17.0, *) {
-            hasAccess = authorizationStatus == .fullAccess
-        } else {
-            hasAccess = authorizationStatus == .authorized
-        }
-
-        guard hasAccess else {
+        guard authorizationStatus == .fullAccess else {
             await setAppleCalendarEnabled(false)
             return []
         }
