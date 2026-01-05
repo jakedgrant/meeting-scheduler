@@ -176,7 +176,8 @@ export async function disableCalendarIntegration() {
 
 /**
  * Check for calendar conflicts with time options
- * Calls Google Calendar API directly from the browser using stored access token
+ * Calls Edge Function with Supabase authentication
+ * Edge Function handles Google Calendar API calls server-side (secure)
  */
 export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
   if (!timeOptions.length) {
@@ -194,96 +195,33 @@ export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
       return
     }
 
-    // Get the stored access token from profile
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('google_calendar_access_token, google_calendar_token_expires_at')
-      .eq('id', currentSession.user.id)
-      .single()
+    console.log('Calling check-calendar-conflicts Edge Function')
 
-    if (profileError || !profile?.google_calendar_access_token) {
-      console.warn('No Google Calendar access token found')
-      calendarConflicts.set(new Set())
-      return
-    }
-
-    // Check if token is expired
-    const expiresAt = new Date(profile.google_calendar_token_expires_at)
-    if (expiresAt < new Date()) {
-      console.warn('Google Calendar access token expired')
-      calendarConflicts.set(new Set())
-      return
-    }
-
-    console.log('Checking calendar conflicts for', timeOptions.length, 'time options')
-
-    // Find the time range to query (min start to max end)
-    const startTimes = timeOptions.map(opt => new Date(opt.start_time).getTime())
-    const endTimes = timeOptions.map(opt => new Date(opt.end_time).getTime())
-    const minTime = new Date(Math.min(...startTimes))
-    const maxTime = new Date(Math.max(...endTimes))
-
-    // Call Google Calendar API directly
-    const params = new URLSearchParams({
-      timeMin: minTime.toISOString(),
-      timeMax: maxTime.toISOString(),
-      singleEvents: 'true',
-      maxResults: '100'
+    // Call Edge Function - Supabase automatically includes the session token
+    const { data, error } = await supabase.functions.invoke('check-calendar-conflicts', {
+      body: {
+        timeOptions: timeOptions.map(opt => ({
+          id: opt.id,
+          start_time: opt.start_time,
+          end_time: opt.end_time
+        }))
+      }
     })
 
-    const response = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${profile.google_calendar_access_token}`
-        }
-      }
-    )
-
-    if (!response.ok) {
-      console.error('Google Calendar API error:', response.status)
+    if (error) {
+      console.error('Edge Function error:', error)
       calendarConflicts.set(new Set())
       return
     }
 
-    const data = await response.json()
-    const events = data.items || []
-    console.log('Found', events.length, 'calendar events in time range')
-
-    // Filter out events that don't count as busy
-    const busyEvents = events.filter((event: any) => {
-      if (event.status === 'cancelled') return false
-      if (event.transparency === 'transparent') return false
-      if (event.attendees?.some((att: any) => att.self && att.responseStatus === 'declined')) {
-        return false
-      }
-      return true
-    })
-
-    console.log('Busy events:', busyEvents.length)
-
-    // Check each time option for conflicts
-    const conflictingIds: string[] = []
-
-    for (const option of timeOptions) {
-      const optionStart = new Date(option.start_time).getTime()
-      const optionEnd = new Date(option.end_time).getTime()
-
-      const hasConflict = busyEvents.some((event: any) => {
-        const eventStart = new Date(event.start?.dateTime || event.start?.date).getTime()
-        const eventEnd = new Date(event.end?.dateTime || event.end?.date).getTime()
-
-        // Check for overlap
-        return optionStart < eventEnd && optionEnd > eventStart
-      })
-
-      if (hasConflict) {
-        conflictingIds.push(option.id)
-      }
+    if (!data || !Array.isArray(data.conflictingIds)) {
+      console.warn('Invalid response from Edge Function:', data)
+      calendarConflicts.set(new Set())
+      return
     }
 
-    console.log('Conflicting time option IDs:', conflictingIds)
-    calendarConflicts.set(new Set(conflictingIds))
+    console.log('Conflicting time option IDs:', data.conflictingIds)
+    calendarConflicts.set(new Set(data.conflictingIds))
   } catch (err) {
     console.error('Error during calendar conflict check:', err)
     // Fail silently - don't block user
