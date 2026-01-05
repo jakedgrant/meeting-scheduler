@@ -1,49 +1,81 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 Deno.serve(async (req) => {
+  console.log('=== FUNCTION START ===')
+  console.log('Method:', req.method)
+  console.log('Headers:', Object.fromEntries(req.headers.entries()))
+
   // CORS headers
   if (req.method === 'OPTIONS') {
-    return new Response('ok', {
+    console.log('Handling CORS preflight')
+    const response = new Response('ok', {
+      status: 200,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+        'Access-Control-Max-Age': '86400',
       },
     })
+    console.log('Preflight response status:', response.status)
+    console.log('Preflight response headers:', Object.fromEntries(response.headers.entries()))
+    return response
   }
 
   try {
+    console.log('Creating Supabase admin client...')
     // Create admin client to access identities
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     )
+    console.log('Admin client created')
 
-    // Get user from Authorization header
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
+    // Parse request body
+    console.log('Parsing request body...')
+    const body = await req.json()
+    console.log('Body parsed:', body)
+
+    const userId = body?.userId
+    console.log('User ID from body:', userId)
+
+    if (!userId) {
+      console.log('Returning 400: Missing userId')
       return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'Missing userId in request body' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
-
-    // Get user from JWT
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
+    // Get user from database using service role
+    console.log('Fetching user:', userId)
+    const { data: { user }, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId)
+    console.log('User fetch response - user:', !!user, 'error:', !!userError)
 
     if (userError || !user) {
+      console.log('User fetch failed - userError:', userError)
+      console.log('User object:', user)
       return new Response(
-        JSON.stringify({ error: 'Unauthorized', details: userError?.message }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
+        JSON.stringify({ error: 'User not found', details: userError?.message }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
       )
     }
+
+    // DEBUG: Log the entire user object to see all available fields
+    console.log('=== FULL USER OBJECT ===')
+    console.log(JSON.stringify(user, null, 2))
+    console.log('=== USER OBJECT KEYS ===')
+    console.log(Object.keys(user))
+    console.log('=== USER.IDENTITIES ===')
+    console.log(JSON.stringify(user.identities, null, 2))
 
     // Extract Google OAuth refresh token from user identities
     const googleIdentity = user.identities?.find(
       (identity: any) => identity.provider === 'google'
     )
+
+    console.log('Google identity found:', !!googleIdentity)
+    console.log('Full identity data:', JSON.stringify(googleIdentity?.identity_data, null, 2))
 
     if (!googleIdentity) {
       return new Response(
@@ -56,11 +88,16 @@ Deno.serve(async (req) => {
 
     const refreshToken = googleIdentity.identity_data?.provider_refresh_token
 
+    console.log('Refresh token found:', !!refreshToken)
+    console.log('Available identity_data keys:', Object.keys(googleIdentity.identity_data || {}))
+
     if (!refreshToken) {
+      console.error('No refresh token in identity_data. Available keys:', Object.keys(googleIdentity.identity_data || {}))
       return new Response(
         JSON.stringify({
-          error: 'No refresh token available. Please sign in again with calendar access.',
-          hint: 'Make sure to grant calendar permissions during sign-in.',
+          error: 'No refresh token available. The calendar scope may not have been properly granted.',
+          available_keys: Object.keys(googleIdentity.identity_data || {}),
+          hint: 'Make sure your Google OAuth app has calendar scope configured in Google Cloud Console.',
         }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       )
@@ -89,6 +126,8 @@ Deno.serve(async (req) => {
       )
     }
 
+    console.log('=== SUCCESS ===')
+    console.log('Token stored successfully for user:', user.id)
     return new Response(
       JSON.stringify({
         success: true,
@@ -103,7 +142,10 @@ Deno.serve(async (req) => {
       }
     )
   } catch (error) {
-    console.error('Function error:', error)
+    console.error('=== FUNCTION ERROR ===')
+    console.error('Error type:', error?.constructor?.name)
+    console.error('Error message:', error instanceof Error ? error.message : String(error))
+    console.error('Full error:', error)
     return new Response(
       JSON.stringify({
         error: 'Internal server error',

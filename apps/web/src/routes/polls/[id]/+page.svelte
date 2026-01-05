@@ -89,6 +89,23 @@
 		}
 	});
 
+	// Auto-mark calendar conflicts as unavailable (only if no existing response)
+	$effect(() => {
+		if ($calendarConflicts.size > 0 && myParticipant) {
+			const updated = { ...localResponses };
+			let hasChanges = false;
+			for (const conflictId of $calendarConflicts) {
+				if (!updated[conflictId]) {
+					updated[conflictId] = 'unavailable';
+					hasChanges = true;
+				}
+			}
+			if (hasChanges) {
+				localResponses = updated;
+			}
+		}
+	});
+
 	function getResponsesForTimeOption(timeOptionId: string) {
 		const responses = $currentPollResponses.filter((r) => r.time_option_id === timeOptionId);
 		return {

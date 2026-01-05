@@ -74,6 +74,7 @@
 
 	async function handleCalendarToggle(enabled: boolean) {
 		calendarError = '';
+		successMessage = '';
 
 		try {
 			if (enabled) {
@@ -84,7 +85,17 @@
 				successMessage = 'Calendar integration disabled';
 			}
 		} catch (err) {
-			calendarError = err instanceof Error ? err.message : 'Failed to update calendar settings';
+			const errorMsg = err instanceof Error ? err.message : 'Failed to update calendar settings';
+
+			// Handle specific error cases
+			if (errorMsg === 'Calendar scope request was cancelled') {
+				calendarError = 'Calendar integration setup was cancelled. Please try again when ready.';
+			} else if (errorMsg.includes('Unauthorized')) {
+				calendarError = 'Authorization failed. Please try signing in again.';
+			} else {
+				calendarError = errorMsg;
+			}
+
 			// Reset the toggle on error
 			calendarEnabled.set(!enabled);
 		}

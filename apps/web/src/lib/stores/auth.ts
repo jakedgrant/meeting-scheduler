@@ -66,15 +66,38 @@ export async function signInWithGoogle() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      scopes: 'openid email profile https://www.googleapis.com/auth/calendar.readonly',
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent'
-      }
+      redirectTo: `${window.location.origin}/auth/callback`
     }
   })
   if (error) throw error
+}
+
+/**
+ * Request calendar scope from Google
+ * Called when user enables calendar integration
+ * User will be prompted to re-authenticate and grant calendar access
+ */
+export async function requestCalendarScope() {
+  console.log('requestCalendarScope - Starting OAuth flow with calendar scope')
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: `${window.location.origin}/auth/callback`,
+      // Request calendar scope along with standard auth scopes
+      scopes: 'openid email profile https://www.googleapis.com/auth/calendar.readonly',
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+        include_granted_scopes: 'true'
+      }
+    }
+  })
+
+  if (error) {
+    console.error('OAuth error:', error)
+    throw error
+  }
 }
 
 export async function signInWithApple() {

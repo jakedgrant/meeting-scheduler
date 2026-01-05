@@ -7,62 +7,36 @@ interface TimeOption {
 }
 
 interface RequestBody {
+  userId: string
   timeOptions: TimeOption[]
 }
 
-// Refresh Google OAuth token if expired
+// Get Google Calendar access token for the user
 async function getAccessToken(
   userId: string,
   supabase: any
 ): Promise<string> {
   const { data: profile, error: fetchError } = await supabase
     .from('profiles')
-    .select('google_calendar_refresh_token, google_calendar_token_expires_at')
+    .select('google_calendar_access_token, google_calendar_token_expires_at')
     .eq('id', userId)
     .single()
 
-  if (fetchError || !profile?.google_calendar_refresh_token) {
-    throw new Error('No calendar refresh token found')
+  if (fetchError || !profile?.google_calendar_access_token) {
+    throw new Error('No calendar access token found')
   }
 
   const now = new Date()
   const expiresAt = new Date(profile.google_calendar_token_expires_at)
 
-  // Token still valid, return refresh token (will be used by Edge Function, access token stored separately in production)
+  // Token still valid
   if (expiresAt > now) {
-    // In production, you'd store the access token too and return it here
-    // For now, we return the refresh token and let the calling code handle refresh
-    return profile.google_calendar_refresh_token
+    console.log('Using stored access token for user:', userId)
+    return profile.google_calendar_access_token
   }
 
-  // Token expired, refresh it
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: Deno.env.get('GOOGLE_CLIENT_ID') ?? '',
-      client_secret: Deno.env.get('GOOGLE_CLIENT_SECRET') ?? '',
-      refresh_token: profile.google_calendar_refresh_token,
-      grant_type: 'refresh_token',
-    }).toString(),
-  })
-
-  if (!tokenResponse.ok) {
-    throw new Error(`Failed to refresh token: ${tokenResponse.statusText}`)
-  }
-
-  const tokenData = await tokenResponse.json()
-
-  // Update expiry in database
-  const newExpiry = new Date(Date.now() + 3600 * 1000) // 1 hour
-  await supabase
-    .from('profiles')
-    .update({
-      google_calendar_token_expires_at: newExpiry.toISOString(),
-    })
-    .eq('id', userId)
-
-  return tokenData.access_token
+  // Token expired - user needs to re-authenticate
+  throw new Error('Calendar access token expired. Please re-authenticate in settings.')
 }
 
 interface GoogleCalendarEvent {
@@ -149,28 +123,16 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     )
 
-    // Get user from Authorization header
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: 'Missing authorization header' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: userError } = await supabaseAdmin.auth.getUser(token)
-
-    if (userError || !user) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      )
-    }
-
     // Parse request body
     const body: RequestBody = await req.json()
-    const { timeOptions } = body
+    const { userId, timeOptions } = body
+
+    if (!userId) {
+      return new Response(
+        JSON.stringify({ error: 'Missing userId in request body' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      )
+    }
 
     if (!Array.isArray(timeOptions) || timeOptions.length === 0) {
       return new Response(
@@ -182,7 +144,7 @@ Deno.serve(async (req) => {
     }
 
     // Get access token (refresh if needed)
-    const accessToken = await getAccessToken(user.id, supabaseAdmin)
+    const accessToken = await getAccessToken(userId, supabaseAdmin)
 
     // Check conflicts for each time option
     const conflictingIds: string[] = []
