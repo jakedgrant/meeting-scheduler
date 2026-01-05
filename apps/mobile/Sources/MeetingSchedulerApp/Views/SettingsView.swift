@@ -96,30 +96,82 @@ struct SettingsView: View {
 
                 // Calendar Integration Section
                 Section("Calendar Integration") {
-                    Toggle(isOn: Binding(
-                        get: { calendarService.isEnabled },
-                        set: { enabled in
-                            Task {
-                                await calendarService.setEnabled(enabled)
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Select calendar sources to check for conflicts")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        // Apple Calendar Toggle
+                        Toggle(isOn: Binding(
+                            get: { calendarService.appleCalendarEnabled },
+                            set: { enabled in
+                                Task {
+                                    await calendarService.setAppleCalendarEnabled(enabled)
+                                }
+                            }
+                        )) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "calendar")
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Apple Calendar")
+                                        .font(.body)
+                                    Text("Local device calendar")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
-                    )) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Auto-mark Conflicts")
-                            Text("Automatically mark times when you're busy")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
 
-                    if calendarService.isEnabled {
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("Connected to Apple Calendar")
-                                .font(.caption)
+                        // Google Calendar Toggle
+                        Toggle(isOn: Binding(
+                            get: { calendarService.googleCalendarEnabled },
+                            set: { enabled in
+                                Task {
+                                    if enabled {
+                                        // Check if token exists
+                                        let hasToken = await calendarService.hasGoogleCalendarToken()
+                                        if !hasToken {
+                                            // Show alert or navigate to OAuth
+                                            print("Google Calendar token not found. Please sign in with Google.")
+                                        }
+                                    } else {
+                                        await calendarService.setGoogleCalendarEnabled(false)
+                                    }
+                                }
+                            }
+                        )) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "globe")
+                                    .foregroundStyle(.red)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Google Calendar")
+                                        .font(.body)
+                                    if calendarService.googleCalendarEnabled {
+                                        Text("Connected")
+                                            .font(.caption)
+                                            .foregroundStyle(.green)
+                                    } else {
+                                        Text("Not connected")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                        .disabled(calendarService.googleCalendarLoading)
+
+                        if calendarService.googleCalendarLoading {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Checking Google Calendar connection...")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .padding(.vertical, 4)
                 }
 
                 // App Section
