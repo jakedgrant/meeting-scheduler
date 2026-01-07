@@ -128,16 +128,7 @@ struct SettingsView: View {
                             get: { calendarService.googleCalendarEnabled },
                             set: { enabled in
                                 Task {
-                                    if enabled {
-                                        // Check if token exists
-                                        let hasToken = await calendarService.hasGoogleCalendarToken()
-                                        if !hasToken {
-                                            // Show alert or navigate to OAuth
-                                            print("Google Calendar token not found. Please sign in with Google.")
-                                        }
-                                    } else {
-                                        await calendarService.setGoogleCalendarEnabled(false)
-                                    }
+                                    await calendarService.setGoogleCalendarEnabled(enabled)
                                 }
                             }
                         )) {
