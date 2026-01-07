@@ -107,9 +107,31 @@ public final class CalendarService {
     /// Enable/disable Google Calendar
     public func setGoogleCalendarEnabled(_ enabled: Bool) async {
         if enabled {
-            // For now, Google Calendar is disabled until token is set
-            // User should authenticate through OAuth first
-            googleCalendarEnabled = false
+            // Check if token already exists
+            let hasToken = await hasGoogleCalendarToken()
+            if hasToken {
+                // Already authorized, just enable
+                googleCalendarEnabled = true
+                UserDefaults.standard.set(true, forKey: "googleCalendarEnabled")
+                await syncPreferencesToSupabase()
+                return
+            }
+
+            // No token exists, need to authorize
+            do {
+                // Trigger Google OAuth with calendar scope
+                let authorized = try await AuthService.shared.authorizeGoogleCalendar()
+                if authorized {
+                    googleCalendarEnabled = true
+                    UserDefaults.standard.set(true, forKey: "googleCalendarEnabled")
+                } else {
+                    googleCalendarEnabled = false
+                    print("Google Calendar authorization did not return tokens")
+                }
+            } catch {
+                print("Failed to authorize Google Calendar: \(error)")
+                googleCalendarEnabled = false
+            }
             return
         }
 
