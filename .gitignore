@@ -65,6 +65,12 @@ local.properties
 
 # Skip
 .skip/
+# Skip Fuse build outputs
+Android/app/build/
+Android/build/
+Android/.gradle/
+Android/local.properties
+Darwin/DerivedData/
 
 # Secrets (never commit)
 *.p8

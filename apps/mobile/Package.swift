@@ -18,9 +18,10 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://source.skip.tools/skip.git", from: "1.0.0"),
-        .package(url: "https://source.skip.tools/skip-ui.git", from: "1.0.0"),
-        .package(url: "https://source.skip.tools/skip-foundation.git", from: "1.0.0"),
+        .package(url: "https://source.skip.tools/skip.git", from: "1.6.0"),
+        .package(url: "https://source.skip.tools/skip-fuse.git", from: "1.0.0"),
+        .package(url: "https://source.skip.tools/skip-fuse-ui.git", from: "1.0.0"),
+        .package(url: "https://source.skip.tools/skip-foundation.git", from: "1.3.0"),
         .package(url: "https://source.skip.tools/skip-model.git", from: "1.0.0"),
         .package(url: "https://github.com/supabase-community/supabase-swift.git", from: "2.0.0"),
         .package(url: "https://github.com/RevenueCat/purchases-ios.git", from: "5.0.0")
@@ -30,6 +31,7 @@ let package = Package(
         .target(
             name: "Shared",
             dependencies: [
+                .product(name: "SkipFuse", package: "skip-fuse"),
                 .product(name: "SkipFoundation", package: "skip-foundation"),
                 .product(name: "SkipModel", package: "skip-model"),
                 .product(name: "Supabase", package: "supabase-swift"),
@@ -43,7 +45,7 @@ let package = Package(
             name: "MeetingSchedulerApp",
             dependencies: [
                 "Shared",
-                .product(name: "SkipUI", package: "skip-ui")
+                .product(name: "SkipFuseUI", package: "skip-fuse-ui")
             ],
             path: "Sources/MeetingSchedulerApp",
             plugins: [.plugin(name: "skipstone", package: "skip")]
