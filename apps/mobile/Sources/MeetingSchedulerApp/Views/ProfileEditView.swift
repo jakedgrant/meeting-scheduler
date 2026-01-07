@@ -2,9 +2,9 @@ import SwiftUI
 import Shared
 
 struct ProfileEditView: View {
-    @State var authService = AuthService.shared
     @Environment(\.dismiss) var dismiss
 
+    @State var authService = AuthService.shared
     @State var displayName: String = ""
     @State var avatarUrl: String = ""
     @State var timezone: String = "UTC"
@@ -12,7 +12,6 @@ struct ProfileEditView: View {
     @State var errorMessage: String?
     @State var showSuccessAlert = false
 
-    // Common timezones
     private let timezones = [
         "UTC",
         "America/New_York",
@@ -41,57 +40,9 @@ struct ProfileEditView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField("Display Name", text: $displayName)
-                        .autocorrectionDisabled()
-
-                    TextField("Avatar URL", text: $avatarUrl)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-
-                    if !avatarUrl.isEmpty, let url = URL(string: avatarUrl) {
-                        HStack {
-                            Spacer()
-                            AsyncImage(url: url) { image in
-                                image
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                ProgressView()
-                            }
-                            .frame(width: 100, height: 100)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                            Spacer()
-                        }
-                        .padding(.vertical, 8)
-                    }
-                } header: {
-                    Text("Profile Information")
-                } footer: {
-                    Text("Your display name and avatar will be shown to other participants")
-                }
-
-                Section {
-                    Picker("Timezone", selection: $timezone) {
-                        ForEach(timezones, id: \.self) { tz in
-                            Text(tz).tag(tz)
-                        }
-                    }
-                } header: {
-                    Text("Timezone")
-                } footer: {
-                    Text("Your local timezone for meeting scheduling")
-                }
-
-                if let errorMessage = errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                            .font(.caption)
-                    }
-                }
+                profileSection
+                timezoneSection
+                errorSection
             }
             .navigationTitle("Edit Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -122,6 +73,76 @@ struct ProfileEditView: View {
             loadCurrentProfile()
         }
     }
+
+    // MARK: - Sections
+
+    private var profileSection: some View {
+        Section {
+            TextField("Display Name", text: $displayName)
+                .autocorrectionDisabled()
+
+            TextField("Avatar URL", text: $avatarUrl)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+
+            avatarPreview
+        } header: {
+            Text("Profile Information")
+        } footer: {
+            Text("Your display name and avatar will be shown to other participants")
+        }
+    }
+
+    private var timezoneSection: some View {
+        Section {
+            Picker("Timezone", selection: $timezone) {
+                ForEach(timezones, id: \.self) { tz in
+                    Text(tz).tag(tz)
+                }
+            }
+        } header: {
+            Text("Timezone")
+        } footer: {
+            Text("Your local timezone for meeting scheduling")
+        }
+    }
+
+    @ViewBuilder
+    private var errorSection: some View {
+        if let errorMessage = errorMessage {
+            Section {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+                    .font(.caption)
+            }
+        }
+    }
+
+    // MARK: - Subviews
+
+    @ViewBuilder
+    private var avatarPreview: some View {
+        if !avatarUrl.isEmpty, let url = URL(string: avatarUrl) {
+            HStack {
+                Spacer()
+                AsyncImage(url: url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } placeholder: {
+                    ProgressView()
+                }
+                .frame(width: 100, height: 100)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                Spacer()
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - Actions
 
     private func loadCurrentProfile() {
         displayName = authService.profile?.displayName ?? ""

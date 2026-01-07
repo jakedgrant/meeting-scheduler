@@ -9,7 +9,7 @@ public struct ContentView: View {
     public var body: some View {
         Group {
             if authService.isLoading {
-                ProgressView("Loading...")
+                loadingView
             } else if authService.isAuthenticated {
                 MainTabView()
             } else {
@@ -17,7 +17,15 @@ public struct ContentView: View {
             }
         }
     }
+
+    // MARK: - Subviews
+
+    private var loadingView: some View {
+        ProgressView("Loading...")
+    }
 }
+
+// MARK: - MainTabView
 
 struct MainTabView: View {
     var body: some View {

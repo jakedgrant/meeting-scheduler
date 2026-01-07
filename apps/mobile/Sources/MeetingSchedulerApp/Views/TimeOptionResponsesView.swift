@@ -9,6 +9,30 @@ struct TimeOptionResponsesView: View {
     @State var responses: [AvailabilityResponse] = []
     @State var isLoading = true
 
+    private var groupedResponses: GroupedResponses {
+        let optionResponses = responses.filter { $0.timeOptionId == timeOption.id }
+
+        let items = optionResponses.compactMap { response -> ResponseItem? in
+            guard let participant = participants.first(where: { $0.id == response.participantId }) else {
+                return nil
+            }
+            return ResponseItem(
+                id: response.id,
+                participantName: participant.displayName,
+                status: response.status,
+                note: response.note
+            )
+        }
+
+        let sortedItems = items.sorted { $0.participantName < $1.participantName }
+
+        return GroupedResponses(
+            available: sortedItems.filter { $0.status == .available },
+            maybe: sortedItems.filter { $0.status == .maybe },
+            unavailable: sortedItems.filter { $0.status == .unavailable }
+        )
+    }
+
     var body: some View {
         Group {
             if isLoading {
@@ -26,123 +50,116 @@ struct TimeOptionResponsesView: View {
         }
     }
 
-    @ViewBuilder
+    // MARK: - Main Content
+
     private var responsesList: some View {
         List {
-            // Time option info
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(timeOption.startTime, style: .date)
-                        .font(.headline)
-                    if timeOption.isAllDay {
-                        Text("All day")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("\(timeOption.startTime, style: .time) - \(timeOption.endTime, style: .time)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            timeOptionInfoSection
+            responseSections
+        }
+    }
 
-            let grouped = groupedResponses
+    // MARK: - Sections
 
-            if responses.isEmpty {
-                Section {
-                    Text("No responses yet for this time option")
+    private var timeOptionInfoSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(timeOption.startTime, style: .date)
+                    .font(.headline)
+                if timeOption.isAllDay {
+                    Text("All day")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(timeOption.startTime, style: .time) - \(timeOption.endTime, style: .time)")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-            } else {
-                // Available
-                if !grouped.available.isEmpty {
-                    Section {
-                        ForEach(grouped.available) { item in
-                            ResponseRow(item: item)
-                        }
-                    } header: {
-                        HStack {
-                            Image(systemName: "checkmark")
-                            Text("Available (\(grouped.available.count))")
-                        }
-                        .foregroundStyle(.green)
-                    }
-                }
-
-                // Tentative (Maybe)
-                if !grouped.maybe.isEmpty {
-                    Section {
-                        ForEach(grouped.maybe) { item in
-                            ResponseRow(item: item)
-                        }
-                    } header: {
-                        HStack {
-                            Image(systemName: "questionmark")
-                            Text("Tentative (\(grouped.maybe.count))")
-                        }
-                        .foregroundStyle(.orange)
-                    }
-                }
-
-                // Not Available
-                if !grouped.unavailable.isEmpty {
-                    Section {
-                        ForEach(grouped.unavailable) { item in
-                            ResponseRow(item: item)
-                        }
-                    } header: {
-                        HStack {
-                            Image(systemName: "xmark")
-                            Text("Not Available (\(grouped.unavailable.count))")
-                        }
-                        .foregroundStyle(.red)
-                    }
-                }
             }
         }
     }
 
-    private var groupedResponses: GroupedResponses {
-        // Get responses for this time option
-        let optionResponses = responses.filter { $0.timeOptionId == timeOption.id }
+    @ViewBuilder
+    private var responseSections: some View {
+        let grouped = groupedResponses
 
-        // Map to response items with participant info
-        let items = optionResponses.compactMap { response -> ResponseItem? in
-            guard let participant = participants.first(where: { $0.id == response.participantId }) else {
-                return nil
+        if responses.isEmpty {
+            Section {
+                Text("No responses yet for this time option")
+                    .foregroundStyle(.secondary)
             }
-            return ResponseItem(
-                id: response.id,
-                participantName: participant.displayName,
-                status: response.status,
-                note: response.note
-            )
+        } else {
+            availableSection(grouped.available)
+            maybeSection(grouped.maybe)
+            unavailableSection(grouped.unavailable)
         }
-
-        // Sort alphabetically within each group
-        let sortedItems = items.sorted { $0.participantName < $1.participantName }
-
-        // Group by status
-        return GroupedResponses(
-            available: sortedItems.filter { $0.status == .available },
-            maybe: sortedItems.filter { $0.status == .maybe },
-            unavailable: sortedItems.filter { $0.status == .unavailable }
-        )
     }
+
+    @ViewBuilder
+    private func availableSection(_ items: [ResponseItem]) -> some View {
+        if !items.isEmpty {
+            Section {
+                ForEach(items) { item in
+                    ResponseRow(item: item)
+                }
+            } header: {
+                HStack {
+                    Image(systemName: "checkmark")
+                    Text("Available (\(items.count))")
+                }
+                .foregroundStyle(.green)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func maybeSection(_ items: [ResponseItem]) -> some View {
+        if !items.isEmpty {
+            Section {
+                ForEach(items) { item in
+                    ResponseRow(item: item)
+                }
+            } header: {
+                HStack {
+                    Image(systemName: "questionmark")
+                    Text("Tentative (\(items.count))")
+                }
+                .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func unavailableSection(_ items: [ResponseItem]) -> some View {
+        if !items.isEmpty {
+            Section {
+                ForEach(items) { item in
+                    ResponseRow(item: item)
+                }
+            } header: {
+                HStack {
+                    Image(systemName: "xmark")
+                    Text("Not Available (\(items.count))")
+                }
+                .foregroundStyle(.red)
+            }
+        }
+    }
+
+    // MARK: - Data Loading
 
     private func loadData() async {
         isLoading = true
 
-        // Load participants
         participants = await PollService.shared.loadParticipants(pollId: pollId)
-
-        // Load all responses for these participants
         let participantIds = participants.map { $0.id }
         responses = await PollService.shared.loadResponses(participantIds: participantIds)
 
         isLoading = false
     }
 }
+
+// MARK: - Supporting Types
 
 struct ResponseItem: Identifiable {
     let id: UUID
@@ -156,6 +173,8 @@ struct GroupedResponses {
     let maybe: [ResponseItem]
     let unavailable: [ResponseItem]
 }
+
+// MARK: - ResponseRow
 
 struct ResponseRow: View {
     let item: ResponseItem

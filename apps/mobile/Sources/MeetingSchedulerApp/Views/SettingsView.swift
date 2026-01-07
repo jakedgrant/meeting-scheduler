@@ -9,200 +9,6 @@ struct SettingsView: View {
     @State var showProfileEdit = false
     @State var isSigningOut = false
 
-    var body: some View {
-        NavigationStack {
-            List {
-                // Profile Section
-                Section {
-                    Button {
-                        showProfileEdit = true
-                    } label: {
-                        HStack(spacing: 12) {
-                            if let avatarUrl = authService.profile?.avatarUrl,
-                               !avatarUrl.isEmpty,
-                               let url = URL(string: avatarUrl) {
-                                AsyncImage(url: url) { image in
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                } placeholder: {
-                                    Circle()
-                                        .fill(Color.blue.opacity(0.2))
-                                        .overlay {
-                                            Text(initials)
-                                                .font(.headline)
-                                                .foregroundStyle(.blue)
-                                        }
-                                }
-                                .frame(width: 50, height: 50)
-                                .clipShape(Circle())
-                            } else {
-                                Circle()
-                                    .fill(Color.blue.opacity(0.2))
-                                    .frame(width: 50, height: 50)
-                                    .overlay {
-                                        Text(initials)
-                                            .font(.headline)
-                                            .foregroundStyle(.blue)
-                                    }
-                            }
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(displayName)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                                Text(authService.currentUser?.email ?? "")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Spacer()
-
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(.secondary)
-                                .font(.caption)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-
-                // Subscription Section
-                Section("Subscription") {
-                    if purchaseService.hasProAccess {
-                        HStack {
-                            Label("Pro", systemImage: "star.fill")
-                                .foregroundStyle(.yellow)
-                            Spacer()
-                            Text("Active")
-                                .foregroundStyle(.green)
-                        }
-                    } else {
-                        Button {
-                            showPaywall = true
-                        } label: {
-                            HStack {
-                                Label("Upgrade to Pro", systemImage: "star")
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    Button("Restore Purchases") {
-                        restorePurchases()
-                    }
-                }
-
-                // Calendar Integration Section
-                Section("Calendar Integration") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Select calendar sources to check for conflicts")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        // Apple Calendar Toggle
-                        Toggle(isOn: Binding(
-                            get: { calendarService.appleCalendarEnabled },
-                            set: { enabled in
-                                Task {
-                                    await calendarService.setAppleCalendarEnabled(enabled)
-                                }
-                            }
-                        )) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "calendar")
-                                    .foregroundStyle(.blue)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Apple Calendar")
-                                        .font(.body)
-                                    Text("Local device calendar")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-
-                        // Google Calendar Toggle
-                        Toggle(isOn: Binding(
-                            get: { calendarService.googleCalendarEnabled },
-                            set: { enabled in
-                                Task {
-                                    await calendarService.setGoogleCalendarEnabled(enabled)
-                                }
-                            }
-                        )) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "globe")
-                                    .foregroundStyle(.red)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Google Calendar")
-                                        .font(.body)
-                                    if calendarService.googleCalendarEnabled {
-                                        Text("Connected")
-                                            .font(.caption)
-                                            .foregroundStyle(.green)
-                                    } else {
-                                        Text("Not connected")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        .disabled(calendarService.googleCalendarLoading)
-
-                        if calendarService.googleCalendarLoading {
-                            HStack {
-                                ProgressView()
-                                    .scaleEffect(0.8)
-                                Text("Checking Google Calendar connection...")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                // App Section
-                Section("App") {
-                    HStack {
-                        Text("Version")
-                        Spacer()
-                        Text("1.0.0")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                // Sign Out
-                Section {
-                    Button(role: .destructive) {
-                        signOut()
-                    } label: {
-                        HStack {
-                            Spacer()
-                            if isSigningOut {
-                                ProgressView()
-                            } else {
-                                Text("Sign Out")
-                            }
-                            Spacer()
-                        }
-                    }
-                    .disabled(isSigningOut)
-                }
-            }
-            .navigationTitle("Settings")
-            .sheet(isPresented: $showPaywall) {
-                PaywallView()
-            }
-            .sheet(isPresented: $showProfileEdit) {
-                ProfileEditView()
-            }
-        }
-    }
-
     private var displayName: String {
         authService.profile?.displayName ?? authService.currentUser?.email ?? "User"
     }
@@ -215,6 +21,127 @@ struct SettingsView: View {
         }
         return String(name.prefix(2)).uppercased()
     }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                profileSection
+                subscriptionSection
+                calendarIntegrationSection
+                appSection
+                signOutSection
+            }
+            .navigationTitle("Settings")
+            .sheet(isPresented: $showPaywall) {
+                PaywallView()
+            }
+            .sheet(isPresented: $showProfileEdit) {
+                ProfileEditView()
+            }
+        }
+    }
+
+    // MARK: - Sections
+
+    private var profileSection: some View {
+        Section {
+            Button {
+                showProfileEdit = true
+            } label: {
+                ProfileRow(
+                    avatarUrl: authService.profile?.avatarUrl,
+                    displayName: displayName,
+                    email: authService.currentUser?.email ?? "",
+                    initials: initials
+                )
+            }
+        }
+    }
+
+    private var subscriptionSection: some View {
+        Section("Subscription") {
+            if purchaseService.hasProAccess {
+                HStack {
+                    Label("Pro", systemImage: "star.fill")
+                        .foregroundStyle(.yellow)
+                    Spacer()
+                    Text("Active")
+                        .foregroundStyle(.green)
+                }
+            } else {
+                Button {
+                    showPaywall = true
+                } label: {
+                    HStack {
+                        Label("Upgrade to Pro", systemImage: "star")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Button("Restore Purchases") {
+                restorePurchases()
+            }
+        }
+    }
+
+    private var calendarIntegrationSection: some View {
+        Section("Calendar Integration") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Select calendar sources to check for conflicts")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                AppleCalendarToggle(calendarService: calendarService)
+                GoogleCalendarToggle(calendarService: calendarService)
+
+                if calendarService.googleCalendarLoading {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                        Text("Checking Google Calendar connection...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var appSection: some View {
+        Section("App") {
+            HStack {
+                Text("Version")
+                Spacer()
+                Text("1.0.0")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var signOutSection: some View {
+        Section {
+            Button(role: .destructive) {
+                signOut()
+            } label: {
+                HStack {
+                    Spacer()
+                    if isSigningOut {
+                        ProgressView()
+                    } else {
+                        Text("Sign Out")
+                    }
+                    Spacer()
+                }
+            }
+            .disabled(isSigningOut)
+        }
+    }
+
+    // MARK: - Actions
 
     private func signOut() {
         isSigningOut = true
@@ -237,6 +164,133 @@ struct SettingsView: View {
                 print("Restore failed: \(error)")
             }
         }
+    }
+}
+
+// MARK: - ProfileRow
+
+struct ProfileRow: View {
+    let avatarUrl: String?
+    let displayName: String
+    let email: String
+    let initials: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            avatarView
+            userInfo
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var avatarView: some View {
+        if let avatarUrl = avatarUrl,
+           !avatarUrl.isEmpty,
+           let url = URL(string: avatarUrl) {
+            AsyncImage(url: url) { image in
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } placeholder: {
+                initialsAvatar
+            }
+            .frame(width: 50, height: 50)
+            .clipShape(Circle())
+        } else {
+            initialsAvatar
+        }
+    }
+
+    private var initialsAvatar: some View {
+        Circle()
+            .fill(Color.blue.opacity(0.2))
+            .frame(width: 50, height: 50)
+            .overlay {
+                Text(initials)
+                    .font(.headline)
+                    .foregroundStyle(.blue)
+            }
+    }
+
+    private var userInfo: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(displayName)
+                .font(.headline)
+                .foregroundStyle(.primary)
+            Text(email)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - AppleCalendarToggle
+
+struct AppleCalendarToggle: View {
+    let calendarService: CalendarService
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { calendarService.appleCalendarEnabled },
+            set: { enabled in
+                Task {
+                    await calendarService.setAppleCalendarEnabled(enabled)
+                }
+            }
+        )) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .foregroundStyle(.blue)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Apple Calendar")
+                        .font(.body)
+                    Text("Local device calendar")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - GoogleCalendarToggle
+
+struct GoogleCalendarToggle: View {
+    let calendarService: CalendarService
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { calendarService.googleCalendarEnabled },
+            set: { enabled in
+                Task {
+                    await calendarService.setGoogleCalendarEnabled(enabled)
+                }
+            }
+        )) {
+            HStack(spacing: 8) {
+                Image(systemName: "globe")
+                    .foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Google Calendar")
+                        .font(.body)
+                    if calendarService.googleCalendarEnabled {
+                        Text("Connected")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("Not connected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .disabled(calendarService.googleCalendarLoading)
     }
 }
 

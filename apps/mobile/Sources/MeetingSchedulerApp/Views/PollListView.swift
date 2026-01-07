@@ -25,11 +25,10 @@ struct PollListView: View {
             .navigationTitle("My Polls")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    
                     Button("Join Poll", systemImage: "arrow.down.circle") {
                         showJoinByCode = true
                     }
-                    
+
                     Button("Create Poll", systemImage: "plus") {
                         handleCreatePoll()
                     }
@@ -42,7 +41,13 @@ struct PollListView: View {
                 PaywallView()
             }
             .sheet(isPresented: $showJoinByCode) {
-                joinByCodeSheet
+                JoinByCodeSheet(
+                    joinCode: $joinCode,
+                    joinError: $joinError,
+                    isJoining: $isJoining,
+                    onJoin: handleJoinByCode,
+                    onDismiss: dismissJoinSheet
+                )
             }
             .navigationDestination(item: $navigateToPoll) { pollId in
                 PollDetailView(pollId: pollId)
@@ -55,6 +60,8 @@ struct PollListView: View {
             }
         }
     }
+
+    // MARK: - Subviews
 
     private var emptyState: some View {
         ContentUnavailableView {
@@ -93,53 +100,12 @@ struct PollListView: View {
         }
     }
 
-    private var joinByCodeSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("ABC123", text: $joinCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.system(.body, design: .monospaced))
-                } header: {
-                    Text("Share Code")
-                } footer: {
-                    Text("Enter the 6-character code shared by the poll creator")
-                }
+    // MARK: - Actions
 
-                if let error = joinError {
-                    Section {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.footnote)
-                    }
-                }
-
-                Section {
-                    Button(action: handleJoinByCode) {
-                        if isJoining {
-                            ProgressView()
-                        } else {
-                            Text("Join Poll")
-                        }
-                    }
-                    .disabled(isJoining || joinCode.count != 6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
-            .navigationTitle("Join by Code")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") {
-                        showJoinByCode = false
-                        joinCode = ""
-                        joinError = nil
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
+    private func dismissJoinSheet() {
+        showJoinByCode = false
+        joinCode = ""
+        joinError = nil
     }
 
     private func handleJoinByCode() {
@@ -167,12 +133,10 @@ struct PollListView: View {
                 return
             }
 
-            // Close the sheet and navigate to the poll
             showJoinByCode = false
             joinCode = ""
             joinError = nil
             isJoining = false
-
             navigateToPoll = poll.id
         }
     }
@@ -188,6 +152,65 @@ struct PollListView: View {
         }
     }
 }
+
+// MARK: - JoinByCodeSheet
+
+struct JoinByCodeSheet: View {
+    @Binding var joinCode: String
+    @Binding var joinError: String?
+    @Binding var isJoining: Bool
+    let onJoin: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("ABC123", text: $joinCode)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .font(.system(.body, design: .monospaced))
+                } header: {
+                    Text("Share Code")
+                } footer: {
+                    Text("Enter the 6-character code shared by the poll creator")
+                }
+
+                if let error = joinError {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .font(.footnote)
+                    }
+                }
+
+                Section {
+                    Button(action: onJoin) {
+                        if isJoining {
+                            ProgressView()
+                        } else {
+                            Text("Join Poll")
+                        }
+                    }
+                    .disabled(isJoining || joinCode.count != 6)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .navigationTitle("Join by Code")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel", systemImage: "xmark") {
+                        onDismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+}
+
+// MARK: - PollRowView
 
 struct PollRowView: View {
     let poll: Poll
@@ -218,19 +241,10 @@ struct PollRowView: View {
     }
 }
 
+// MARK: - StatusBadge
+
 struct StatusBadge: View {
     let status: PollStatus
-
-    var body: some View {
-        Text(status.rawValue.capitalized)
-            .font(.caption)
-            .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(backgroundColor)
-            .foregroundStyle(foregroundColor)
-            .clipShape(Capsule())
-    }
 
     private var backgroundColor: Color {
         switch status {
@@ -248,6 +262,17 @@ struct StatusBadge: View {
         case .closed: return .orange
         case .archived: return .secondary
         }
+    }
+
+    var body: some View {
+        Text(status.rawValue.capitalized)
+            .font(.caption)
+            .fontWeight(.medium)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(backgroundColor)
+            .foregroundStyle(foregroundColor)
+            .clipShape(Capsule())
     }
 }
 

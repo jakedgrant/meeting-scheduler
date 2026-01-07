@@ -11,98 +11,12 @@ struct AuthView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
-
-                // Logo & Title
-                VStack(spacing: 8) {
-                    Image(systemName: "calendar.badge.clock")
-                        .font(.system(size: 60))
-                        .foregroundStyle(.blue)
-
-                    Text("Meeting Scheduler")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-
-                    Text("Find the perfect meeting time")
-                        .foregroundStyle(.secondary)
-                }
-
+                logoSection
                 Spacer()
-
-                // OAuth Buttons
-                VStack(spacing: 12) {
-                    Button(action: signInWithGoogle) {
-                        HStack {
-                            Image(systemName: "globe")
-                            Text("Continue with Google")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.gray.opacity(0.15))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isLoading)
-
-                    Button(action: signInWithApple) {
-                        HStack {
-                            Image(systemName: "apple.logo")
-                            Text("Continue with Apple")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(.black)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isLoading)
-                }
-
-                // Divider
-                HStack {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: 1)
-                    Text("or")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: 1)
-                }
-
-                // Magic Link
-                VStack(spacing: 12) {
-                    TextField("Email", text: $email)
-                        .textFieldStyle(.roundedBorder)
-                        .textContentType(.emailAddress)
-                        #if os(iOS)
-                        .keyboardType(.emailAddress)
-                        .autocapitalization(.none)
-                        #endif
-                        .disabled(isLoading)
-
-                    Button(action: signInWithMagicLink) {
-                        HStack {
-                            if isLoading {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            }
-                            Text(isLoading ? "Sending..." : "Send Magic Link")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(.blue)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                    }
-                    .disabled(isLoading || email.isEmpty)
-                }
-
-                if let error = errorMessage {
-                    Text(error)
-                        .foregroundStyle(.red)
-                        .font(.caption)
-                }
-
+                oauthButtons
+                divider
+                magicLinkSection
+                errorMessageView
                 Spacer()
             }
             .padding()
@@ -113,6 +27,106 @@ struct AuthView: View {
             }
         }
     }
+
+    // MARK: - Subviews
+
+    private var logoSection: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 60))
+                .foregroundStyle(.blue)
+
+            Text("Meeting Scheduler")
+                .font(.largeTitle)
+                .fontWeight(.bold)
+
+            Text("Find the perfect meeting time")
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var oauthButtons: some View {
+        VStack(spacing: 12) {
+            Button(action: signInWithGoogle) {
+                HStack {
+                    Image(systemName: "globe")
+                    Text("Continue with Google")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.gray.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isLoading)
+
+            Button(action: signInWithApple) {
+                HStack {
+                    Image(systemName: "apple.logo")
+                    Text("Continue with Apple")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(.black)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isLoading)
+        }
+    }
+
+    private var divider: some View {
+        HStack {
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(height: 1)
+            Text("or")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            Rectangle()
+                .fill(Color.gray.opacity(0.3))
+                .frame(height: 1)
+        }
+    }
+
+    private var magicLinkSection: some View {
+        VStack(spacing: 12) {
+            TextField("Email", text: $email)
+                .textFieldStyle(.roundedBorder)
+                .textContentType(.emailAddress)
+                #if os(iOS)
+                .keyboardType(.emailAddress)
+                .autocapitalization(.none)
+                #endif
+                .disabled(isLoading)
+
+            Button(action: signInWithMagicLink) {
+                HStack {
+                    if isLoading {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    }
+                    Text(isLoading ? "Sending..." : "Send Magic Link")
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(.blue)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(isLoading || email.isEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var errorMessageView: some View {
+        if let error = errorMessage {
+            Text(error)
+                .foregroundStyle(.red)
+                .font(.caption)
+        }
+    }
+
+    // MARK: - Actions
 
     private func signInWithGoogle() {
         isLoading = true
