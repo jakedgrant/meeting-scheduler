@@ -14,6 +14,7 @@ struct PollDetailView: View {
     @State var responses: [AvailabilityResponse] = []
     @State var myParticipant: PollParticipant?
     @State var localResponses: [UUID: AvailabilityStatus] = [:]
+    @State var calendarConflicts: Set<UUID> = []
     @State var isLoading = true
     @State var isSaving = false
     @State var showClosePollAlert = false
@@ -280,6 +281,7 @@ struct PollDetailView: View {
                             option: option,
                             responses: responsesForOption(option.id),
                             myResponse: localResponses[option.id],
+                            hasCalendarConflict: calendarConflicts.contains(option.id),
                             canRespond: myParticipant != nil && poll.status == .active,
                             onResponseChange: { status in
                                 localResponses[option.id] = status
@@ -375,6 +377,18 @@ struct PollDetailView: View {
                 let myResponses = responses.filter { $0.participantId == myParticipant.id }
                 for response in myResponses {
                     localResponses[response.timeOptionId] = response.status
+                }
+            }
+
+            // Check calendar conflicts if enabled
+            if CalendarService.shared.isEnabled && !timeOptions.isEmpty {
+                calendarConflicts = await CalendarService.shared.checkConflicts(for: timeOptions)
+
+                // Auto-mark conflicts as unavailable (only if no existing response)
+                for conflictId in calendarConflicts {
+                    if localResponses[conflictId] == nil {
+                        localResponses[conflictId] = .unavailable
+                    }
                 }
             }
         }
@@ -495,16 +509,30 @@ struct TimeOptionRow: View {
     let option: PollTimeOption
     let responses: ResponseSummary
     let myResponse: AvailabilityStatus?
+    let hasCalendarConflict: Bool
     let canRespond: Bool
     let onResponseChange: (AvailabilityStatus) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Date & Time
+            // Date & Time with Calendar Badge
             HStack {
-                VStack(alignment: .leading) {
-                    Text(option.startTime, style: .date)
-                        .font(.headline)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(option.startTime, style: .date)
+                            .font(.headline)
+
+                        if hasCalendarConflict {
+                            Label("Busy", systemImage: "calendar.badge.exclamationmark")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
+                    }
+
                     if option.isAllDay {
                         Text("All day")
                             .font(.subheadline)

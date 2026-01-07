@@ -4,6 +4,7 @@ import Shared
 struct SettingsView: View {
     @State var authService = AuthService.shared
     @State var purchaseService = PurchaseService.shared
+    @State var calendarService = CalendarService.shared
     @State var showPaywall = false
     @State var showProfileEdit = false
     @State var isSigningOut = false
@@ -91,6 +92,77 @@ struct SettingsView: View {
                     Button("Restore Purchases") {
                         restorePurchases()
                     }
+                }
+
+                // Calendar Integration Section
+                Section("Calendar Integration") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Select calendar sources to check for conflicts")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        // Apple Calendar Toggle
+                        Toggle(isOn: Binding(
+                            get: { calendarService.appleCalendarEnabled },
+                            set: { enabled in
+                                Task {
+                                    await calendarService.setAppleCalendarEnabled(enabled)
+                                }
+                            }
+                        )) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "calendar")
+                                    .foregroundStyle(.blue)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Apple Calendar")
+                                        .font(.body)
+                                    Text("Local device calendar")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        // Google Calendar Toggle
+                        Toggle(isOn: Binding(
+                            get: { calendarService.googleCalendarEnabled },
+                            set: { enabled in
+                                Task {
+                                    await calendarService.setGoogleCalendarEnabled(enabled)
+                                }
+                            }
+                        )) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "globe")
+                                    .foregroundStyle(.red)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Google Calendar")
+                                        .font(.body)
+                                    if calendarService.googleCalendarEnabled {
+                                        Text("Connected")
+                                            .font(.caption)
+                                            .foregroundStyle(.green)
+                                    } else {
+                                        Text("Not connected")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                        .disabled(calendarService.googleCalendarLoading)
+
+                        if calendarService.googleCalendarLoading {
+                            HStack {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                                Text("Checking Google Calendar connection...")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
                 }
 
                 // App Section

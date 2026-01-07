@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { user, profile, updateProfile } from '$lib/stores/auth';
+	import { calendarEnabled, calendarLoading, enableCalendarIntegration, disableCalendarIntegration } from '$lib/stores/calendar';
 
 	let displayName = $state('');
 	let avatarUrl = $state('');
@@ -8,6 +9,7 @@
 	let loading = $state(false);
 	let errorMessage = $state('');
 	let successMessage = $state('');
+	let calendarError = $state('');
 
 	// Common timezones for the dropdown
 	const timezones = [
@@ -69,6 +71,35 @@
 			loading = false;
 		}
 	}
+
+	async function handleCalendarToggle(enabled: boolean) {
+		calendarError = '';
+		successMessage = '';
+
+		try {
+			if (enabled) {
+				await enableCalendarIntegration();
+				successMessage = 'Calendar integration enabled!';
+			} else {
+				await disableCalendarIntegration();
+				successMessage = 'Calendar integration disabled';
+			}
+		} catch (err) {
+			const errorMsg = err instanceof Error ? err.message : 'Failed to update calendar settings';
+
+			// Handle specific error cases
+			if (errorMsg === 'Calendar scope request was cancelled') {
+				calendarError = 'Calendar integration setup was cancelled. Please try again when ready.';
+			} else if (errorMsg.includes('Unauthorized')) {
+				calendarError = 'Authorization failed. Please try signing in again.';
+			} else {
+				calendarError = errorMsg;
+			}
+
+			// Reset the toggle on error
+			calendarEnabled.set(!enabled);
+		}
+	}
 </script>
 
 <div class="settings-container">
@@ -127,6 +158,28 @@
 					{/each}
 				</select>
 				<small class="help-text">Your local timezone for meeting scheduling</small>
+			</div>
+
+			<div class="divider"></div>
+
+			<div class="form-group">
+				<div class="calendar-header">
+					<label for="calendar-toggle">Calendar Integration</label>
+					<input
+						id="calendar-toggle"
+						type="checkbox"
+						checked={$calendarEnabled}
+						onchange={(e) => handleCalendarToggle(e.currentTarget.checked)}
+						disabled={$calendarLoading || loading}
+					/>
+				</div>
+				<small class="help-text">Automatically mark times when you have calendar conflicts</small>
+				{#if $calendarEnabled}
+					<div class="calendar-status">✓ Connected to Google Calendar</div>
+				{/if}
+				{#if calendarError}
+					<div class="calendar-error">{calendarError}</div>
+				{/if}
 			</div>
 
 			<div class="form-actions">
@@ -283,5 +336,52 @@
 	.save-button:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.divider {
+		border-top: 1px solid #e0e0e0;
+		margin: 0.5rem 0;
+	}
+
+	.calendar-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: 1rem;
+	}
+
+	.calendar-header label {
+		flex: 1;
+		margin: 0;
+	}
+
+	input[type='checkbox'] {
+		width: 20px;
+		height: 20px;
+		cursor: pointer;
+		flex-shrink: 0;
+	}
+
+	input[type='checkbox']:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+
+	.calendar-status {
+		margin-top: 0.5rem;
+		padding: 0.5rem;
+		background: #efe;
+		color: #060;
+		border-radius: 4px;
+		font-size: 0.875rem;
+	}
+
+	.calendar-error {
+		margin-top: 0.5rem;
+		padding: 0.5rem;
+		background: #fee;
+		color: #c00;
+		border-radius: 4px;
+		font-size: 0.875rem;
 	}
 </style>

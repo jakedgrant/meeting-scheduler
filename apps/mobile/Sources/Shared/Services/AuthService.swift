@@ -96,6 +96,33 @@ public final class AuthService: NSObject {
         )
     }
 
+    /// Sign in with Google and request calendar access
+    /// Returns true if calendar tokens were successfully obtained
+    public func authorizeGoogleCalendar() async throws -> Bool {
+        let session = try await supabase.auth.signInWithOAuth(
+            provider: .google,
+            redirectTo: URL(string: "\(Config.appScheme)://auth/callback"),
+            scopes: "openid email profile https://www.googleapis.com/auth/calendar.readonly",
+            queryParams: [
+                (name: "access_type", value: "offline"),
+                (name: "prompt", value: "consent")
+            ]
+        )
+
+        // Persist calendar tokens if present
+        if let providerToken = session.providerToken,
+           let providerRefreshToken = session.providerRefreshToken {
+            await persistCalendarTokens(
+                accessToken: providerToken,
+                refreshToken: providerRefreshToken,
+                userId: session.user.id
+            )
+            return true
+        }
+
+        return false
+    }
+
     public func signInWithApple() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             self.appleSignInContinuation = continuation
@@ -176,9 +203,41 @@ public final class AuthService: NSObject {
 
     public func handleDeepLink(url: URL) async {
         do {
-            try await supabase.auth.session(from: url)
+            let session = try await supabase.auth.session(from: url)
+
+            // If OAuth callback includes provider tokens (Google Calendar), persist them
+            if let providerToken = session.providerToken,
+               let providerRefreshToken = session.providerRefreshToken {
+                await persistCalendarTokens(
+                    accessToken: providerToken,
+                    refreshToken: providerRefreshToken,
+                    userId: session.user.id
+                )
+            }
         } catch {
             print("Failed to handle deep link: \(error)")
+        }
+    }
+
+    private func persistCalendarTokens(accessToken: String, refreshToken: String, userId: UUID) async {
+        do {
+            let expiresAt = Date.now.addingTimeInterval(3600).ISO8601Format()
+
+            var updates: [String: AnyJSON] = [:]
+            updates["google_calendar_access_token"] = .string(accessToken)
+            updates["google_calendar_refresh_token"] = .string(refreshToken)
+            updates["google_calendar_token_expires_at"] = .string(expiresAt)
+            updates["calendar_integration_enabled"] = .bool(true)
+
+            try await supabase
+                .from("profiles")
+                .update(updates)
+                .eq("id", value: userId.uuidString)
+                .execute()
+
+            print("✓ Calendar tokens persisted successfully")
+        } catch {
+            print("Failed to persist calendar tokens: \(error)")
         }
     }
 }

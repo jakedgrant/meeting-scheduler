@@ -1,12 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { initAuth, authLoading } from '$lib/stores/auth';
+	import { initCalendar, watchCalendarToken } from '$lib/stores/calendar';
 	import favicon from '$lib/assets/favicon.svg';
 
 	let { children } = $props();
 
-	onMount(() => {
-		initAuth();
+	onMount(async () => {
+		await initAuth();
+		await initCalendar();
+		watchCalendarToken();
 	});
 </script>
 
