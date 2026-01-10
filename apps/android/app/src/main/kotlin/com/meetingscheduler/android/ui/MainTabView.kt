@@ -5,39 +5,88 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.navigation.compose.rememberNavController
 import com.meetingscheduler.android.services.AuthService
+import com.meetingscheduler.android.services.CalendarService
+import com.meetingscheduler.android.services.PollService
+import com.meetingscheduler.android.services.PurchaseService
 
-sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    object Polls : Screen("polls", "Polls", Icons.Default.List)
-    object Settings : Screen("settings", "Settings", Icons.Default.Settings)
-}
-
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainTabView(authService: AuthService) {
-    var selectedScreen by remember { mutableStateOf<Screen>(Screen.Polls) }
+fun MainTabView(
+    authService: AuthService,
+    pollService: PollService,
+    calendarService: CalendarService,
+    purchaseService: PurchaseService?
+) {
+    var selectedTab by remember { mutableStateOf(0) }
 
     Scaffold(
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(
-                    selected = selectedScreen == Screen.Polls,
-                    onClick = { selectedScreen = Screen.Polls },
-                    icon = { Icon(Screen.Polls.icon, contentDescription = Screen.Polls.title) },
-                    label = { Text(Screen.Polls.title) }
+                    icon = { Icon(Icons.Default.List, "Polls") },
+                    label = { Text("Polls") },
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 }
                 )
                 NavigationBarItem(
-                    selected = selectedScreen == Screen.Settings,
-                    onClick = { selectedScreen = Screen.Settings },
-                    icon = { Icon(Screen.Settings.icon, contentDescription = Screen.Settings.title) },
-                    label = { Text(Screen.Settings.title) }
+                    icon = { Icon(Icons.Default.Settings, "Settings") },
+                    label = { Text("Settings") },
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 }
                 )
             }
         }
-    ) { paddingValues ->
-        when (selectedScreen) {
-            Screen.Polls -> PollListView(authService, paddingValues)
-            Screen.Settings -> SettingsView(authService, paddingValues)
+    ) { padding ->
+        when (selectedTab) {
+            0 -> {
+                // Polls Tab with Navigation
+                val pollNavController = rememberNavController()
+                PollNavHost(
+                    navController = pollNavController,
+                    authService = authService,
+                    pollService = pollService,
+                    calendarService = calendarService,
+                    purchaseService = purchaseService
+                )
+            }
+            1 -> {
+                // Settings Tab with Navigation
+                val settingsNavController = rememberNavController()
+                androidx.navigation.compose.NavHost(
+                    navController = settingsNavController,
+                    startDestination = "settings"
+                ) {
+                    androidx.navigation.compose.composable("settings") {
+                        SettingsView(
+                            authService = authService,
+                            purchaseService = purchaseService,
+                            calendarService = calendarService,
+                            onNavigateToProfileEdit = {
+                                settingsNavController.navigate("profile_edit")
+                            },
+                            onNavigateToPaywall = {
+                                settingsNavController.navigate("paywall")
+                            }
+                        )
+                    }
+
+                    androidx.navigation.compose.composable("profile_edit") {
+                        ProfileEditView(
+                            authService = authService,
+                            onDismiss = { settingsNavController.popBackStack() }
+                        )
+                    }
+
+                    androidx.navigation.compose.composable("paywall") {
+                        PaywallView(
+                            purchaseService = purchaseService,
+                            onDismiss = { settingsNavController.popBackStack() }
+                        )
+                    }
+                }
+            }
         }
     }
 }

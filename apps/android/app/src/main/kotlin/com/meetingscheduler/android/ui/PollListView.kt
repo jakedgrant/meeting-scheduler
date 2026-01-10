@@ -6,159 +6,242 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import com.meetingscheduler.android.models.Poll
-import com.meetingscheduler.android.models.PollStatus
-import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.PollService
+import com.meetingscheduler.android.services.PurchaseService
 import kotlinx.coroutines.launch
+import kotlinx.datetime.toJavaInstant
+import java.text.SimpleDateFormat
+import java.util.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PollListView(authService: AuthService, paddingValues: PaddingValues) {
-    val pollService = remember { PollService.getInstance(authService, rememberCoroutineScope()) }
-    var showCreatePoll by remember { mutableStateOf(false) }
+fun PollListView(
+    pollService: PollService,
+    purchaseService: PurchaseService?,
+    onNavigateToPoll: (String) -> Unit,
+    onNavigateToCreatePoll: () -> Unit,
+    onNavigateToPaywall: () -> Unit
+) {
     var showJoinByCode by remember { mutableStateOf(false) }
+    var joinCode by remember { mutableStateOf("") }
+    var joinError by remember { mutableStateOf<String?>(null) }
+    var isJoining by remember { mutableStateOf(false) }
+    var navigateToPollId by remember { mutableStateOf<String?>(null) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         pollService.loadMyPolls()
     }
 
+    LaunchedEffect(navigateToPollId) {
+        navigateToPollId?.let { pollId ->
+            onNavigateToPoll(pollId)
+            navigateToPollId = null
+        }
+    }
+
+    fun handleCreatePoll() {
+        scope.launch {
+            val canCreate = pollService.canCreatePoll()
+            if (canCreate) {
+                onNavigateToCreatePoll()
+            } else {
+                onNavigateToPaywall()
+            }
+        }
+    }
+
+    fun handleJoinByCode() {
+        scope.launch {
+            isJoining = true
+            joinError = null
+
+            val code = joinCode.trim().uppercase()
+
+            if (code.length != 6) {
+                joinError = "Code must be 6 characters"
+                isJoining = false
+                return@launch
+            }
+
+            val poll = pollService.loadPollByCode(code)
+
+            if (poll == null) {
+                joinError = "Poll not found. Please check the code."
+                isJoining = false
+                return@launch
+            }
+
+            if (poll.status == com.meetingscheduler.android.models.PollStatus.CLOSED ||
+                poll.status == com.meetingscheduler.android.models.PollStatus.ARCHIVED
+            ) {
+                joinError = "This poll is closed and cannot accept new participants."
+                isJoining = false
+                return@launch
+            }
+
+            showJoinByCode = false
+            joinCode = ""
+            joinError = null
+            isJoining = false
+            navigateToPollId = poll.id
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Polls") },
+                title = { Text("My Polls") },
                 actions = {
                     IconButton(onClick = { showJoinByCode = true }) {
-                        Icon(Icons.Default.Add, contentDescription = "Join by Code")
+                        Icon(Icons.Default.Download, "Join Poll")
+                    }
+                    IconButton(onClick = { handleCreatePoll() }) {
+                        Icon(Icons.Default.Add, "Create Poll")
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showCreatePoll = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Create Poll")
-            }
-        },
-        modifier = Modifier.padding(paddingValues)
+        }
     ) { padding ->
-        if (pollService.isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else if (pollService.myPolls.isEmpty()) {
-            EmptyPollsView(
-                onCreatePoll = { showCreatePoll = true },
-                onJoinByCode = { showJoinByCode = true },
-                modifier = Modifier.padding(padding)
-            )
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (pollService.createdPolls.isNotEmpty()) {
-                    item {
-                        Text(
-                            "My Polls",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-                    items(pollService.createdPolls) { poll ->
-                        PollCard(poll = poll, onClick = { /* Navigate to detail */ })
+        SwipeRefresh(
+            state = rememberSwipeRefreshState(isRefreshing),
+            onRefresh = {
+                scope.launch {
+                    isRefreshing = true
+                    pollService.loadMyPolls()
+                    isRefreshing = false
+                }
+            },
+            modifier = Modifier.padding(padding)
+        ) {
+            when {
+                pollService.isLoading && pollService.createdPolls.isEmpty() && pollService.joinedPolls.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
                     }
                 }
 
-                if (pollService.joinedPolls.isNotEmpty()) {
-                    item {
-                        Text(
-                            "Polls I Joined",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.padding(vertical = 8.dp)
-                        )
-                    }
-                    items(pollService.joinedPolls) { poll ->
-                        PollCard(poll = poll, onClick = { /* Navigate to detail */ })
+                pollService.createdPolls.isEmpty() && pollService.joinedPolls.isEmpty() -> {
+                    EmptyPollsView(onCreatePoll = { handleCreatePoll() })
+                }
+
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        if (pollService.createdPolls.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "My Polls",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+
+                            items(pollService.createdPolls) { poll ->
+                                PollRowView(
+                                    poll = poll,
+                                    onClick = { onNavigateToPoll(poll.id) }
+                                )
+                            }
+                        }
+
+                        if (pollService.joinedPolls.isNotEmpty()) {
+                            item {
+                                Spacer(Modifier.height(16.dp))
+                                Text(
+                                    "Polls I Joined",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                )
+                            }
+
+                            items(pollService.joinedPolls) { poll ->
+                                PollRowView(
+                                    poll = poll,
+                                    onClick = { onNavigateToPoll(poll.id) }
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    if (showCreatePoll) {
-        // TODO: Show CreatePollView as a dialog or navigate
-        showCreatePoll = false
-    }
-
+    // Join by Code Sheet
     if (showJoinByCode) {
-        JoinByCodeDialog(
-            onDismiss = { showJoinByCode = false },
-            onJoin = { code ->
-                scope.launch {
-                    val poll = pollService.loadPollByCode(code)
-                    if (poll != null) {
-                        // Navigate to poll detail
-                    }
-                    showJoinByCode = false
-                }
+        JoinByCodeSheet(
+            joinCode = joinCode,
+            joinError = joinError,
+            isJoining = isJoining,
+            onCodeChange = { joinCode = it },
+            onJoin = { handleJoinByCode() },
+            onDismiss = {
+                showJoinByCode = false
+                joinCode = ""
+                joinError = null
             }
         )
     }
 }
 
 @Composable
-fun EmptyPollsView(
-    onCreatePoll: () -> Unit,
-    onJoinByCode: () -> Unit,
-    modifier: Modifier = Modifier
-) {
+fun EmptyPollsView(onCreatePoll: () -> Unit) {
     Box(
-        modifier = modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
         ) {
+            Icon(
+                Icons.Default.Add,
+                null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
             Text(
-                "No polls yet",
+                "No Polls Yet",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
+
             Text(
-                "Create a poll or join one with a code",
+                "Create your first poll to start scheduling meetings.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onCreatePoll) {
-                    Text("Create Poll")
-                }
-                OutlinedButton(onClick = onJoinByCode) {
-                    Text("Join by Code")
-                }
+
+            Button(onClick = onCreatePoll) {
+                Text("Create Poll")
             }
         }
     }
 }
 
 @Composable
-fun PollCard(poll: Poll, onClick: () -> Unit) {
+fun PollRowView(poll: Poll, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -166,63 +249,95 @@ fun PollCard(poll: Poll, onClick: () -> Unit) {
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text(
-                text = poll.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    poll.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                StatusBadge(poll.status)
+            }
+
             poll.description?.let { desc ->
                 Text(
-                    text = desc,
+                    desc,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2
                 )
             }
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AssistChip(
-                    onClick = {},
-                    label = { Text(poll.status.name) }
-                )
-                poll.location?.let { loc ->
-                    AssistChip(
-                        onClick = {},
-                        label = { Text(loc) }
-                    )
-                }
-            }
+
+            val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+            Text(
+                dateFormat.format(Date.from(poll.createdAt.toJavaInstant())),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun JoinByCodeDialog(onDismiss: () -> Unit, onJoin: (String) -> Unit) {
-    var code by remember { mutableStateOf("") }
-
+fun JoinByCodeSheet(
+    joinCode: String,
+    joinError: String?,
+    isJoining: Boolean,
+    onCodeChange: (String) -> Unit,
+    onJoin: () -> Unit,
+    onDismiss: () -> Unit
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Join Poll") },
+        title = { Text("Join by Code") },
         text = {
-            OutlinedTextField(
-                value = code,
-                onValueChange = { code = it.uppercase() },
-                label = { Text("Poll Code") },
-                singleLine = true
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Enter the 6-character code shared by the poll creator")
+
+                OutlinedTextField(
+                    value = joinCode,
+                    onValueChange = { if (it.length <= 6) onCodeChange(it.uppercase()) },
+                    label = { Text("Share Code") },
+                    placeholder = { Text("ABC123") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    enabled = !isJoining,
+                    isError = joinError != null
+                )
+
+                joinError?.let { error ->
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
         },
         confirmButton = {
-            TextButton(
-                onClick = { onJoin(code) },
-                enabled = code.isNotBlank()
+            Button(
+                onClick = onJoin,
+                enabled = joinCode.length == 6 && !isJoining
             ) {
-                Text("Join")
+                if (isJoining) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Text("Join Poll")
+                }
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = onDismiss, enabled = !isJoining) {
                 Text("Cancel")
             }
         }

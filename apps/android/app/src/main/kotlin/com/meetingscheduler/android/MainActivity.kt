@@ -10,13 +10,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.meetingscheduler.android.services.AuthService
+import com.meetingscheduler.android.services.CalendarService
+import com.meetingscheduler.android.services.PollService
 import com.meetingscheduler.android.services.PurchaseService
 import com.meetingscheduler.android.ui.ContentView
 import com.meetingscheduler.android.ui.theme.MeetingSchedulerTheme
 
 class MainActivity : ComponentActivity() {
     private lateinit var authService: AuthService
-    private lateinit var purchaseService: PurchaseService
+    private lateinit var pollService: PollService
+    private lateinit var calendarService: CalendarService
+    private var purchaseService: PurchaseService? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,7 +28,13 @@ class MainActivity : ComponentActivity() {
 
         // Initialize services
         authService = AuthService.getInstance(this, lifecycleScope)
-        purchaseService = PurchaseService.getInstance(application, lifecycleScope)
+        pollService = PollService.getInstance(authService, lifecycleScope)
+        calendarService = CalendarService.getInstance(this, authService, lifecycleScope)
+        try {
+            purchaseService = PurchaseService.getInstance(application, lifecycleScope)
+        } catch (e: Exception) {
+            println("Failed to initialize PurchaseService: ${e.message}")
+        }
 
         setContent {
             MeetingSchedulerTheme {
@@ -32,7 +42,12 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ContentView(authService = authService)
+                    ContentView(
+                        authService = authService,
+                        pollService = pollService,
+                        calendarService = calendarService,
+                        purchaseService = purchaseService
+                    )
                 }
             }
         }
