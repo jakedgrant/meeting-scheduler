@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 android {
@@ -21,13 +23,48 @@ android {
         }
     }
 
+    signingConfigs {
+        // Create release signing config
+        // TODO: Update with your actual keystore path and credentials
+        create("release") {
+            // For development, you can use debug keystore
+            // For production, create a release keystore using:
+            // keytool -genkey -v -keystore meeting-scheduler-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias meeting-scheduler
+
+            // Option 1: Use environment variables (recommended for CI/CD)
+            storeFile = System.getenv("KEYSTORE_FILE")?.let { file(it) }
+            storePassword = System.getenv("KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("KEY_ALIAS")
+            keyPassword = System.getenv("KEY_PASSWORD")
+
+            // Option 2: Use gradle.properties (add to .gitignore)
+            // storeFile = file(project.findProperty("KEYSTORE_FILE") as String? ?: "debug.keystore")
+            // storePassword = project.findProperty("KEYSTORE_PASSWORD") as String?
+            // keyAlias = project.findProperty("KEY_ALIAS") as String?
+            // keyPassword = project.findProperty("KEY_PASSWORD") as String?
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+
+            // Sign with release config when credentials are available
+            signingConfig = if (System.getenv("KEYSTORE_FILE") != null) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
         }
     }
 
@@ -104,6 +141,19 @@ dependencies {
 
     // Preferences DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    // Image Loading
+    implementation("io.coil-kt:coil-compose:2.5.0")
+
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-crashlytics-ktx")
+
+    // Accompanist (for SwipeRefresh and other utilities)
+    implementation("com.google.accompanist:accompanist-swiperefresh:0.32.0")
+    implementation("com.google.accompanist:accompanist-permissions:0.32.0")
+    implementation("com.google.accompanist:accompanist-systemuicontroller:0.32.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
