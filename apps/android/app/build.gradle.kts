@@ -109,7 +109,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.6")
 
     // Supabase
-    implementation(platform("io.github.jan-tennert.supabase:bom:2.0.0"))
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.3.0"))
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:realtime-kt")
@@ -123,8 +123,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.5.0")
 
     // RevenueCat
-    implementation("com.revenuecat.purchases:purchases:7.0.0")
-    implementation("com.revenuecat.purchases:purchases-ui:7.0.0")
+    implementation("com.revenuecat.purchases:purchases:9.1.0")
 
     // Google Auth
     implementation("com.google.android.gms:play-services-auth:20.7.0")
