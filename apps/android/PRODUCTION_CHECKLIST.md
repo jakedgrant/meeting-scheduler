@@ -22,30 +22,30 @@ This guide will help you take the Meeting Scheduler Android app from development
 ### Install Android Studio
 **iOS Equivalent:** Xcode
 
-- [ ] Download Android Studio from https://developer.android.com/studio
-- [ ] Install Android Studio (similar to installing Xcode)
-- [ ] During setup, ensure these components are installed:
-  - [ ] Android SDK (like iOS SDK)
-  - [ ] Android SDK Platform-Tools
-  - [ ] Android Emulator (like iOS Simulator)
-  - [ ] Android Virtual Device (AVD)
+- [x] Download Android Studio from https://developer.android.com/studio
+- [x] Install Android Studio (similar to installing Xcode)
+- [x] During setup, ensure these components are installed:
+  - [x] Android SDK (like iOS SDK)
+  - [x] Android SDK Platform-Tools
+  - [x] Android Emulator (like iOS Simulator)
+  - [x] Android Virtual Device (AVD)
 
 ### Open the Project
 
-- [ ] Open Android Studio
-- [ ] Select "Open an Existing Project"
-- [ ] Navigate to `/home/user/meeting-scheduler/apps/android`
-- [ ] Wait for Gradle sync to complete (similar to Swift Package Manager resolution)
+- [x] Open Android Studio
+- [x] Select "Open an Existing Project"
+- [x] Navigate to `/home/user/meeting-scheduler/apps/android`
+- [x] Wait for Gradle sync to complete (similar to Swift Package Manager resolution)
 
 ### Configure Android SDK
 
 **iOS Equivalent:** Setting deployment targets in Xcode
 
-- [ ] Open `File > Project Structure` (or `Cmd + ;` on Mac)
-- [ ] Under "Project", set:
-  - [ ] Compile SDK: 34 (Android 14)
-  - [ ] Build Tools Version: Latest
-- [ ] Under "Modules > app", verify:
+- [x] Open `File > Project Structure` (or `Cmd + ;` on Mac)
+- [x] Under "Project", set:
+  - [x] Compile SDK: 34 (Android 14)
+  - [x] Build Tools Version: Latest
+- [x] Under "Modules > app", verify:
   - [ ] Minimum SDK: 26 (Android 8.0)
   - [ ] Target SDK: 34
   - [ ] Source Compatibility: Java 17
@@ -55,14 +55,14 @@ This guide will help you take the Meeting Scheduler Android app from development
 
 **iOS Equivalent:** iOS Simulator
 
-- [ ] Open AVD Manager: `Tools > Device Manager`
-- [ ] Click "Create Virtual Device"
-- [ ] Select a phone (recommend Pixel 6 or Pixel 7)
-- [ ] Choose system image:
-  - [ ] Select "Tiramisu" (API 33) or "UpsideDownCake" (API 34)
-  - [ ] Download if needed
-- [ ] Click "Finish"
-- [ ] Test by clicking the play button next to your AVD
+- [x] Open AVD Manager: `Tools > Device Manager`
+- [x] Click "Create Virtual Device"
+- [x] Select a phone (recommend Pixel 6 or Pixel 7)
+- [x] Choose system image:
+  - [x] Select "Tiramisu" (API 33) or "UpsideDownCake" (API 34)
+  - [x] Download if needed
+- [x] Click "Finish"
+- [x] Test by clicking the play button next to your AVD
 
 ### Connect Physical Device (Recommended)
 
