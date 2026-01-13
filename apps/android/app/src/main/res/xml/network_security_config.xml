@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext traffic for local development -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Android emulator localhost alias (for both Supabase:54321 and Web:5173) -->
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <!-- Localhost -->
+        <domain includeSubdomains="true">localhost</domain>
+        <!-- Add your Mac's IP address if testing on physical device -->
+        <!-- <domain includeSubdomains="true">192.168.1.XXX</domain> -->
+    </domain-config>
+
+    <!-- Production domains use HTTPS only -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">supabase.co</domain>
+    </domain-config>
+</network-security-config>

@@ -18,9 +18,12 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.*
 import java.util.*
 
+private val currentSystemTime: Instant
+    get() = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+
 data class TimeOption(
     val id: String = UUID.randomUUID().toString(),
-    var date: LocalDate = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date,
+    var date: LocalDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date,
     var startTime: LocalTime = LocalTime(9, 0),
     var endTime: LocalTime = LocalTime(10, 0)
 )
@@ -41,8 +44,8 @@ fun CreatePollView(
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // Date range fields
-    var rangeStartDate by remember { mutableStateOf(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date) }
-    var rangeEndDate by remember { mutableStateOf(Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date) }
+    var rangeStartDate by remember { mutableStateOf(currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date) }
+    var rangeEndDate by remember { mutableStateOf(currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date) }
     var rangeStartTime by remember { mutableStateOf(LocalTime(9, 0)) }
     var rangeEndTime by remember { mutableStateOf(LocalTime(10, 0)) }
 
@@ -88,7 +91,7 @@ fun CreatePollView(
                                             }
                                         }
 
-                                        Triple(start, end, isAllDay)
+                                        PollService.TimeOptionInput(start, end, isAllDay)
                                     }
 
                                     pollService.addTimeOptions(poll.id, options)

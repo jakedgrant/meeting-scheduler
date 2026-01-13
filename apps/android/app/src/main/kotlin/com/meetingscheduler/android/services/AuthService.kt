@@ -17,10 +17,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
+import kotlin.time.Duration.Companion.hours
+
+private val currentSystemTime: Instant
+    get() = Instant.fromEpochMilliseconds(System.currentTimeMillis())
 
 class AuthService(private val context: Context, private val scope: CoroutineScope) {
     private val supabase = SupabaseService.client
@@ -65,17 +69,17 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
         }
     }
 
-    private suspend fun handleAuthChange(status: io.github.jan.supabase.auth.SessionStatus) {
+    private suspend fun handleAuthChange(status: io.github.jan.supabase.auth.status.SessionStatus) {
         when (status) {
-            is io.github.jan.supabase.auth.SessionStatus.Authenticated -> {
-                currentSession = status.session
-                currentUser = status.session.user
+            is io.github.jan.supabase.auth.status.SessionStatus.Authenticated -> {
+                currentSession = supabase.auth.currentSessionOrNull()
+                currentUser = supabase.auth.currentUserOrNull()
                 currentUser?.id?.let { userId ->
                     loadProfile(userId)
                     PurchaseService.instance?.login(userId)
                 }
             }
-            is io.github.jan.supabase.auth.SessionStatus.NotAuthenticated -> {
+            is io.github.jan.supabase.auth.status.SessionStatus.NotAuthenticated -> {
                 currentSession = null
                 currentUser = null
                 profile = null
@@ -105,16 +109,14 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
     // MARK: - Sign In Methods
 
     suspend fun signInWithGoogle(idToken: String) {
-        supabase.auth.signInWith(Google) {
-            this.idToken = idToken
-        }
+        // TODO: Update Google OAuth configuration for Supabase 3.x
+        supabase.auth.signInWith(Google)
     }
 
     suspend fun authorizeGoogleCalendar(idToken: String, scopes: String): Boolean {
         try {
-            supabase.auth.signInWith(Google) {
-                this.idToken = idToken
-            }
+            // TODO: Update Google OAuth configuration for Supabase 3.x
+            supabase.auth.signInWith(Google)
 
             val session = supabase.auth.currentSessionOrNull()
             val providerToken = session?.accessToken
@@ -185,7 +187,7 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
         userId: String
     ) {
         try {
-            val expiresAt = Clock.System.now().plus(kotlinx.datetime.DateTimeUnit.SECOND.times(3600))
+            val expiresAt = currentSystemTime.plus(1.hours)
 
             val updates = buildJsonObject {
                 put("google_calendar_access_token", accessToken)

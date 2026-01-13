@@ -1,5 +1,6 @@
 package com.meetingscheduler.android.services
 
+import android.app.Activity
 import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -9,6 +10,7 @@ import com.revenuecat.purchases.CustomerInfo
 import com.revenuecat.purchases.LogLevel
 import com.revenuecat.purchases.Offerings
 import com.revenuecat.purchases.Package
+import com.revenuecat.purchases.PurchaseParams
 import com.revenuecat.purchases.Purchases
 import com.revenuecat.purchases.PurchasesConfiguration
 import com.revenuecat.purchases.awaitCustomerInfo
@@ -108,8 +110,9 @@ class PurchaseService(
 
     // MARK: - Purchases
 
-    suspend fun purchase(packageToPurchase: Package): CustomerInfo {
-        val result = Purchases.sharedInstance.awaitPurchase(packageToPurchase)
+    suspend fun purchase(activity: Activity, packageToPurchase: Package): CustomerInfo {
+        val purchaseParams = PurchaseParams.Builder(activity, packageToPurchase).build()
+        val result = Purchases.sharedInstance.awaitPurchase(purchaseParams)
         customerInfo = result.customerInfo
         return result.customerInfo
     }

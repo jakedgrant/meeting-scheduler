@@ -5,6 +5,8 @@ import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
@@ -54,11 +56,11 @@ fun MainTabView(
             1 -> {
                 // Settings Tab with Navigation
                 val settingsNavController = rememberNavController()
-                androidx.navigation.compose.NavHost(
+                NavHost(
                     navController = settingsNavController,
                     startDestination = "settings"
                 ) {
-                    androidx.navigation.compose.composable("settings") {
+                    composable("settings") {
                         SettingsView(
                             authService = authService,
                             purchaseService = purchaseService,
@@ -72,14 +74,14 @@ fun MainTabView(
                         )
                     }
 
-                    androidx.navigation.compose.composable("profile_edit") {
+                    composable("profile_edit") {
                         ProfileEditView(
                             authService = authService,
                             onDismiss = { settingsNavController.popBackStack() }
                         )
                     }
 
-                    androidx.navigation.compose.composable("paywall") {
+                    composable("paywall") {
                         PaywallView(
                             purchaseService = purchaseService,
                             onDismiss = { settingsNavController.popBackStack() }

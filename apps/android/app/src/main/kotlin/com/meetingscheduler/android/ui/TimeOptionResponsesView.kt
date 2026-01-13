@@ -20,9 +20,14 @@ import com.meetingscheduler.android.models.AvailabilityStatus
 import com.meetingscheduler.android.models.PollParticipant
 import com.meetingscheduler.android.models.PollTimeOption
 import com.meetingscheduler.android.services.PollService
-import kotlinx.datetime.toJavaInstant
+import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
 import java.util.*
+
+// Extension function to convert kotlinx.datetime.Instant to java.time.Instant
+private fun Instant.toJavaInstant(): java.time.Instant {
+    return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
+}
 
 data class ResponseItem(
     val id: String,
@@ -80,8 +85,7 @@ fun TimeOptionResponsesView(
         timeOption = allTimeOptions.firstOrNull { it.id == timeOptionId }
 
         participants = pollService.loadParticipants(pollId)
-        val participantIds = participants.map { it.id }
-        responses = pollService.loadResponses(participantIds)
+        responses = pollService.loadResponses(pollId)
 
         isLoading = false
     }

@@ -89,30 +89,30 @@ This guide will help you take the Meeting Scheduler Android app from development
 
 **iOS Equivalent:** Setting up Firebase for iOS
 
-- [ ] Go to https://console.firebase.google.com
-- [ ] Click "Add Project"
-- [ ] Enter project name: "Meeting Scheduler"
-- [ ] Disable Google Analytics (optional for now)
-- [ ] Click "Create Project"
+- [x] Go to https://console.firebase.google.com
+- [x] Click "Add Project"
+- [x] Enter project name: "Meeting Scheduler"
+- [x] Disable Google Analytics (optional for now)
+- [x] Click "Create Project"
 
 ### Add Android App to Firebase
 
-- [ ] In Firebase Console, click "Add App" and select Android
-- [ ] Enter Android package name:
+- [x] In Firebase Console, click "Add App" and select Android
+- [x] Enter Android package name:
   ```
   com.meetingscheduler.android
   ```
   **Note:** Find this in `app/build.gradle.kts` under `namespace`
 
-- [ ] Enter app nickname: "Meeting Scheduler Android"
+- [x] Enter app nickname: "Meeting Scheduler Android"
 - [ ] Leave SHA-1 empty for now (we'll add it later)
 - [ ] Click "Register App"
 
 ### Download Configuration File
 
-- [ ] Download `google-services.json`
-- [ ] Place it in: `apps/android/app/google-services.json`
-- [ ] Verify it's in the correct location (same directory as `build.gradle.kts`)
+- [x] Download `google-services.json`
+- [x] Place it in: `apps/android/app/google-services.json`
+- [x] Verify it's in the correct location (same directory as `build.gradle.kts`)
 
 ### Get Debug SHA-1 Certificate
 
@@ -130,11 +130,11 @@ cd %USERPROFILE%\.android
 keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android
 ```
 
-- [ ] Copy the SHA-1 fingerprint (looks like `A1:B2:C3:...`)
-- [ ] In Firebase Console, go to Project Settings
-- [ ] Under "Your apps" > Android app, click "Add fingerprint"
-- [ ] Paste the SHA-1 fingerprint
-- [ ] Click "Save"
+- [x] Copy the SHA-1 fingerprint (looks like `A1:B2:C3:...`)
+- [x] In Firebase Console, go to Project Settings
+- [x] Under "Your apps" > Android app, click "Add fingerprint"
+- [x] Paste the SHA-1 fingerprint
+- [x] Click "Save"
 
 ### Configure OAuth Consent Screen
 
@@ -153,15 +153,15 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
 
 ### Create OAuth 2.0 Client IDs
 
-- [ ] Go to "APIs & Services" > "Credentials"
-- [ ] Click "Create Credentials" > "OAuth client ID"
+- [x] Go to "APIs & Services" > "Credentials"
+- [x] Click "Create Credentials" > "OAuth client ID"
 
 **Create Android Client:**
-- [ ] Application type: "Android"
-- [ ] Name: "Meeting Scheduler Android"
-- [ ] Package name: `com.meetingscheduler.android`
-- [ ] SHA-1: Paste your debug SHA-1 from earlier
-- [ ] Click "Create"
+- [x] Application type: "Android"
+- [x] Name: "Meeting Scheduler Android"
+- [x] Package name: `com.meetingscheduler.android`
+- [x] SHA-1: Paste your debug SHA-1 from earlier
+- [x] Click "Create"
 - [ ] **Save the Client ID** (you won't use it directly, but keep it)
 
 **Create Web Client (IMPORTANT):**
@@ -174,20 +174,20 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
 
 ### Update AuthView.kt with Web Client ID
 
-- [ ] Open `apps/android/app/src/main/kotlin/com/meetingscheduler/android/ui/AuthView.kt`
-- [ ] Find line 66:
+- [x] Open `apps/android/app/src/main/kotlin/com/meetingscheduler/android/ui/AuthView.kt`
+- [x] Find line 66:
   ```kotlin
   .requestIdToken("YOUR_WEB_CLIENT_ID") // TODO: Add your Google Web Client ID
   ```
-- [ ] Replace `"YOUR_WEB_CLIENT_ID"` with your actual Web Client ID:
+- [x] Replace `"YOUR_WEB_CLIENT_ID"` with your actual Web Client ID:
   ```kotlin
   .requestIdToken("123456789-abcdefg.apps.googleusercontent.com")
   ```
-- [ ] Save the file
+- [x] Save the file
 
 ### Enable Google Sign-In API
 
-- [ ] In Google Cloud Console, go to "APIs & Services" > "Library"
+- [x] In Google Cloud Console, go to "APIs & Services" > "Library"
 - [ ] Search for "Google Sign-In"
 - [ ] Click "Google Sign-In API"
 - [ ] Click "Enable"

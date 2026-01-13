@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.meetingscheduler.android.models.*
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -46,8 +47,8 @@ class PollService(
 
         isLoading = true
         try {
-            val response = supabase
-                .rpc("get_user_participated_polls")
+            val response = supabase.postgrest
+                .rpc("get_user_participated_polls", buildJsonObject { })
                 .decodeAs<ParticipatedPollsResponse>()
 
             createdPolls = response.createdPolls
@@ -83,7 +84,7 @@ class PollService(
             val params = buildJsonObject {
                 put("code", code.uppercase())
             }
-            val response = supabase
+            val response = supabase.postgrest
                 .rpc("get_poll_by_code", params)
                 .decodeList<PollLookupResponse>()
 
@@ -134,7 +135,7 @@ class PollService(
                     filter {
                         eq("poll_id", pollId)
                     }
-                    order("start_time", ascending = true)
+                    order("start_time", order = io.github.jan.supabase.postgrest.query.Order.ASCENDING)
                 }
                 .decodeList<PollTimeOption>()
         } catch (e: Exception) {
@@ -221,7 +222,7 @@ class PollService(
         return try {
             supabase
                 .from("poll_participants")
-                .select(columns = "*, profiles(display_name)") {
+                .select(columns = io.github.jan.supabase.postgrest.query.Columns.raw("*, profiles(display_name)")) {
                     filter {
                         eq("poll_id", pollId)
                     }
@@ -290,6 +291,19 @@ class PollService(
         val status: AvailabilityStatus,
         val note: String?
     )
+
+    // MARK: - Poll Limits
+
+    fun canCreatePoll(): Boolean {
+        // Count active polls created by the user
+        val activeCreatedPolls = createdPolls.count { it.status == PollStatus.ACTIVE }
+
+        // Free tier: 3 active polls, Pro tier: unlimited
+        val hasProAccess = false // authService.profile?.hasProAccess == true ||
+                          // authService.profile?.hasTeamAccess == true
+
+        return hasProAccess || activeCreatedPolls < 3
+    }
 
     sealed class PollError : Exception() {
         object NotAuthenticated : PollError()

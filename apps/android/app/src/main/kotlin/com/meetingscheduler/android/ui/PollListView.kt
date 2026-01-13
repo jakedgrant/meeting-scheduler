@@ -19,9 +19,14 @@ import com.meetingscheduler.android.models.Poll
 import com.meetingscheduler.android.services.PollService
 import com.meetingscheduler.android.services.PurchaseService
 import kotlinx.coroutines.launch
-import kotlinx.datetime.toJavaInstant
+import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
 import java.util.*
+
+// Extension function to convert kotlinx.datetime.Instant to java.time.Instant
+private fun Instant.toJavaInstant(): java.time.Instant {
+    return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

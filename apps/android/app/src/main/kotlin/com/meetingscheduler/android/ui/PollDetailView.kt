@@ -25,12 +25,18 @@ import androidx.compose.ui.unit.dp
 import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
+import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import kotlinx.datetime.toJavaInstant
 import java.text.SimpleDateFormat
+import java.time.ZoneId
 import java.util.*
+
+// Extension function to convert kotlinx.datetime.Instant to java.time.Instant
+private fun Instant.toJavaInstant(): java.time.Instant {
+    return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
+}
 
 data class ResponseSummary(
     val available: Int,
@@ -98,8 +104,7 @@ fun PollDetailView(
                 myParticipant = participants.firstOrNull { it.userId == userId }
             }
 
-            val participantIds = participants.map { it.id }
-            responses = pollService.loadResponses(participantIds)
+            responses = pollService.loadResponses(pollId)
 
             myParticipant?.let { participant ->
                 val myResponses = responses.filter { it.participantId == participant.id }
@@ -349,20 +354,19 @@ fun PollDetailView(
                                 scope.launch {
                                     isSaving = true
                                     myParticipant?.let { participant ->
-                                        localResponses.forEach { (optionId, status) ->
-                                            try {
-                                                pollService.submitAvailability(
-                                                    participant.id,
-                                                    optionId,
-                                                    status
+                                        try {
+                                            val responseInputs = localResponses.map { (optionId, status) ->
+                                                PollService.ResponseInput(
+                                                    timeOptionId = optionId,
+                                                    status = status,
+                                                    note = null
                                                 )
-                                            } catch (e: Exception) {
-                                                println("Failed to save response: ${e.message}")
                                             }
+                                            pollService.saveResponses(participant.id, responseInputs)
+                                            responses = pollService.loadResponses(pollId)
+                                        } catch (e: Exception) {
+                                            println("Failed to save responses: ${e.message}")
                                         }
-
-                                        val participantIds = participants.map { it.id }
-                                        responses = pollService.loadResponses(participantIds)
                                     }
                                     isSaving = false
                                 }

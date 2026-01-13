@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Apple
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -59,7 +58,7 @@ fun AuthView(authService: AuthService) {
 
     fun signInWithGoogle() {
         val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken("YOUR_WEB_CLIENT_ID") // TODO: Add your Google Web Client ID
+            .requestIdToken("761708589972-t4o5c3b51shbt84h6ijpsr1qom0ri54s.apps.googleusercontent.com")
             .requestEmail()
             .build()
 
@@ -143,22 +142,6 @@ fun AuthView(authService: AuthService) {
                     Icon(Icons.Default.Language, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Continue with Google")
-                }
-
-                Button(
-                    onClick = { /* Apple Sign-In not typically available on Android */ },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    enabled = false,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Black
-                    ),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Icon(Icons.Default.Apple, contentDescription = null, tint = Color.White)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Continue with Apple", color = Color.White)
                 }
             }
 
