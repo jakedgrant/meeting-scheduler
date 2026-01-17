@@ -180,12 +180,12 @@ fun TimeOptionResponsesView(
                     if (groupedResponses.available.isNotEmpty()) {
                         item {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Check, null, tint = Color.Green, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.Check, null, tint = Color(0xFF1B5E20), modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     "Available (${groupedResponses.available.size})",
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = Color.Green
+                                    color = Color(0xFF1B5E20)
                                 )
                             }
                         }
@@ -200,12 +200,12 @@ fun TimeOptionResponsesView(
                         item {
                             Spacer(Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.HelpOutline, null, tint = Color(0xFFFF9800), modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.HelpOutline, null, tint = Color(0xFFE65100), modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     "Tentative (${groupedResponses.maybe.size})",
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = Color(0xFFFF9800)
+                                    color = Color(0xFFE65100)
                                 )
                             }
                         }
@@ -220,12 +220,12 @@ fun TimeOptionResponsesView(
                         item {
                             Spacer(Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Close, null, tint = Color.Red, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Default.Close, null, tint = Color(0xFFC62828), modifier = Modifier.size(20.dp))
                                 Spacer(Modifier.width(8.dp))
                                 Text(
                                     "Not Available (${groupedResponses.unavailable.size})",
                                     style = MaterialTheme.typography.titleSmall,
-                                    color = Color.Red
+                                    color = Color(0xFFC62828)
                                 )
                             }
                         }

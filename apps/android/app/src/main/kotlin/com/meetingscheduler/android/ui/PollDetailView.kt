@@ -618,15 +618,15 @@ fun TimeOptionRow(
 @Composable
 fun ResponseCount(count: Int, status: AvailabilityStatus) {
     val backgroundColor = when (status) {
-        AvailabilityStatus.AVAILABLE -> Color.Green.copy(alpha = 0.2f)
-        AvailabilityStatus.MAYBE -> Color(0xFFFF9800).copy(alpha = 0.2f)
-        AvailabilityStatus.UNAVAILABLE -> Color.Red.copy(alpha = 0.2f)
+        AvailabilityStatus.AVAILABLE -> Color(0xFF2E7D32).copy(alpha = 0.15f)
+        AvailabilityStatus.MAYBE -> Color(0xFFE65100).copy(alpha = 0.15f)
+        AvailabilityStatus.UNAVAILABLE -> Color(0xFFC62828).copy(alpha = 0.15f)
     }
 
     val foregroundColor = when (status) {
-        AvailabilityStatus.AVAILABLE -> Color.Green
-        AvailabilityStatus.MAYBE -> Color(0xFFFF9800)
-        AvailabilityStatus.UNAVAILABLE -> Color.Red
+        AvailabilityStatus.AVAILABLE -> Color(0xFF1B5E20)
+        AvailabilityStatus.MAYBE -> Color(0xFFE65100)
+        AvailabilityStatus.UNAVAILABLE -> Color(0xFFC62828)
     }
 
     Box(
@@ -658,15 +658,15 @@ fun ResponseButton(
     }
 
     val selectedColor = when (status) {
-        AvailabilityStatus.AVAILABLE -> Color.Green.copy(alpha = 0.2f)
-        AvailabilityStatus.MAYBE -> Color(0xFFFF9800).copy(alpha = 0.2f)
-        AvailabilityStatus.UNAVAILABLE -> Color.Red.copy(alpha = 0.2f)
+        AvailabilityStatus.AVAILABLE -> Color(0xFF2E7D32).copy(alpha = 0.2f)
+        AvailabilityStatus.MAYBE -> Color(0xFFE65100).copy(alpha = 0.2f)
+        AvailabilityStatus.UNAVAILABLE -> Color(0xFFC62828).copy(alpha = 0.2f)
     }
 
     val foregroundColor = when (status) {
-        AvailabilityStatus.AVAILABLE -> Color.Green
-        AvailabilityStatus.MAYBE -> Color(0xFFFF9800)
-        AvailabilityStatus.UNAVAILABLE -> Color.Red
+        AvailabilityStatus.AVAILABLE -> Color(0xFF1B5E20)
+        AvailabilityStatus.MAYBE -> Color(0xFFE65100)
+        AvailabilityStatus.UNAVAILABLE -> Color(0xFFC62828)
     }
 
     OutlinedButton(
@@ -825,17 +825,17 @@ fun FinalDateOptionRow(
 @Composable
 fun StatusBadge(status: PollStatus) {
     val backgroundColor = when (status) {
-        PollStatus.DRAFT -> Color.Gray.copy(alpha = 0.2f)
-        PollStatus.ACTIVE -> Color.Green.copy(alpha = 0.2f)
-        PollStatus.CLOSED -> Color(0xFFFF9800).copy(alpha = 0.2f)
-        PollStatus.ARCHIVED -> Color.Gray.copy(alpha = 0.3f)
+        PollStatus.DRAFT -> Color(0xFF616161).copy(alpha = 0.15f)
+        PollStatus.ACTIVE -> Color(0xFF2E7D32).copy(alpha = 0.15f)
+        PollStatus.CLOSED -> Color(0xFFE65100).copy(alpha = 0.15f)
+        PollStatus.ARCHIVED -> Color(0xFF616161).copy(alpha = 0.2f)
     }
 
     val foregroundColor = when (status) {
-        PollStatus.DRAFT -> Color.Gray
-        PollStatus.ACTIVE -> Color.Green
-        PollStatus.CLOSED -> Color(0xFFFF9800)
-        PollStatus.ARCHIVED -> Color.Gray
+        PollStatus.DRAFT -> Color(0xFF424242)
+        PollStatus.ACTIVE -> Color(0xFF1B5E20)
+        PollStatus.CLOSED -> Color(0xFFE65100)
+        PollStatus.ARCHIVED -> Color(0xFF424242)
     }
 
     Surface(
