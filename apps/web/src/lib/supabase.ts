@@ -81,6 +81,7 @@ export interface PollParticipant {
   anonymous_name: string | null
   anonymous_email: string | null
   access_token: string
+  comment: string | null
   created_at: string
   updated_at: string
   profiles?: {

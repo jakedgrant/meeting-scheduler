@@ -99,6 +99,7 @@ data class PollParticipant(
     val anonymousEmail: String? = null,
     @SerialName("access_token")
     val accessToken: String,
+    val comment: String? = null,
     @SerialName("created_at")
     val createdAt: Instant,
     @SerialName("updated_at")

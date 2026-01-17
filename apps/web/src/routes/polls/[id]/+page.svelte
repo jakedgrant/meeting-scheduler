@@ -14,7 +14,8 @@
 		updatePollStatus,
 		setSelectedFinalDate,
 		joinPoll,
-		submitAvailability
+		submitAvailability,
+		updateParticipantComment
 	} from '$lib/stores/polls';
 	import { calendarEnabled, calendarConflicts, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
@@ -33,6 +34,7 @@
 
 	// Track local response changes before saving
 	let localResponses = $state<Record<string, AvailabilityStatus>>({});
+	let localComment = $state('');
 	let savingResponses = $state(false);
 
 	// Copy button states
@@ -66,7 +68,7 @@
 		cleanupPollRealtime();
 	});
 
-	// Initialize local responses when participant data loads
+	// Initialize local responses and comment when participant data loads
 	$effect(() => {
 		if (myParticipant && $currentPollResponses.length > 0) {
 			const myResponses = $currentPollResponses.filter(
@@ -77,6 +79,13 @@
 				responseMap[r.time_option_id] = r.status;
 			});
 			localResponses = responseMap;
+		}
+	});
+
+	// Initialize comment when participant loads
+	$effect(() => {
+		if (myParticipant) {
+			localComment = myParticipant.comment || '';
 		}
 	});
 
@@ -164,6 +173,8 @@
 			for (const [timeOptionId, status] of Object.entries(localResponses)) {
 				await submitAvailability(myParticipant.id, timeOptionId, status);
 			}
+			// Save comment
+			await updateParticipantComment(myParticipant.id, localComment.trim() || null);
 			// Reload to get updated responses
 			await loadPoll(pollId);
 		} catch (err) {
@@ -442,6 +453,16 @@
 				</div>
 
 				{#if myParticipant && $currentPoll.status === 'active'}
+					<div class="comment-section">
+						<label for="participant-comment" class="comment-label">Add a comment (optional)</label>
+						<textarea
+							id="participant-comment"
+							bind:value={localComment}
+							placeholder="e.g., I'm flexible on timing, or I can only attend virtually..."
+							rows="3"
+							class="comment-textarea"
+						></textarea>
+					</div>
 					<div class="save-section">
 						<button class="btn primary" onclick={saveResponses} disabled={savingResponses}>
 							{savingResponses ? 'Saving...' : 'Save Responses'}
@@ -458,12 +479,19 @@
 					<ul class="participants-list">
 						{#each $currentPollParticipants as participant}
 							<li>
-								<span class="participant-name">
-									{participant.profiles?.display_name || participant.anonymous_name || 'Anonymous'}
-								</span>
-								{#if participant.user_id === $user?.id}
-									<span class="you-badge">You</span>
-								{/if}
+								<div class="participant-info">
+									<div class="participant-header">
+										<span class="participant-name">
+											{participant.profiles?.display_name || participant.anonymous_name || 'Anonymous'}
+										</span>
+										{#if participant.user_id === $user?.id}
+											<span class="you-badge">You</span>
+										{/if}
+									</div>
+									{#if participant.comment}
+										<p class="participant-comment">{participant.comment}</p>
+									{/if}
+								</div>
 							</li>
 						{/each}
 					</ul>
@@ -786,6 +814,41 @@
 		color: #721c24;
 	}
 
+	.comment-section {
+		margin-top: 1.5rem;
+		padding-top: 1rem;
+		border-top: 1px solid #eee;
+	}
+
+	.comment-label {
+		display: block;
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: #333;
+		margin-bottom: 0.5rem;
+	}
+
+	.comment-textarea {
+		width: 100%;
+		padding: 0.75rem;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		font-size: 0.875rem;
+		font-family: inherit;
+		resize: vertical;
+		min-height: 80px;
+	}
+
+	.comment-textarea:focus {
+		outline: none;
+		border-color: #007bff;
+		box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.1);
+	}
+
+	.comment-textarea::placeholder {
+		color: #999;
+	}
+
 	.save-section {
 		margin-top: 1rem;
 		text-align: right;
@@ -798,15 +861,32 @@
 	}
 
 	.participants-list li {
-		padding: 0.5rem 0;
+		padding: 0.75rem 0;
 		border-bottom: 1px solid #eee;
+	}
+
+	.participants-list li:last-child {
+		border-bottom: none;
+	}
+
+	.participant-info {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+
+	.participant-header {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 	}
 
-	.participants-list li:last-child {
-		border-bottom: none;
+	.participant-comment {
+		font-size: 0.8125rem;
+		color: #666;
+		font-style: italic;
+		margin: 0;
+		padding-left: 0;
 	}
 
 	.you-badge {

@@ -60,6 +60,7 @@ fun PollDetailView(
     var responses by remember { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
     var myParticipant by remember { mutableStateOf<PollParticipant?>(null) }
     var localResponses by remember { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
+    var localComment by remember { mutableStateOf("") }
     var calendarConflicts by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isLoading by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
@@ -109,6 +110,7 @@ fun PollDetailView(
             myParticipant?.let { participant ->
                 val myResponses = responses.filter { it.participantId == participant.id }
                 localResponses = myResponses.associate { it.timeOptionId to it.status }
+                localComment = participant.comment ?: ""
             }
 
             // Check calendar conflicts
@@ -346,6 +348,32 @@ fun PollDetailView(
                     )
                 }
 
+                // Comment Field
+                if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
+                    item {
+                        Card {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    "Add a comment (optional)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                OutlinedTextField(
+                                    value = localComment,
+                                    onValueChange = { localComment = it },
+                                    placeholder = { Text("e.g., I'm flexible on timing, or I can only attend virtually...") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    minLines = 2,
+                                    maxLines = 4
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Save Responses Button
                 if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
@@ -363,7 +391,14 @@ fun PollDetailView(
                                                 )
                                             }
                                             pollService.saveResponses(participant.id, responseInputs)
+                                            // Save comment
+                                            val trimmedComment = localComment.trim()
+                                            pollService.updateParticipantComment(
+                                                participant.id,
+                                                if (trimmedComment.isEmpty()) null else trimmedComment
+                                            )
                                             responses = pollService.loadResponses(timeOptions.map { it.id })
+                                            participants = pollService.loadParticipants(pollId)
                                         } catch (e: Exception) {
                                             println("Failed to save responses: ${e.message}")
                                         }
@@ -687,22 +722,34 @@ fun ResponseButton(
 
 @Composable
 fun ParticipantRow(participant: PollParticipant, isCurrentUser: Boolean) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(participant.displayName)
-        if (isCurrentUser) {
-            Spacer(Modifier.width(8.dp))
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(12.dp)
-            ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(participant.displayName)
+            if (isCurrentUser) {
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "You",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
+        participant.comment?.let { comment ->
+            if (comment.isNotBlank()) {
                 Text(
-                    "You",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimary
+                    comment,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                 )
             }
         }

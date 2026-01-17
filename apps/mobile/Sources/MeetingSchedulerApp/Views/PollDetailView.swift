@@ -14,6 +14,7 @@ struct PollDetailView: View {
     @State var responses: [AvailabilityResponse] = []
     @State var myParticipant: PollParticipant?
     @State var localResponses: [UUID: AvailabilityStatus] = [:]
+    @State var localComment: String = ""
     @State var calendarConflicts: Set<UUID> = []
     @State var isLoading = true
     @State var isSaving = false
@@ -121,6 +122,7 @@ struct PollDetailView: View {
             shareCodeSection(poll)
             finalDateSection(poll)
             timeOptionsSection(poll)
+            commentSection(poll)
             saveButtonSection(poll)
             joinButtonSection(poll)
             participantsSection
@@ -233,6 +235,25 @@ struct PollDetailView: View {
     }
 
     @ViewBuilder
+    private func commentSection(_ poll: Poll) -> some View {
+        if myParticipant != nil && poll.status == .active {
+            Section {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Add a comment (optional)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "e.g., I'm flexible on timing, or I can only attend virtually...",
+                        text: $localComment,
+                        axis: .vertical
+                    )
+                    .lineLimit(2...4)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func saveButtonSection(_ poll: Poll) -> some View {
         if myParticipant != nil && poll.status == .active {
             Section {
@@ -314,6 +335,7 @@ struct PollDetailView: View {
                 for response in myResponses {
                     localResponses[response.timeOptionId] = response.status
                 }
+                localComment = myParticipant.comment ?? ""
             }
 
             if CalendarService.shared.isEnabled && !timeOptions.isEmpty {
@@ -372,8 +394,20 @@ struct PollDetailView: View {
                 }
             }
 
+            // Save comment
+            do {
+                let trimmedComment = localComment.trimmingCharacters(in: .whitespacesAndNewlines)
+                try await PollService.shared.updateParticipantComment(
+                    participantId: myParticipant.id,
+                    comment: trimmedComment.isEmpty ? nil : trimmedComment
+                )
+            } catch {
+                print("Failed to save comment: \(error)")
+            }
+
             let participantIds = participants.map { $0.id }
             responses = await PollService.shared.loadResponses(participantIds: participantIds)
+            participants = await PollService.shared.loadParticipants(pollId: pollId)
 
             isSaving = false
         }
@@ -447,16 +481,24 @@ struct ParticipantRow: View {
     let isCurrentUser: Bool
 
     var body: some View {
-        HStack {
-            Text(participant.displayName)
-            if isCurrentUser {
-                Text("You")
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(participant.displayName)
+                if isCurrentUser {
+                    Text("You")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.blue)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+            }
+            if let comment = participant.comment, !comment.isEmpty {
+                Text(comment)
                     .font(.caption)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(.blue)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
+                    .foregroundStyle(.secondary)
+                    .italic()
             }
         }
     }
