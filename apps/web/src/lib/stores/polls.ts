@@ -336,6 +336,26 @@ export async function submitAvailability(
   }
 }
 
+// Update participant comment
+export async function updateParticipantComment(participantId: string, comment: string | null) {
+  const { error } = await supabase
+    .from('poll_participants')
+    .update({ comment })
+    .eq('id', participantId)
+
+  if (error) {
+    console.error('Failed to update participant comment:', error)
+    throw error
+  }
+
+  // Update local state
+  currentPollParticipants.update(participants =>
+    participants.map(p =>
+      p.id === participantId ? { ...p, comment } : p
+    )
+  )
+}
+
 // Clean up realtime subscription
 export function cleanupPollRealtime() {
   if (realtimeChannel) {

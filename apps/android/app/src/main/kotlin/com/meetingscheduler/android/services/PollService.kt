@@ -290,6 +290,24 @@ class PollService(
             }
     }
 
+    suspend fun updateParticipantComment(participantId: String, comment: String?) {
+        val update = buildJsonObject {
+            if (comment != null) {
+                put("comment", comment)
+            } else {
+                put("comment", null as String?)
+            }
+        }
+
+        supabase
+            .from("poll_participants")
+            .update(update) {
+                filter {
+                    eq("id", participantId)
+                }
+            }
+    }
+
     data class ResponseInput(
         val timeOptionId: String,
         val status: AvailabilityStatus,

@@ -60,7 +60,11 @@ fun PollDetailView(
     var responses by remember { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
     var myParticipant by remember { mutableStateOf<PollParticipant?>(null) }
     var localResponses by remember { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
+    var localComment by remember { mutableStateOf("") }
+    var commentError by remember { mutableStateOf("") }
     var calendarConflicts by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    val MAX_COMMENT_LENGTH = 500
     var isLoading by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var showClosePollDialog by remember { mutableStateOf(false) }
@@ -109,6 +113,7 @@ fun PollDetailView(
             myParticipant?.let { participant ->
                 val myResponses = responses.filter { it.participantId == participant.id }
                 localResponses = myResponses.associate { it.timeOptionId to it.status }
+                localComment = participant.comment ?: ""
             }
 
             // Check calendar conflicts
@@ -346,11 +351,69 @@ fun PollDetailView(
                     )
                 }
 
+                // Comment Field
+                if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
+                    item {
+                        Card {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        "Add a comment (optional)",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        "${localComment.length}/$MAX_COMMENT_LENGTH",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = localComment,
+                                    onValueChange = { newValue ->
+                                        if (newValue.length <= MAX_COMMENT_LENGTH) {
+                                            localComment = newValue
+                                            commentError = ""
+                                        } else {
+                                            commentError = "Comment must be $MAX_COMMENT_LENGTH characters or less"
+                                        }
+                                    },
+                                    placeholder = { Text("e.g., I'm flexible on timing, or I can only attend virtually...") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    minLines = 2,
+                                    maxLines = 4,
+                                    isError = commentError.isNotEmpty()
+                                )
+                                if (commentError.isNotEmpty()) {
+                                    Text(
+                                        commentError,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Save Responses Button
                 if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
                         Button(
                             onClick = {
+                                // Validate comment
+                                if (localComment.length > MAX_COMMENT_LENGTH) {
+                                    commentError = "Comment must be $MAX_COMMENT_LENGTH characters or less"
+                                    return@Button
+                                }
+
                                 scope.launch {
                                     isSaving = true
                                     myParticipant?.let { participant ->
@@ -363,7 +426,14 @@ fun PollDetailView(
                                                 )
                                             }
                                             pollService.saveResponses(participant.id, responseInputs)
+                                            // Save comment (trimmed, null if empty)
+                                            val trimmedComment = localComment.trim()
+                                            pollService.updateParticipantComment(
+                                                participant.id,
+                                                if (trimmedComment.isEmpty()) null else trimmedComment
+                                            )
                                             responses = pollService.loadResponses(timeOptions.map { it.id })
+                                            participants = pollService.loadParticipants(pollId)
                                         } catch (e: Exception) {
                                             println("Failed to save responses: ${e.message}")
                                         }
@@ -372,7 +442,7 @@ fun PollDetailView(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isSaving
+                            enabled = !isSaving && commentError.isEmpty()
                         ) {
                             if (isSaving) {
                                 CircularProgressIndicator(
@@ -687,22 +757,34 @@ fun ResponseButton(
 
 @Composable
 fun ParticipantRow(participant: PollParticipant, isCurrentUser: Boolean) {
-    Row(
+    Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Text(participant.displayName)
-        if (isCurrentUser) {
-            Spacer(Modifier.width(8.dp))
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = RoundedCornerShape(12.dp)
-            ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(participant.displayName)
+            if (isCurrentUser) {
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primary,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        "You",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
+        participant.comment?.let { comment ->
+            if (comment.isNotBlank()) {
                 Text(
-                    "You",
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onPrimary
+                    comment,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
                 )
             }
         }

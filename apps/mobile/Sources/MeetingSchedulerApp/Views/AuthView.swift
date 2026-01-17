@@ -75,16 +75,13 @@ struct AuthView: View {
     }
 
     private var divider: some View {
-        HStack {
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(height: 1)
+        ZStack(alignment: .center) {
+            Divider()
             Text("or")
                 .foregroundStyle(.secondary)
                 .font(.caption)
-            Rectangle()
-                .fill(Color.gray.opacity(0.3))
-                .frame(height: 1)
+                .padding(8)
+                .background(.background)
         }
     }
 

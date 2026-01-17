@@ -264,6 +264,18 @@ public final class PollService {
             .execute()
     }
 
+    public func updateParticipantComment(participantId: UUID, comment: String?) async throws {
+        let data: [String: AnyJSON] = [
+            "comment": comment.map { .string($0) } ?? .null
+        ]
+
+        try await supabase
+            .from("poll_participants")
+            .update(data)
+            .eq("id", value: participantId.uuidString)
+            .execute()
+    }
+
     // MARK: - Subscription Checks
 
     public func canCreatePoll() async -> Bool {
