@@ -1,5 +1,6 @@
 package com.meetingscheduler.android.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -8,6 +9,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -49,7 +51,225 @@ fun CreatePollView(
     var rangeStartTime by remember { mutableStateOf(LocalTime(9, 0)) }
     var rangeEndTime by remember { mutableStateOf(LocalTime(10, 0)) }
 
+    // Picker dialog state for time options
+    var showDatePicker by remember { mutableStateOf(false) }
+    var showStartTimePicker by remember { mutableStateOf(false) }
+    var showEndTimePicker by remember { mutableStateOf(false) }
+    var editingOptionIndex by remember { mutableStateOf(-1) }
+
+    // Picker dialog state for date range
+    var showRangeStartDatePicker by remember { mutableStateOf(false) }
+    var showRangeEndDatePicker by remember { mutableStateOf(false) }
+    var showRangeStartTimePicker by remember { mutableStateOf(false) }
+    var showRangeEndTimePicker by remember { mutableStateOf(false) }
+
     val scope = rememberCoroutineScope()
+
+    // Date picker dialog
+    if (showDatePicker && editingOptionIndex >= 0 && editingOptionIndex < timeOptions.size) {
+        val option = timeOptions[editingOptionIndex]
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = option.date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val newDate = Instant.fromEpochMilliseconds(millis)
+                            .toLocalDateTime(TimeZone.UTC).date
+                        timeOptions = timeOptions.mapIndexed { index, opt ->
+                            if (index == editingOptionIndex) {
+                                opt.copy(date = newDate)
+                            } else opt
+                        }
+                    }
+                    showDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // Start time picker dialog
+    if (showStartTimePicker && editingOptionIndex >= 0 && editingOptionIndex < timeOptions.size) {
+        val option = timeOptions[editingOptionIndex]
+        val timePickerState = rememberTimePickerState(
+            initialHour = option.startTime.hour,
+            initialMinute = option.startTime.minute
+        )
+        AlertDialog(
+            onDismissRequest = { showStartTimePicker = false },
+            title = { Text("Select Start Time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newTime = LocalTime(timePickerState.hour, timePickerState.minute)
+                    timeOptions = timeOptions.mapIndexed { index, opt ->
+                        if (index == editingOptionIndex) {
+                            opt.copy(startTime = newTime)
+                        } else opt
+                    }
+                    showStartTimePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showStartTimePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // End time picker dialog
+    if (showEndTimePicker && editingOptionIndex >= 0 && editingOptionIndex < timeOptions.size) {
+        val option = timeOptions[editingOptionIndex]
+        val timePickerState = rememberTimePickerState(
+            initialHour = option.endTime.hour,
+            initialMinute = option.endTime.minute
+        )
+        AlertDialog(
+            onDismissRequest = { showEndTimePicker = false },
+            title = { Text("Select End Time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val newTime = LocalTime(timePickerState.hour, timePickerState.minute)
+                    timeOptions = timeOptions.mapIndexed { index, opt ->
+                        if (index == editingOptionIndex) {
+                            opt.copy(endTime = newTime)
+                        } else opt
+                    }
+                    showEndTimePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showEndTimePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Date range start date picker
+    if (showRangeStartDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = rangeStartDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showRangeStartDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        rangeStartDate = Instant.fromEpochMilliseconds(millis)
+                            .toLocalDateTime(TimeZone.UTC).date
+                    }
+                    showRangeStartDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRangeStartDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // Date range end date picker
+    if (showRangeEndDatePicker) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = rangeEndDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showRangeEndDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        rangeEndDate = Instant.fromEpochMilliseconds(millis)
+                            .toLocalDateTime(TimeZone.UTC).date
+                    }
+                    showRangeEndDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRangeEndDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    // Date range start time picker
+    if (showRangeStartTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = rangeStartTime.hour,
+            initialMinute = rangeStartTime.minute
+        )
+        AlertDialog(
+            onDismissRequest = { showRangeStartTimePicker = false },
+            title = { Text("Select Start Time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    rangeStartTime = LocalTime(timePickerState.hour, timePickerState.minute)
+                    showRangeStartTimePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRangeStartTimePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Date range end time picker
+    if (showRangeEndTimePicker) {
+        val timePickerState = rememberTimePickerState(
+            initialHour = rangeEndTime.hour,
+            initialMinute = rangeEndTime.minute
+        )
+        AlertDialog(
+            onDismissRequest = { showRangeEndTimePicker = false },
+            title = { Text("Select End Time") },
+            text = { TimePicker(state = timePickerState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    rangeEndTime = LocalTime(timePickerState.hour, timePickerState.minute)
+                    showRangeEndTimePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRangeEndTimePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -205,10 +425,69 @@ fun CreatePollView(
                             ) {
                                 Text("Add Date Range", style = MaterialTheme.typography.labelLarge)
 
-                                Text("Start Date: ${rangeStartDate}")
-                                Text("End Date: ${rangeEndDate}")
-                                Text("Start Time: ${rangeStartTime}")
-                                Text("End Time: ${rangeEndTime}")
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showRangeStartDatePicker = true },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Start Date: ${rangeStartDate}")
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit start date",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showRangeEndDatePicker = true },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("End Date: ${rangeEndDate}")
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit end date",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showRangeStartTimePicker = true },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Start Time: ${rangeStartTime}")
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit start time",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { showRangeEndTimePicker = true },
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("End Time: ${rangeEndTime}")
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit end time",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
 
                                 Button(
                                     onClick = {
@@ -267,11 +546,63 @@ fun CreatePollView(
                             }
                         }
 
-                        Text("Date: ${option.date}")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    editingOptionIndex = index
+                                    showDatePicker = true
+                                },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Date: ${option.date}")
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "Edit date",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
 
                         if (!isAllDay) {
-                            Text("Start: ${option.startTime}")
-                            Text("End: ${option.endTime}")
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingOptionIndex = index
+                                        showStartTimePicker = true
+                                    },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Start: ${option.startTime}")
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit start time",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingOptionIndex = index
+                                        showEndTimePicker = true
+                                    },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("End: ${option.endTime}")
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit end time",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
                         }
                     }
                 }
@@ -280,7 +611,16 @@ fun CreatePollView(
             item {
                 Button(
                     onClick = {
-                        timeOptions = timeOptions + TimeOption()
+                        val lastOption = timeOptions.lastOrNull()
+                        val newDate = lastOption?.date?.plus(1, DateTimeUnit.DAY)
+                            ?: currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date
+                        val newStartTime = lastOption?.startTime ?: LocalTime(9, 0)
+                        val newEndTime = lastOption?.endTime ?: LocalTime(10, 0)
+                        timeOptions = timeOptions + TimeOption(
+                            date = newDate,
+                            startTime = newStartTime,
+                            endTime = newEndTime
+                        )
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
