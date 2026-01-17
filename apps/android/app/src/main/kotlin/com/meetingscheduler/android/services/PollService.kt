@@ -252,13 +252,15 @@ class PollService(
 
     // MARK: - Availability Responses
 
-    suspend fun loadResponses(pollId: String): List<AvailabilityResponse> {
+    suspend fun loadResponses(timeOptionIds: List<String>): List<AvailabilityResponse> {
+        if (timeOptionIds.isEmpty()) return emptyList()
+
         return try {
             supabase
                 .from("availability_responses")
                 .select {
                     filter {
-                        eq("poll_id", pollId)
+                        isIn("time_option_id", timeOptionIds)
                     }
                 }
                 .decodeList<AvailabilityResponse>()
@@ -283,7 +285,9 @@ class PollService(
 
         supabase
             .from("availability_responses")
-            .upsert(insertData)
+            .upsert(insertData) {
+                onConflict = "participant_id,time_option_id"
+            }
     }
 
     data class ResponseInput(

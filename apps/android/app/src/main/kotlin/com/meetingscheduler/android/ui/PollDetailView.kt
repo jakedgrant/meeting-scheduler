@@ -104,7 +104,7 @@ fun PollDetailView(
                 myParticipant = participants.firstOrNull { it.userId == userId }
             }
 
-            responses = pollService.loadResponses(pollId)
+            responses = pollService.loadResponses(timeOptions.map { it.id })
 
             myParticipant?.let { participant ->
                 val myResponses = responses.filter { it.participantId == participant.id }
@@ -363,7 +363,7 @@ fun PollDetailView(
                                                 )
                                             }
                                             pollService.saveResponses(participant.id, responseInputs)
-                                            responses = pollService.loadResponses(pollId)
+                                            responses = pollService.loadResponses(timeOptions.map { it.id })
                                         } catch (e: Exception) {
                                             println("Failed to save responses: ${e.message}")
                                         }

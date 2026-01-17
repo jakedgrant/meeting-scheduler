@@ -85,7 +85,7 @@ fun TimeOptionResponsesView(
         timeOption = allTimeOptions.firstOrNull { it.id == timeOptionId }
 
         participants = pollService.loadParticipants(pollId)
-        responses = pollService.loadResponses(pollId)
+        responses = pollService.loadResponses(allTimeOptions.map { it.id })
 
         isLoading = false
     }
@@ -155,7 +155,11 @@ fun TimeOptionResponsesView(
                 }
 
                 // Responses
-                if (responses.isEmpty()) {
+                val hasNoResponses = groupedResponses.available.isEmpty() &&
+                    groupedResponses.maybe.isEmpty() &&
+                    groupedResponses.unavailable.isEmpty()
+
+                if (hasNoResponses) {
                     item {
                         Card {
                             Box(
