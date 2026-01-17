@@ -10,6 +10,7 @@ struct PollListView: View {
     @State var joinError: String?
     @State var isJoining = false
     @State var navigateToPoll: UUID?
+    @State var participantCounts: [UUID: Int] = [:]
 
     var body: some View {
         NavigationStack {
@@ -54,9 +55,11 @@ struct PollListView: View {
             }
             .refreshable {
                 await pollService.loadMyPolls()
+                await loadAllParticipantCounts()
             }
             .task {
                 await pollService.loadMyPolls()
+                await loadAllParticipantCounts()
             }
         }
     }
@@ -82,7 +85,7 @@ struct PollListView: View {
                 Section("My Polls") {
                     ForEach(pollService.createdPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(poll: poll)
+                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0)
                         }
                     }
                 }
@@ -92,7 +95,7 @@ struct PollListView: View {
                 Section("Polls I Joined") {
                     ForEach(pollService.joinedPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(poll: poll)
+                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0)
                         }
                     }
                 }
@@ -150,6 +153,23 @@ struct PollListView: View {
                 showPaywall = true
             }
         }
+    }
+
+    private func loadAllParticipantCounts() async {
+        let allPolls = pollService.myPolls
+        var newCounts: [UUID: Int] = [:]
+
+        for poll in allPolls {
+            do {
+                let participants = await pollService.loadParticipants(pollId: poll.id)
+                newCounts[poll.id] = participants.count
+            } catch {
+                print("Failed to load participants for poll \(poll.id): \(error)")
+                newCounts[poll.id] = participantCounts[poll.id] ?? 0
+            }
+        }
+
+        participantCounts = newCounts
     }
 }
 
@@ -214,6 +234,7 @@ struct JoinByCodeSheet: View {
 
 struct PollRowView: View {
     let poll: Poll
+    let participantCount: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -233,9 +254,17 @@ struct PollRowView: View {
                     .lineLimit(2)
             }
 
-            Text(poll.createdAt, style: .date)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            HStack {
+                Text(poll.createdAt, style: .date)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                Spacer()
+
+                Text("^[\(participantCount) participant](inflect: true)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 4)
     }
