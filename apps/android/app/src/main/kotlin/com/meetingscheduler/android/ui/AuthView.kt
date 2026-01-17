@@ -1,9 +1,6 @@
 package com.meetingscheduler.android.ui
 
-import android.app.Activity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
+import android.util.Log
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -12,17 +9,29 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.GetCredentialResponse
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.meetingscheduler.android.services.AuthService
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
+import java.util.UUID
+
+private const val TAG = "AuthView"
+private const val WEB_CLIENT_ID = "761708589972-t4o5c3b51shbt84h6ijpsr1qom0ri54s.apps.googleusercontent.com"
 
 @Composable
 fun AuthView(authService: AuthService) {
@@ -32,39 +41,111 @@ fun AuthView(authService: AuthService) {
     var showMagicLinkSent by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val credentialManager = remember { CredentialManager.create(context) }
 
-    // Google Sign-In launcher
-    val googleSignInLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(ApiException::class.java)
-                account.idToken?.let { idToken ->
-                    scope.launch {
-                        try {
-                            authService.signInWithGoogle(idToken)
-                        } catch (e: Exception) {
-                            errorMessage = e.message
-                        }
+    // Generate a raw nonce for security (prevents replay attacks)
+    // Returns a pair of (rawNonce, hashedNonce)
+    // - rawNonce: passed to Supabase for verification
+    // - hashedNonce: passed to Google Credential Manager
+    fun generateNonce(): Pair<String, String> {
+        val rawNonce = UUID.randomUUID().toString()
+        val bytes = rawNonce.toByteArray()
+        val md = MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(bytes)
+        val hashedNonce = digest.fold("") { str, it -> str + "%02x".format(it) }
+        return Pair(rawNonce, hashedNonce)
+    }
+
+    // Handle the credential response from Google Sign-In
+    // Note: rawNonce is the unhashed nonce that Supabase needs for verification
+    suspend fun handleSignIn(result: GetCredentialResponse, rawNonce: String) {
+        when (val credential = result.credential) {
+            is CustomCredential -> {
+                if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    try {
+                        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                        val idToken = googleIdTokenCredential.idToken
+                        Log.d(TAG, "Successfully received Google ID token, signing in with Supabase...")
+                        authService.signInWithGoogle(idToken, rawNonce)
+                        Log.d(TAG, "Supabase sign-in completed successfully")
+                    } catch (e: GoogleIdTokenParsingException) {
+                        Log.e(TAG, "Received an invalid Google ID token response", e)
+                        errorMessage = "Failed to parse Google credentials"
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Supabase sign-in failed: ${e.message}", e)
+                        errorMessage = e.message ?: "Sign-in failed"
                     }
+                } else {
+                    Log.e(TAG, "Unexpected credential type: ${credential.type}")
+                    errorMessage = "Unexpected credential type"
                 }
-            } catch (e: ApiException) {
-                errorMessage = "Google sign-in failed: ${e.message}"
+            }
+            else -> {
+                Log.e(TAG, "Unexpected credential class: ${credential::class.java}")
+                errorMessage = "Unexpected credential type"
             }
         }
     }
 
+    // Sign in with Google using Credential Manager
     fun signInWithGoogle() {
-        val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestIdToken("761708589972-t4o5c3b51shbt84h6ijpsr1qom0ri54s.apps.googleusercontent.com")
-            .requestEmail()
-            .build()
+        isLoading = true
+        errorMessage = null
+        val (rawNonce, hashedNonce) = generateNonce()
 
-        val googleSignInClient = GoogleSignIn.getClient(context, gso)
-        val signInIntent = googleSignInClient.signInIntent
-        googleSignInLauncher.launch(signInIntent)
+        scope.launch {
+            try {
+                // First, try One Tap sign-in for returning users (faster UX)
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(true)
+                    .setServerClientId(WEB_CLIENT_ID)
+                    .setAutoSelectEnabled(true)
+                    .setNonce(hashedNonce)
+                    .build()
+
+                val oneTapRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
+
+                try {
+                    val result = credentialManager.getCredential(context, oneTapRequest)
+                    handleSignIn(result, rawNonce)
+                    return@launch
+                } catch (e: NoCredentialException) {
+                    Log.d(TAG, "No returning user, using Sign In With Google button flow")
+                } catch (e: GetCredentialCancellationException) {
+                    // User cancelled One Tap or it failed after account selection, fall through to SIWG
+                    Log.d(TAG, "One Tap cancelled or failed, falling back to Sign In With Google: ${e.message}")
+                } catch (e: GetCredentialException) {
+                    Log.d(TAG, "One Tap failed, falling back to Sign In With Google: ${e.type} - ${e.message}")
+                }
+
+                // Fall back to "Sign In With Google" button flow
+                // This works without Android OAuth client, only needs Web Client ID
+                val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID)
+                    .setNonce(hashedNonce)
+                    .build()
+
+                val signInRequest = GetCredentialRequest.Builder()
+                    .addCredentialOption(signInWithGoogleOption)
+                    .build()
+
+                val result = credentialManager.getCredential(context, signInRequest)
+                handleSignIn(result, rawNonce)
+
+            } catch (e: GetCredentialCancellationException) {
+                Log.d(TAG, "User cancelled Google sign-in: ${e.message}")
+                // User cancelled, no error message needed
+            } catch (e: GetCredentialException) {
+                Log.e(TAG, "Google sign-in failed: ${e.type} - ${e.message}", e)
+                errorMessage = "Google sign-in failed. Please ensure you have a Google account on this device."
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error during Google sign-in: ${e.javaClass.simpleName}", e)
+                errorMessage = e.message ?: "Sign-in failed"
+            } finally {
+                isLoading = false
+            }
+        }
     }
 
     fun signInWithMagicLink() {

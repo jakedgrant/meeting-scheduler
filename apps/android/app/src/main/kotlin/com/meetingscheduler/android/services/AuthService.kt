@@ -8,6 +8,7 @@ import com.meetingscheduler.android.Config
 import com.meetingscheduler.android.models.Profile
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.Google
+import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
@@ -108,9 +109,12 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
 
     // MARK: - Sign In Methods
 
-    suspend fun signInWithGoogle(idToken: String) {
-        // TODO: Update Google OAuth configuration for Supabase 3.x
-        supabase.auth.signInWith(Google)
+    suspend fun signInWithGoogle(idToken: String, nonce: String? = null) {
+        supabase.auth.signInWith(IDToken) {
+            this.idToken = idToken
+            this.provider = Google
+            nonce?.let { this.nonce = it }
+        }
     }
 
     suspend fun authorizeGoogleCalendar(idToken: String, scopes: String): Boolean {

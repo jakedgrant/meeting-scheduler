@@ -4,7 +4,7 @@ object Config {
     // MARK: - Environment
     // Set to true to use local Supabase instance (for development with Android emulator)
     // Set to false to use production Supabase
-    private const val USE_LOCAL_SUPABASE = true
+    private const val USE_LOCAL_SUPABASE = false
 
     // MARK: - Supabase
     // For Android emulator: use 10.0.2.2 to access localhost on host machine
