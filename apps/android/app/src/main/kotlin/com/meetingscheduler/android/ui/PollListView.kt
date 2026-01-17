@@ -43,11 +43,17 @@ fun PollListView(
     var isJoining by remember { mutableStateOf(false) }
     var navigateToPollId by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var participantCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        pollService.loadMyPolls()
+        scope.launch {
+            pollService.loadMyPolls()
+            loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
+                participantCounts = newCounts
+            }
+        }
     }
 
     LaunchedEffect(navigateToPollId) {
@@ -126,6 +132,9 @@ fun PollListView(
                 scope.launch {
                     isRefreshing = true
                     pollService.loadMyPolls()
+                    loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
+                        participantCounts = newCounts
+                    }
                     isRefreshing = false
                 }
             },
@@ -163,6 +172,7 @@ fun PollListView(
                             items(pollService.createdPolls) { poll ->
                                 PollRowView(
                                     poll = poll,
+                                    participantCount = participantCounts[poll.id] ?: 0,
                                     onClick = { onNavigateToPoll(poll.id) }
                                 )
                             }
@@ -181,6 +191,7 @@ fun PollListView(
                             items(pollService.joinedPolls) { poll ->
                                 PollRowView(
                                     poll = poll,
+                                    participantCount = participantCounts[poll.id] ?: 0,
                                     onClick = { onNavigateToPoll(poll.id) }
                                 )
                             }
@@ -246,7 +257,7 @@ fun EmptyPollsView(onCreatePoll: () -> Unit) {
 }
 
 @Composable
-fun PollRowView(poll: Poll, onClick: () -> Unit) {
+fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -279,12 +290,26 @@ fun PollRowView(poll: Poll, onClick: () -> Unit) {
                 )
             }
 
-            val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-            Text(
-                dateFormat.format(Date.from(poll.createdAt.toJavaInstant())),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                Text(
+                    dateFormat.format(Date.from(poll.createdAt.toJavaInstant())),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+
+                Text(
+                    "$participantCount participant${if (participantCount != 1) "s" else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            }
         }
     }
 }
@@ -347,4 +372,26 @@ fun JoinByCodeSheet(
             }
         }
     )
+}
+
+// Helper function to load participant counts for all polls
+private suspend fun loadAllParticipantCounts(
+    pollService: PollService,
+    currentCounts: Map<String, Int>,
+    updateCounts: (Map<String, Int>) -> Unit
+) {
+    val allPolls = pollService.myPolls
+    val newCounts = mutableMapOf<String, Int>()
+
+    for (poll in allPolls) {
+        try {
+            val participants = pollService.loadParticipants(poll.id)
+            newCounts[poll.id] = participants.size
+        } catch (e: Exception) {
+            println("Failed to load participants for poll ${poll.id}: ${e.message}")
+            newCounts[poll.id] = currentCounts[poll.id] ?: 0
+        }
+    }
+
+    updateCounts(newCounts)
 }
