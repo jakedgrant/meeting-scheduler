@@ -35,7 +35,10 @@
 	// Track local response changes before saving
 	let localResponses = $state<Record<string, AvailabilityStatus>>({});
 	let localComment = $state('');
+	let commentError = $state('');
 	let savingResponses = $state(false);
+
+	const MAX_COMMENT_LENGTH = 500;
 
 	// Copy button states
 	let codeCopied = $state(false);
@@ -164,8 +167,27 @@
 		localResponses = { ...localResponses, [timeOptionId]: status };
 	}
 
+	function validateComment(value: string) {
+		if (value.length > MAX_COMMENT_LENGTH) {
+			commentError = `Comment must be ${MAX_COMMENT_LENGTH} characters or less`;
+			return false;
+		}
+		commentError = '';
+		return true;
+	}
+
+	function handleCommentChange(value: string) {
+		localComment = value;
+		validateComment(value);
+	}
+
 	async function saveResponses() {
 		if (!myParticipant) return;
+
+		// Validate comment before saving
+		if (!validateComment(localComment)) {
+			return;
+		}
 
 		savingResponses = true;
 
@@ -173,8 +195,9 @@
 			for (const [timeOptionId, status] of Object.entries(localResponses)) {
 				await submitAvailability(myParticipant.id, timeOptionId, status);
 			}
-			// Save comment
-			await updateParticipantComment(myParticipant.id, localComment.trim() || null);
+			// Save comment (trimmed, null if empty)
+			const trimmedComment = localComment.trim();
+			await updateParticipantComment(myParticipant.id, trimmedComment || null);
 			// Reload to get updated responses
 			await loadPoll(pollId);
 		} catch (err) {
@@ -454,14 +477,23 @@
 
 				{#if myParticipant && $currentPoll.status === 'active'}
 					<div class="comment-section">
-						<label for="participant-comment" class="comment-label">Add a comment (optional)</label>
+						<div class="comment-header">
+							<label for="participant-comment" class="comment-label">Add a comment (optional)</label>
+							<span class="comment-count">{localComment.length}/{MAX_COMMENT_LENGTH}</span>
+						</div>
 						<textarea
 							id="participant-comment"
-							bind:value={localComment}
+							value={localComment}
+							onchange={(e) => handleCommentChange(e.currentTarget.value)}
+							oninput={(e) => handleCommentChange(e.currentTarget.value)}
 							placeholder="e.g., I'm flexible on timing, or I can only attend virtually..."
 							rows="3"
 							class="comment-textarea"
+							maxlength={MAX_COMMENT_LENGTH}
 						></textarea>
+						{#if commentError}
+							<p class="comment-error">{commentError}</p>
+						{/if}
 					</div>
 					<div class="save-section">
 						<button class="btn primary" onclick={saveResponses} disabled={savingResponses}>
@@ -820,12 +852,22 @@
 		border-top: 1px solid #eee;
 	}
 
+	.comment-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 0.5rem;
+	}
+
 	.comment-label {
-		display: block;
 		font-size: 0.875rem;
 		font-weight: 500;
 		color: #333;
-		margin-bottom: 0.5rem;
+	}
+
+	.comment-count {
+		font-size: 0.75rem;
+		color: #666;
 	}
 
 	.comment-textarea {
@@ -847,6 +889,12 @@
 
 	.comment-textarea::placeholder {
 		color: #999;
+	}
+
+	.comment-error {
+		font-size: 0.8125rem;
+		color: #c00;
+		margin: 0.5rem 0 0 0;
 	}
 
 	.save-section {

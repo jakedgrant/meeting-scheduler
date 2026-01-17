@@ -15,7 +15,10 @@ struct PollDetailView: View {
     @State var myParticipant: PollParticipant?
     @State var localResponses: [UUID: AvailabilityStatus] = [:]
     @State var localComment: String = ""
+    @State var commentError: String = ""
     @State var calendarConflicts: Set<UUID> = []
+
+    private let MAX_COMMENT_LENGTH = 500
     @State var isLoading = true
     @State var isSaving = false
     @State var showClosePollAlert = false
@@ -239,15 +242,36 @@ struct PollDetailView: View {
         if myParticipant != nil && poll.status == .active {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Add a comment (optional)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("Add a comment (optional)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(localComment.count)/\(MAX_COMMENT_LENGTH)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     TextField(
                         "e.g., I'm flexible on timing, or I can only attend virtually...",
-                        text: $localComment,
+                        text: Binding(
+                            get: { localComment },
+                            set: { newValue in
+                                if newValue.count <= MAX_COMMENT_LENGTH {
+                                    localComment = newValue
+                                    commentError = ""
+                                } else {
+                                    commentError = "Comment must be \(MAX_COMMENT_LENGTH) characters or less"
+                                }
+                            }
+                        ),
                         axis: .vertical
                     )
                     .lineLimit(2...4)
+                    if !commentError.isEmpty {
+                        Text(commentError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
         }
@@ -376,8 +400,20 @@ struct PollDetailView: View {
         }
     }
 
+    private func validateComment() -> Bool {
+        if localComment.count > MAX_COMMENT_LENGTH {
+            commentError = "Comment must be \(MAX_COMMENT_LENGTH) characters or less"
+            return false
+        }
+        commentError = ""
+        return true
+    }
+
     private func saveResponses() {
         guard let myParticipant = myParticipant else { return }
+
+        // Validate comment
+        guard validateComment() else { return }
 
         isSaving = true
 
@@ -394,7 +430,7 @@ struct PollDetailView: View {
                 }
             }
 
-            // Save comment
+            // Save comment (trimmed, nil if empty)
             do {
                 let trimmedComment = localComment.trimmingCharacters(in: .whitespacesAndNewlines)
                 try await PollService.shared.updateParticipantComment(
