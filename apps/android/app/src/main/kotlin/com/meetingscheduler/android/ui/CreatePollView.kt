@@ -281,51 +281,7 @@ fun CreatePollView(
                     }
                 },
                 actions = {
-                    IconButton(
-                        onClick = {
-                            scope.launch {
-                                isLoading = true
-                                errorMessage = null
-                                try {
-                                    val poll = pollService.createPoll(
-                                        title = title,
-                                        description = description.ifBlank { null },
-                                        location = location.ifBlank { null }
-                                    )
-
-                                    val options = timeOptions.map { option ->
-                                        val start: Instant
-                                        val end: Instant
-
-                                        if (isAllDay) {
-                                            start = option.date.atTime(0, 0).toInstant(TimeZone.currentSystemDefault())
-                                            end = option.date.atTime(23, 59).toInstant(TimeZone.currentSystemDefault())
-                                        } else {
-                                            start = option.date.atTime(option.startTime).toInstant(TimeZone.currentSystemDefault())
-                                            end = option.date.atTime(option.endTime).toInstant(TimeZone.currentSystemDefault())
-
-                                            if (end <= start) {
-                                                errorMessage = "End time must be after start time for all time options"
-                                                isLoading = false
-                                                return@launch
-                                            }
-                                        }
-
-                                        PollService.TimeOptionInput(start, end, isAllDay)
-                                    }
-
-                                    pollService.addTimeOptions(poll.id, options)
-                                    onDismiss()
-                                } catch (e: Exception) {
-                                    errorMessage = e.message
-                                    isLoading = false
-                                }
-                            }
-                        },
-                        enabled = title.isNotBlank() && !isLoading
-                    ) {
-                        Icon(Icons.Default.Check, "Create Poll")
-                    }
+                    // No actions in toolbar
                 }
             )
         }
@@ -643,6 +599,64 @@ fun CreatePollView(
                             color = MaterialTheme.colorScheme.onErrorContainer,
                             modifier = Modifier.padding(16.dp)
                         )
+                    }
+                }
+            }
+
+            // Create Poll Button
+            item {
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        scope.launch {
+                            isLoading = true
+                            errorMessage = null
+                            try {
+                                val poll = pollService.createPoll(
+                                    title = title,
+                                    description = description.ifBlank { null },
+                                    location = location.ifBlank { null }
+                                )
+
+                                val options = timeOptions.map { option ->
+                                    val start: Instant
+                                    val end: Instant
+
+                                    if (isAllDay) {
+                                        start = option.date.atTime(0, 0).toInstant(TimeZone.currentSystemDefault())
+                                        end = option.date.atTime(23, 59).toInstant(TimeZone.currentSystemDefault())
+                                    } else {
+                                        start = option.date.atTime(option.startTime).toInstant(TimeZone.currentSystemDefault())
+                                        end = option.date.atTime(option.endTime).toInstant(TimeZone.currentSystemDefault())
+
+                                        if (end <= start) {
+                                            errorMessage = "End time must be after start time for all time options"
+                                            isLoading = false
+                                            return@launch
+                                        }
+                                    }
+
+                                    PollService.TimeOptionInput(start, end, isAllDay)
+                                }
+
+                                pollService.addTimeOptions(poll.id, options)
+                                onDismiss()
+                            } catch (e: Exception) {
+                                errorMessage = e.message
+                                isLoading = false
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = title.isNotBlank() && !isLoading
+                ) {
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    } else {
+                        Text("Create Poll")
                     }
                 }
             }

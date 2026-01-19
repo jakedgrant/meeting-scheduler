@@ -154,9 +154,6 @@ fun PollDetailView(
                 },
                 actions = {
                     if (isCreator && poll?.status == PollStatus.ACTIVE) {
-                        IconButton(onClick = { showClosePollDialog = true }) {
-                            Icon(Icons.Default.Close, "Close Poll")
-                        }
                         IconButton(onClick = {
                             poll?.let {
                                 val shareText = """
@@ -497,6 +494,23 @@ fun PollDetailView(
                             participant = participant,
                             isCurrentUser = participant.userId == authService.currentUser?.id
                         )
+                    }
+                }
+
+                // Close Poll Button
+                if (isCreator && poll?.status == PollStatus.ACTIVE) {
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(
+                            onClick = { showClosePollDialog = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        ) {
+                            Text("Close Poll")
+                        }
                     }
                 }
             }

@@ -35,6 +35,7 @@ struct CreatePollView: View {
                 pollDetailsSection
                 timeOptionsSection
                 errorSection
+                createPollButtonSection
             }
             .navigationTitle("New Poll")
             #if os(iOS)
@@ -46,16 +47,6 @@ struct CreatePollView: View {
                         dismiss()
                     }
                     .disabled(isLoading)
-                }
-
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Create Poll", systemImage: "checkmark") {
-                        createPoll()
-                    }
-                    #if os(iOS)
-                    .buttonStyle(.glassProminent)
-                    #endif
-                    .disabled(title.isEmpty || isLoading)
                 }
             }
             .interactiveDismissDisabled(isLoading)
@@ -120,6 +111,24 @@ struct CreatePollView: View {
                 Text(error)
                     .foregroundStyle(.red)
             }
+        }
+    }
+
+    private var createPollButtonSection: some View {
+        Section {
+            Button(action: createPoll) {
+                HStack {
+                    Spacer()
+                    if isLoading {
+                        ProgressView()
+                    } else {
+                        Text("Create Poll")
+                            .fontWeight(.semibold)
+                    }
+                    Spacer()
+                }
+            }
+            .disabled(title.isEmpty || isLoading)
         }
     }
 
