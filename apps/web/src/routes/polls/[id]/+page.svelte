@@ -331,6 +331,28 @@
 			</div>
 		{/if}
 
+		{#if !myParticipant && $currentPoll.status === 'active'}
+			<div class="join-prompt">
+				<p>Join this poll to submit your availability</p>
+				{#if !$user}
+					<div class="anonymous-join">
+						<input
+							type="text"
+							bind:value={anonymousName}
+							placeholder="Enter your name"
+							disabled={joiningPoll}
+						/>
+					</div>
+				{/if}
+				{#if joinError}
+					<p class="error">{joinError}</p>
+				{/if}
+				<button class="btn primary" onclick={handleJoinPoll} disabled={joiningPoll}>
+					{joiningPoll ? 'Joining...' : 'Join Poll'}
+				</button>
+			</div>
+		{/if}
+
 		{#if $currentPoll.selected_start_time && $currentPoll.selected_end_time}
 			{@const selectedFormatted = formatDateTime($currentPoll.selected_start_time)}
 			{@const selectedEndFormatted = formatDateTime($currentPoll.selected_end_time)}
@@ -383,28 +405,6 @@
 		<div class="content-grid">
 			<div class="availability-section">
 				<h2>Time Options</h2>
-
-				{#if !myParticipant && $currentPoll.status === 'active'}
-					<div class="join-prompt">
-						<p>Join this poll to submit your availability</p>
-						{#if !$user}
-							<div class="anonymous-join">
-								<input
-									type="text"
-									bind:value={anonymousName}
-									placeholder="Enter your name"
-									disabled={joiningPoll}
-								/>
-							</div>
-						{/if}
-						{#if joinError}
-							<p class="error">{joinError}</p>
-						{/if}
-						<button class="btn primary" onclick={handleJoinPoll} disabled={joiningPoll}>
-							{joiningPoll ? 'Joining...' : 'Join Poll'}
-						</button>
-					</div>
-				{/if}
 
 				<div class="time-options-list">
 					{#each $currentPollTimeOptions as option}
@@ -694,7 +694,7 @@
 		background: #f8f9fa;
 		padding: 1rem;
 		border-radius: 6px;
-		margin-bottom: 1rem;
+		margin: 1.5rem 0;
 		text-align: center;
 	}
 
