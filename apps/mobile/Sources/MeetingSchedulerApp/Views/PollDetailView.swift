@@ -156,34 +156,67 @@ struct PollDetailView: View {
     private func shareCodeSection(_ poll: Poll) -> some View {
         if poll.status == .active {
             Section("Share") {
-                VStack(spacing: 8) {
-                    HStack {
-                        Text("Share Code")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button(action: {
-                            #if os(iOS)
-                            UIPasteboard.general.string = poll.shareCode
-                            #endif
-                        }) {
-                            Label("Copy", systemImage: "doc.on.doc")
-                                .font(.caption)
+                VStack(spacing: 12) {
+                    // Share Link
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Share Link")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button(action: {
+                                #if os(iOS)
+                                let pollURL = "\(Config.webURL)/polls/\(poll.id)"
+                                UIPasteboard.general.string = pollURL
+                                #endif
+                            }) {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
+
+                        Text("\(Config.webURL)/polls/\(poll.id)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color.blue.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
 
-                    Text(poll.shareCode)
-                        .font(.system(.title2, design: .monospaced, weight: .bold))
-                        .foregroundStyle(.blue)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(Color.blue.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    Divider()
 
-                    Text("Share this code for others to join")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    // Share Code
+                    VStack(spacing: 8) {
+                        HStack {
+                            Text("Share Code")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button(action: {
+                                #if os(iOS)
+                                UIPasteboard.general.string = poll.shareCode
+                                #endif
+                            }) {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+
+                        Text(poll.shareCode)
+                            .font(.system(.title2, design: .monospaced, weight: .bold))
+                            .foregroundStyle(.blue)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(Color.blue.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                        Text("Share this code for others to join")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -472,12 +505,13 @@ struct PollDetailView: View {
     private func sharePoll() {
         guard let poll = poll else { return }
 
+        let pollURL = "\(Config.webURL)/polls/\(poll.id)"
         let shareText = """
         Join my poll: \(poll.title)
 
-        Share Code: \(poll.shareCode)
+        \(pollURL)
 
-        Open the Meeting Scheduler app and enter the code to join!
+        Share Code: \(poll.shareCode)
         """
 
         #if os(iOS)

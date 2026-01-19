@@ -24,4 +24,5 @@ object Config {
     // MARK: - App
     const val APP_NAME = "Meeting Scheduler"
     const val APP_SCHEME = "meetingscheduler"
+    const val WEB_URL = "https://meeting-scheduler.app" // TODO: Update with production URL
 }
