@@ -288,6 +288,28 @@ fun PollDetailView(
                     }
                 }
 
+                // Join Button
+                if (myParticipant == null && poll?.status == PollStatus.ACTIVE) {
+                    item {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    try {
+                                        val participant = pollService.joinPoll(pollId)
+                                        myParticipant = participant
+                                        participants = participants + participant
+                                    } catch (e: Exception) {
+                                        println("Failed to join poll: ${e.message}")
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Join This Poll")
+                        }
+                    }
+                }
+
                 // Final Date Display
                 poll?.selectedStartTime?.let { selectedStart ->
                     poll?.selectedEndTime?.let { selectedEnd ->
@@ -452,28 +474,6 @@ fun PollDetailView(
                             } else {
                                 Text("Save Responses")
                             }
-                        }
-                    }
-                }
-
-                // Join Button
-                if (myParticipant == null && poll?.status == PollStatus.ACTIVE) {
-                    item {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    try {
-                                        val participant = pollService.joinPoll(pollId)
-                                        myParticipant = participant
-                                        participants = participants + participant
-                                    } catch (e: Exception) {
-                                        println("Failed to join poll: ${e.message}")
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Join This Poll")
                         }
                     }
                 }
