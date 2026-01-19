@@ -123,11 +123,11 @@ struct PollDetailView: View {
         List {
             pollInfoSection(poll)
             shareCodeSection(poll)
+            joinButtonSection(poll)
             finalDateSection(poll)
             timeOptionsSection(poll)
             commentSection(poll)
             saveButtonSection(poll)
-            joinButtonSection(poll)
             participantsSection
         }
     }
