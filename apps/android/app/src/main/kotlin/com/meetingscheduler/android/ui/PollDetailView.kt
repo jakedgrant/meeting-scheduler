@@ -159,12 +159,13 @@ fun PollDetailView(
                         }
                         IconButton(onClick = {
                             poll?.let {
+                                val pollURL = "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}"
                                 val shareText = """
                                     Join my poll: ${it.title}
 
-                                    Share Code: ${it.shareCode}
+                                    $pollURL
 
-                                    Open the Meeting Scheduler app and enter the code to join!
+                                    Share Code: ${it.shareCode}
                                 """.trimIndent()
 
                                 val sendIntent = Intent().apply {
@@ -242,47 +243,91 @@ fun PollDetailView(
                         Card {
                             Column(
                                 modifier = Modifier.padding(16.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("Share Code", style = MaterialTheme.typography.labelMedium)
-                                    TextButton(onClick = {
-                                        poll?.let { clipboardManager.setText(AnnotatedString(it.shareCode)) }
-                                    }) {
-                                        Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp))
-                                        Spacer(Modifier.width(4.dp))
-                                        Text("Copy")
+                                // Share Link
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Share Link", style = MaterialTheme.typography.labelMedium)
+                                        TextButton(onClick = {
+                                            poll?.let {
+                                                val pollURL = "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}"
+                                                clipboardManager.setText(AnnotatedString(pollURL))
+                                            }
+                                        }) {
+                                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Copy")
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        poll?.let {
+                                            Text(
+                                                "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
                                     }
                                 }
 
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(
-                                            MaterialTheme.colorScheme.primaryContainer,
-                                            RoundedCornerShape(8.dp)
-                                        )
-                                        .padding(vertical = 16.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    poll?.let {
-                                        Text(
-                                            it.shareCode,
-                                            style = MaterialTheme.typography.headlineSmall,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                }
+                                HorizontalDivider()
 
-                                Text(
-                                    "Share this code for others to join",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                // Share Code
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Share Code", style = MaterialTheme.typography.labelMedium)
+                                        TextButton(onClick = {
+                                            poll?.let { clipboardManager.setText(AnnotatedString(it.shareCode)) }
+                                        }) {
+                                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp))
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("Copy")
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(
+                                                MaterialTheme.colorScheme.primaryContainer,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                            .padding(vertical = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        poll?.let {
+                                            Text(
+                                                it.shareCode,
+                                                style = MaterialTheme.typography.headlineSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        "Share this code for others to join",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }
