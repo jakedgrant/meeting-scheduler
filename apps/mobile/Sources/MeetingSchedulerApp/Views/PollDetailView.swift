@@ -76,18 +76,10 @@ struct PollDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            if isCreator, let poll = poll {
+            if isCreator, let poll = poll, poll.status == .active {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    if poll.status == .active {
-                        Button("Close Poll", systemImage: "xmark.square") {
-                            showClosePollAlert = true
-                        }
-                    }
-
-                    if poll.status == .active {
-                        Button("Share", systemImage: "square.and.arrow.up") {
-                            sharePoll()
-                        }
+                    Button("Share", systemImage: "square.and.arrow.up") {
+                        sharePoll()
                     }
                 }
             }
@@ -129,6 +121,7 @@ struct PollDetailView: View {
             commentSection(poll)
             saveButtonSection(poll)
             participantsSection
+            closePollButtonSection(poll)
         }
     }
 
@@ -353,6 +346,22 @@ struct PollDetailView: View {
                         participant: participant,
                         isCurrentUser: participant.userId == AuthService.shared.currentUser?.id
                     )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func closePollButtonSection(_ poll: Poll) -> some View {
+        if isCreator && poll.status == .active {
+            Section {
+                Button(action: { showClosePollAlert = true }) {
+                    HStack {
+                        Spacer()
+                        Text("Close Poll")
+                            .foregroundStyle(.red)
+                        Spacer()
+                    }
                 }
             }
         }

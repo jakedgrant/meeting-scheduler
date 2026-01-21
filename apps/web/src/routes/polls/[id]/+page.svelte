@@ -288,13 +288,6 @@
 					<h1>{$currentPoll.title}</h1>
 					<span class="status-badge status-{$currentPoll.status}">{$currentPoll.status}</span>
 				</div>
-				{#if isCreator}
-					<div class="creator-actions">
-						{#if $currentPoll.status === 'active'}
-							<button class="btn secondary" onclick={closePoll}>Close Poll</button>
-						{/if}
-					</div>
-				{/if}
 			</div>
 			{#if $currentPoll.description}
 				<p class="description">{$currentPoll.description}</p>
@@ -530,6 +523,12 @@
 				{/if}
 			</div>
 		</div>
+
+		{#if isCreator && $currentPoll.status === 'active'}
+			<div class="close-poll-section">
+				<button class="btn secondary" onclick={closePoll}>Close Poll</button>
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -900,6 +899,13 @@
 	.save-section {
 		margin-top: 1rem;
 		text-align: right;
+	}
+
+	.close-poll-section {
+		margin-top: 2rem;
+		padding-top: 2rem;
+		border-top: 1px solid #eee;
+		text-align: center;
 	}
 
 	.participants-list {
