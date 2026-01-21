@@ -197,6 +197,7 @@ export async function createPoll(poll: {
   description?: string
   location?: string
   timezone?: string
+  closesAt?: string
 }): Promise<Poll | null> {
   const currentUser = get(user)
   if (!currentUser) return null
@@ -209,6 +210,7 @@ export async function createPoll(poll: {
       description: poll.description,
       location: poll.location,
       timezone: poll.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      closes_at: poll.closesAt,
       status: 'active'
     })
     .select()

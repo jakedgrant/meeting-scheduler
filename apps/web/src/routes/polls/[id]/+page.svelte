@@ -295,6 +295,24 @@
 			{#if $currentPoll.location}
 				<p class="location">Location: {$currentPoll.location}</p>
 			{/if}
+			{#if $currentPoll.closes_at}
+				{@const dueDate = new Date($currentPoll.closes_at)}
+				{@const isPastDue = dueDate < new Date()}
+				{@const isClosingSoon = !isPastDue && dueDate.getTime() - Date.now() < 24 * 60 * 60 * 1000}
+				<p class="due-date {isPastDue ? 'past-due' : ''} {isClosingSoon ? 'closing-soon' : ''}">
+					Response deadline: {dueDate.toLocaleDateString('en-US', {
+						weekday: 'short',
+						month: 'short',
+						day: 'numeric',
+						year: 'numeric'
+					})}
+					{#if isPastDue}
+						(Past due)
+					{:else if isClosingSoon}
+						(Closes soon!)
+					{/if}
+				</p>
+			{/if}
 		</header>
 
 		{#if $currentPoll.status === 'active'}
@@ -603,6 +621,23 @@
 		color: #666;
 		font-size: 0.875rem;
 		margin: 0.25rem 0;
+	}
+
+	.due-date {
+		color: #666;
+		font-size: 0.875rem;
+		margin: 0.5rem 0;
+		font-weight: 500;
+	}
+
+	.due-date.closing-soon {
+		color: #ff8800;
+		font-weight: 600;
+	}
+
+	.due-date.past-due {
+		color: #cc0000;
+		font-weight: 600;
 	}
 
 	.creator-actions {

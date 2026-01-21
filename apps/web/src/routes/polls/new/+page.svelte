@@ -13,6 +13,7 @@
 	let title = $state('');
 	let description = $state('');
 	let location = $state('');
+	let dueDate = $state('');
 	let isAllDay = $state(false);
 	let useDateRange = $state(false);
 	let loading = $state(false);
@@ -156,7 +157,8 @@
 			const poll = await createPoll({
 				title: title.trim(),
 				description: description.trim() || undefined,
-				location: location.trim() || undefined
+				location: location.trim() || undefined,
+				closesAt: dueDate ? new Date(dueDate).toISOString() : undefined
 			});
 
 			if (!poll) {
@@ -289,6 +291,18 @@
 					placeholder="e.g., Zoom, Conference Room A"
 					disabled={loading}
 				/>
+			</div>
+
+			<div class="form-group">
+				<label for="due-date">Response Due Date (Optional)</label>
+				<input
+					id="due-date"
+					type="date"
+					bind:value={dueDate}
+					min={new Date().toISOString().split('T')[0]}
+					disabled={loading}
+				/>
+				<p class="help-text">Set a deadline for participants to respond by</p>
 			</div>
 
 			<div class="form-group checkbox-group">

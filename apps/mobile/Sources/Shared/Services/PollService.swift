@@ -82,13 +82,14 @@ public final class PollService {
         title: String,
         description: String?,
         location: String?,
-        timezone: String = TimeZone.current.identifier
+        timezone: String = TimeZone.current.identifier,
+        closesAt: Date? = nil
     ) async throws -> Poll {
         guard let userId = AuthService.shared.currentUser?.id else {
             throw PollError.notAuthenticated
         }
 
-        let newPoll: [String: AnyJSON] = [
+        var newPoll: [String: AnyJSON] = [
             "creator_id": .string(userId.uuidString),
             "title": .string(title),
             "description": description.map { .string($0) } ?? .null,
@@ -96,6 +97,10 @@ public final class PollService {
             "timezone": .string(timezone),
             "status": .string(PollStatus.active.rawValue)
         ]
+
+        if let closesAt = closesAt {
+            newPoll["closes_at"] = .string(closesAt.ISO8601Format())
+        }
 
         let response: Poll = try await supabase
             .from("polls")

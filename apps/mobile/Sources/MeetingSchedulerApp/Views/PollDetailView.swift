@@ -137,6 +137,28 @@ struct PollDetailView: View {
                 Label(location, systemImage: "mappin")
                     .font(.subheadline)
             }
+            if let closesAt = poll.closesAt {
+                let isPastDue = closesAt < Date()
+                let isClosingSoon = !isPastDue && closesAt.timeIntervalSinceNow < 24 * 60 * 60
+
+                HStack {
+                    Label("Response deadline", systemImage: isPastDue ? "exclamationmark.triangle.fill" : "calendar")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(closesAt, style: .date)
+                        .font(.subheadline)
+                        .foregroundStyle(isPastDue ? .red : (isClosingSoon ? .orange : .secondary))
+                }
+                if isPastDue {
+                    Text("Past due")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if isClosingSoon {
+                    Text("Closes soon!")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
             HStack {
                 Text("Status")
                 Spacer()
