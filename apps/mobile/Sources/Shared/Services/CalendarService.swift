@@ -337,6 +337,52 @@ public final class CalendarService {
         return events.filter { !$0.isAllDay && $0.availability != .free }
     }
 
+    // MARK: - Add to Calendar
+
+    /// Add an event to the user's calendar
+    /// - Parameters:
+    ///   - title: Event title
+    ///   - startDate: Event start date
+    ///   - endDate: Event end date
+    ///   - notes: Optional event notes/description
+    ///   - location: Optional event location
+    /// - Returns: true if event was successfully added
+    public func addEventToCalendar(
+        title: String,
+        startDate: Date,
+        endDate: Date,
+        notes: String? = nil,
+        location: String? = nil
+    ) async -> Bool {
+        updateAuthorizationStatus()
+
+        // Check if we have permission
+        guard authorizationStatus == .fullAccess else {
+            // Try to request permission
+            let granted = await requestAccess()
+            if !granted {
+                return false
+            }
+        }
+
+        // Create the event
+        let event = EKEvent(eventStore: eventStore)
+        event.title = title
+        event.startDate = startDate
+        event.endDate = endDate
+        event.notes = notes
+        event.location = location
+        event.calendar = eventStore.defaultCalendarForNewEvents
+
+        do {
+            try eventStore.save(event, span: .thisEvent)
+            return true
+        } catch {
+            print("Failed to save event to calendar: \(error)")
+            return false
+        }
+    }
+
     // MARK: - Backwards Compatibility
 
     /// Legacy method for backwards compatibility

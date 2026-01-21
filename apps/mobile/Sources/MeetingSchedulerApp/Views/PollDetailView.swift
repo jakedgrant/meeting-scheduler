@@ -223,7 +223,10 @@ struct PollDetailView: View {
                 FinalDateDisplay(
                     selectedStart: selectedStart,
                     selectedEnd: selectedEnd,
-                    isAllDay: timeOptions.first(where: { $0.isAllDay }) != nil
+                    isAllDay: timeOptions.first(where: { $0.isAllDay }) != nil,
+                    pollTitle: poll.title,
+                    pollDescription: poll.description,
+                    pollLocation: poll.location
                 )
             }
         } else if isCreator && poll.status == .closed {
@@ -589,12 +592,35 @@ struct FinalDateDisplay: View {
     let selectedStart: Date
     let selectedEnd: Date
     let isAllDay: Bool
+    let pollTitle: String
+    let pollDescription: String?
+    let pollLocation: String?
+
+    @State private var showAddToCalendarAlert = false
+    @State private var addingToCalendar = false
 
     var body: some View {
         VStack(spacing: 12) {
-            Text("Final Meeting Time Selected")
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Text("Final Meeting Time Selected")
+                    .font(.headline)
+
+                Spacer()
+
+                Button(action: { showAddToCalendarAlert = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "calendar.badge.plus")
+                        Text("Add to Calendar")
+                    }
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -626,6 +652,35 @@ struct FinalDateDisplay: View {
                 )
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .alert("Add to Calendar", isPresented: $showAddToCalendarAlert) {
+            Button("Add Event", role: nil) {
+                Task {
+                    await addToCalendar()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Add this meeting to your calendar?")
+        }
+        .alert("Success", isPresented: .init(get: { addingToCalendar }, set: { _ in })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Event added to your calendar successfully!")
+        }
+    }
+
+    private func addToCalendar() async {
+        let success = await CalendarService.shared.addEventToCalendar(
+            title: pollTitle,
+            startDate: selectedStart,
+            endDate: selectedEnd,
+            notes: pollDescription,
+            location: pollLocation
+        )
+
+        if success {
+            addingToCalendar = true
         }
     }
 }
