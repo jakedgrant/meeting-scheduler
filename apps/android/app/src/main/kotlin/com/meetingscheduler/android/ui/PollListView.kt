@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.accompanist.swiperefresh.SwipeRefresh
@@ -175,7 +177,8 @@ fun PollListView(
                                     participantCount = participantCounts[poll.id] ?: 0,
                                     timeRange = pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) },
-                                    pollService = pollService
+                                    pollService = pollService,
+                                    isOwner = true
                                 )
                             }
                         }
@@ -196,7 +199,8 @@ fun PollListView(
                                     participantCount = participantCounts[poll.id] ?: 0,
                                     timeRange = pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) },
-                                    pollService = pollService
+                                    pollService = pollService,
+                                    isOwner = false
                                 )
                             }
                         }
@@ -266,7 +270,8 @@ fun PollRowView(
     participantCount: Int = 0,
     timeRange: Pair<Instant, Instant>? = null,
     onClick: () -> Unit,
-    pollService: PollService
+    pollService: PollService,
+    isOwner: Boolean = false
 ) {
     Card(
         modifier = Modifier
@@ -282,12 +287,21 @@ fun PollRowView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    poll.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        poll.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (isOwner) {
+                        OwnerBadge()
+                    }
+                }
 
                 Spacer(Modifier.width(4.dp))
 
@@ -394,6 +408,22 @@ fun JoinByCodeSheet(
             }
         }
     )
+}
+
+@Composable
+fun OwnerBadge() {
+    Surface(
+        color = Color(0xFF1976D2).copy(alpha = 0.15f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(
+            "Owner",
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF0D47A1)
+        )
+    }
 }
 
 // Helper function to load participant counts for all polls

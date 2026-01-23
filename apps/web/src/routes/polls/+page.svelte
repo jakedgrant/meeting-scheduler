@@ -224,7 +224,10 @@
 					{#each $createdPolls as poll}
 						<a href="/polls/{poll.id}" class="poll-card">
 							<div class="poll-header">
-								<h3>{poll.title}</h3>
+								<div class="poll-title-group">
+									<h3>{poll.title}</h3>
+									<span class="badge badge-owner">Owner</span>
+								</div>
 								<span class="badge {getStatusBadgeClass(poll.status)}">{poll.status}</span>
 							</div>
 							{#if poll.description}
@@ -470,6 +473,13 @@
 		margin-bottom: 0.5rem;
 	}
 
+	.poll-title-group {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+
 	.poll-header h3 {
 		margin: 0;
 		font-size: 1.125rem;
@@ -502,6 +512,12 @@
 	.badge-archived {
 		background: #e2e3e5;
 		color: #383d41;
+	}
+
+	.badge-owner {
+		background: #cfe2ff;
+		color: #084298;
+		font-size: 0.75rem;
 	}
 
 	.poll-description {

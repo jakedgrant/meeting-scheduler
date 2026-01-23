@@ -91,6 +91,7 @@ struct PollListView: View {
                             PollRowView(
                                 poll: poll,
                                 participantCount: participantCounts[poll.id] ?? 0,
+                                isOwner: true,
                                 timeRange: pollTimeRanges[poll.id]
                             )
                         }
@@ -105,6 +106,7 @@ struct PollListView: View {
                             PollRowView(
                                 poll: poll,
                                 participantCount: participantCounts[poll.id] ?? 0,
+                                isOwner: false,
                                 timeRange: pollTimeRanges[poll.id]
                             )
                         }
@@ -262,6 +264,7 @@ struct JoinByCodeSheet: View {
 struct PollRowView: View {
     let poll: Poll
     let participantCount: Int
+    var isOwner: Bool = false
     let timeRange: (earliest: Date, latest: Date)?
 
     var body: some View {
@@ -269,6 +272,10 @@ struct PollRowView: View {
             HStack(spacing: 4) {
                 Text(poll.title)
                     .font(.headline)
+
+                if isOwner {
+                    OwnerBadge()
+                }
 
                 Spacer()
 
@@ -335,6 +342,21 @@ struct StatusBadge: View {
             .padding(.vertical, 4)
             .background(backgroundColor)
             .foregroundStyle(foregroundColor)
+            .clipShape(Capsule())
+    }
+}
+
+// MARK: - OwnerBadge
+
+struct OwnerBadge: View {
+    var body: some View {
+        Text("Owner")
+            .font(.caption)
+            .fontWeight(.medium)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.blue.opacity(0.15))
+            .foregroundStyle(.blue)
             .clipShape(Capsule())
     }
 }
