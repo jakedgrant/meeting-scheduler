@@ -20,13 +20,6 @@ import com.meetingscheduler.android.services.PollService
 import com.meetingscheduler.android.services.PurchaseService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import java.text.SimpleDateFormat
-import java.util.*
-
-// Extension function to convert kotlinx.datetime.Instant to java.time.Instant
-private fun Instant.toJavaInstant(): java.time.Instant {
-    return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -181,7 +174,8 @@ fun PollListView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
                                     timeRange = pollTimeRanges[poll.id],
-                                    onClick = { onNavigateToPoll(poll.id) }
+                                    onClick = { onNavigateToPoll(poll.id) },
+                                    pollService = pollService
                                 )
                             }
                         }
@@ -201,7 +195,8 @@ fun PollListView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
                                     timeRange = pollTimeRanges[poll.id],
-                                    onClick = { onNavigateToPoll(poll.id) }
+                                    onClick = { onNavigateToPoll(poll.id) },
+                                    pollService = pollService
                                 )
                             }
                         }
@@ -270,7 +265,8 @@ fun PollRowView(
     poll: Poll,
     participantCount: Int = 0,
     timeRange: Pair<Instant, Instant>? = null,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    pollService: PollService
 ) {
     Card(
         modifier = Modifier
@@ -315,9 +311,8 @@ fun PollRowView(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (timeRange != null) {
-                    val formatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
                     Text(
-                        "${formatter.format(Date.from(timeRange.first.toJavaInstant()))} - ${formatter.format(Date.from(timeRange.second.toJavaInstant()))}",
+                        pollService.formatTimeRange(timeRange.first, timeRange.second),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)

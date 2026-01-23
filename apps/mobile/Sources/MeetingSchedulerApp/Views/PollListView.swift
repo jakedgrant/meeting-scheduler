@@ -284,7 +284,7 @@ struct PollRowView: View {
 
             HStack {
                 if let range = timeRange {
-                    Text(formatTimeRange(earliest: range.earliest, latest: range.latest))
+                    Text(PollService.shared.formatTimeRange(earliest: range.earliest, latest: range.latest))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -301,12 +301,6 @@ struct PollRowView: View {
             }
         }
         .padding(.vertical, 4)
-    }
-
-    private func formatTimeRange(earliest: Date, latest: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d, h:mm a"
-        return "\(formatter.string(from: earliest)) - \(formatter.string(from: latest))"
     }
 }
 
