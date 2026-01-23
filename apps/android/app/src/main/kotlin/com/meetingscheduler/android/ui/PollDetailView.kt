@@ -146,14 +146,20 @@ fun PollDetailView(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(poll?.title ?: "Poll") },
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(poll?.title ?: "Poll")
+                        Spacer(Modifier.width(8.dp))
+                        poll?.status?.let { StatusBadge(it) }
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.Default.ArrowBack, "Back")
                     }
                 },
                 actions = {
-                    if (isCreator && poll?.status == PollStatus.ACTIVE) {
+                    if (poll?.status == PollStatus.ACTIVE) {
                         IconButton(onClick = {
                             poll?.let {
                                 val pollURL = "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}"
@@ -207,28 +213,23 @@ fun PollDetailView(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Poll Info
-                item {
-                    Card {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            poll?.description?.let { desc ->
-                                Text(desc, style = MaterialTheme.typography.bodyMedium)
-                            }
-                            poll?.location?.let { loc ->
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Place, null, modifier = Modifier.size(16.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(loc, style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                            Row(
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                if (poll?.description != null || poll?.location != null) {
+                    item {
+                        Card {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text("Status")
-                                poll?.status?.let { StatusBadge(it) }
+                                poll?.description?.let { desc ->
+                                    Text(desc, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                poll?.location?.let { loc ->
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Place, null, modifier = Modifier.size(16.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(loc, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
                             }
                         }
                     }
