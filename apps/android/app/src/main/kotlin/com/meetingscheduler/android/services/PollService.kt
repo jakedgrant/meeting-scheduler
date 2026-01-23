@@ -112,7 +112,8 @@ class PollService(
         title: String,
         description: String?,
         location: String?,
-        timezone: String = "UTC"
+        timezone: String = "UTC",
+        closesAt: Instant? = null
     ): Poll {
         val userId = authService.currentUser?.id ?: throw PollError.NotAuthenticated
 
@@ -122,6 +123,7 @@ class PollService(
             description?.let { put("description", it) }
             location?.let { put("location", it) }
             put("timezone", timezone)
+            closesAt?.let { put("closes_at", it.toString()) }
             put("status", "active")
         }
 

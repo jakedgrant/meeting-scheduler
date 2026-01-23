@@ -213,7 +213,7 @@ fun PollDetailView(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Poll Info
-                if (poll?.description != null || poll?.location != null) {
+                if (poll?.description != null || poll?.location != null || poll?.closesAt != null) {
                     item {
                         Card {
                             Column(
@@ -228,6 +228,45 @@ fun PollDetailView(
                                         Icon(Icons.Default.Place, null, modifier = Modifier.size(16.dp))
                                         Spacer(Modifier.width(4.dp))
                                         Text(loc, style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                                poll?.closesAt?.let { closesAt ->
+                                    val currentTime = Instant.fromEpochMilliseconds(System.currentTimeMillis())
+                                    val isPastDue = closesAt < currentTime
+                                    val isClosingSoon = !isPastDue && (closesAt.toEpochMilliseconds() - currentTime.toEpochMilliseconds()) < 24 * 60 * 60 * 1000
+
+                                    val dateFormatter = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
+                                    val formattedDate = dateFormatter.format(Date(closesAt.toEpochMilliseconds()))
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (isPastDue) Icons.Default.Warning else Icons.Default.DateRange,
+                                            null,
+                                            modifier = Modifier.size(16.dp),
+                                            tint = if (isPastDue) MaterialTheme.colorScheme.error else if (isClosingSoon) Color(0xFFFF8800) else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.width(4.dp))
+                                        Column {
+                                            Text(
+                                                "Response deadline: $formattedDate",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = if (isPastDue || isClosingSoon) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = if (isPastDue) MaterialTheme.colorScheme.error else if (isClosingSoon) Color(0xFFFF8800) else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (isPastDue) {
+                                                Text(
+                                                    "Past due",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.error
+                                                )
+                                            } else if (isClosingSoon) {
+                                                Text(
+                                                    "Closes soon!",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color(0xFFFF8800)
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }

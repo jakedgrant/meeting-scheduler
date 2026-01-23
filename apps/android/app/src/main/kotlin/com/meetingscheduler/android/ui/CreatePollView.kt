@@ -39,6 +39,8 @@ fun CreatePollView(
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var location by remember { mutableStateOf("") }
+    var hasDueDate by remember { mutableStateOf(false) }
+    var dueDate by remember { mutableStateOf<LocalDate?>(null) }
     var isAllDay by remember { mutableStateOf(false) }
     var useDateRange by remember { mutableStateOf(false) }
     var timeOptions by remember { mutableStateOf(listOf(TimeOption())) }
@@ -62,6 +64,9 @@ fun CreatePollView(
     var showRangeEndDatePicker by remember { mutableStateOf(false) }
     var showRangeStartTimePicker by remember { mutableStateOf(false) }
     var showRangeEndTimePicker by remember { mutableStateOf(false) }
+
+    // Picker dialog state for due date
+    var showDueDatePicker by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -271,6 +276,34 @@ fun CreatePollView(
         )
     }
 
+    // Due date picker dialog
+    if (showDueDatePicker) {
+        val initialMillis = dueDate?.atStartOfDayIn(TimeZone.UTC)?.toEpochMilliseconds()
+            ?: currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+        val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+        DatePickerDialog(
+            onDismissRequest = { showDueDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        dueDate = Instant.fromEpochMilliseconds(millis)
+                            .toLocalDateTime(TimeZone.UTC).date
+                    }
+                    showDueDatePicker = false
+                }) {
+                    Text("OK")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDueDatePicker = false }) {
+                    Text("Cancel")
+                }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -328,6 +361,41 @@ fun CreatePollView(
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading
                 )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Set response deadline")
+                    Switch(
+                        checked = hasDueDate,
+                        onCheckedChange = {
+                            hasDueDate = it
+                            if (it && dueDate == null) {
+                                dueDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date
+                            }
+                        },
+                        enabled = !isLoading
+                    )
+                }
+            }
+
+            if (hasDueDate) {
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showDueDatePicker = true },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Due Date: ${dueDate ?: ""}")
+                        Icon(Icons.Default.Edit, "Edit due date")
+                    }
+                }
             }
 
             item {
@@ -612,10 +680,15 @@ fun CreatePollView(
                             isLoading = true
                             errorMessage = null
                             try {
+                                val closesAt = if (hasDueDate && dueDate != null) {
+                                    dueDate!!.atStartOfDayIn(TimeZone.currentSystemDefault())
+                                } else null
+
                                 val poll = pollService.createPoll(
                                     title = title,
                                     description = description.ifBlank { null },
-                                    location = location.ifBlank { null }
+                                    location = location.ifBlank { null },
+                                    closesAt = closesAt
                                 )
 
                                 val options = timeOptions.map { option ->
