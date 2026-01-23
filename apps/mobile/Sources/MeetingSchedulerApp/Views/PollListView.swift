@@ -11,6 +11,7 @@ struct PollListView: View {
     @State var isJoining = false
     @State var navigateToPoll: UUID?
     @State var participantCounts: [UUID: Int] = [:]
+    @State var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
     var body: some View {
         NavigationStack {
@@ -56,10 +57,12 @@ struct PollListView: View {
             .refreshable {
                 await pollService.loadMyPolls()
                 await loadAllParticipantCounts()
+                await loadAllTimeRanges()
             }
             .task {
                 await pollService.loadMyPolls()
                 await loadAllParticipantCounts()
+                await loadAllTimeRanges()
             }
         }
     }
@@ -85,7 +88,12 @@ struct PollListView: View {
                 Section("My Polls") {
                     ForEach(pollService.createdPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0, isOwner: true)
+                            PollRowView(
+                                poll: poll,
+                                participantCount: participantCounts[poll.id] ?? 0,
+                                isOwner: true,
+                                timeRange: pollTimeRanges[poll.id]
+                            )
                         }
                     }
                 }
@@ -95,7 +103,12 @@ struct PollListView: View {
                 Section("Polls I Joined") {
                     ForEach(pollService.joinedPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0, isOwner: false)
+                            PollRowView(
+                                poll: poll,
+                                participantCount: participantCounts[poll.id] ?? 0,
+                                isOwner: false,
+                                timeRange: pollTimeRanges[poll.id]
+                            )
                         }
                     }
                 }
@@ -171,6 +184,22 @@ struct PollListView: View {
 
         participantCounts = newCounts
     }
+
+    private func loadAllTimeRanges() async {
+        let allPolls = pollService.myPolls
+        var newRanges: [UUID: (earliest: Date, latest: Date)] = [:]
+
+        for poll in allPolls {
+            let timeOptions = await pollService.loadTimeOptions(pollId: poll.id)
+            if !timeOptions.isEmpty {
+                let earliest = timeOptions.first!.startTime
+                let latest = timeOptions.last!.startTime
+                newRanges[poll.id] = (earliest, latest)
+            }
+        }
+
+        pollTimeRanges = newRanges
+    }
 }
 
 // MARK: - JoinByCodeSheet
@@ -236,17 +265,16 @@ struct PollRowView: View {
     let poll: Poll
     let participantCount: Int
     var isOwner: Bool = false
+    let timeRange: (earliest: Date, latest: Date)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                HStack(spacing: 6) {
-                    Text(poll.title)
-                        .font(.headline)
+            HStack(spacing: 4) {
+                Text(poll.title)
+                    .font(.headline)
 
-                    if isOwner {
-                        OwnerBadge()
-                    }
+                if isOwner {
+                    OwnerBadge()
                 }
 
                 Spacer()
@@ -262,9 +290,15 @@ struct PollRowView: View {
             }
 
             HStack {
-                Text(poll.createdAt, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                if let range = timeRange {
+                    Text(PollService.shared.formatTimeRange(earliest: range.earliest, latest: range.latest))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No time options")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
 
                 Spacer()
 

@@ -18,8 +18,19 @@ public final class PollService {
     public private(set) var isLoading = false
 
     private let supabase = SupabaseService.shared.client
+    private let timeRangeFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, h:mm a"
+        return formatter
+    }()
 
     private init() {}
+
+    // MARK: - Formatting
+
+    public func formatTimeRange(earliest: Date, latest: Date) -> String {
+        "\(timeRangeFormatter.string(from: earliest)) - \(timeRangeFormatter.string(from: latest))"
+    }
 
     // MARK: - Load Polls
 

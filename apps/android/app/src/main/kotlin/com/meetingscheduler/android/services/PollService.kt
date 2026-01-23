@@ -16,6 +16,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
+import java.text.SimpleDateFormat
+import java.util.*
 
 @Serializable
 private data class ParticipatedPollsResponse(
@@ -30,6 +32,7 @@ class PollService(
     private val scope: CoroutineScope
 ) {
     private val supabase = SupabaseService.client
+    private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())
         private set
@@ -39,6 +42,14 @@ class PollService(
         private set
     var isLoading by mutableStateOf(false)
         private set
+
+    // MARK: - Formatting
+
+    fun formatTimeRange(earliest: Instant, latest: Instant): String {
+        val earliestDate = Date.from(java.time.Instant.ofEpochMilli(earliest.toEpochMilliseconds()))
+        val latestDate = Date.from(java.time.Instant.ofEpochMilli(latest.toEpochMilliseconds()))
+        return "${timeRangeFormatter.format(earliestDate)} - ${timeRangeFormatter.format(latestDate)}"
+    }
 
     // MARK: - Load Polls
 

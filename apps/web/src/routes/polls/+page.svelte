@@ -4,10 +4,13 @@
 	import { user, profile, signOut } from '$lib/stores/auth';
 	import { polls, createdPolls, joinedPolls, pollsLoading, loadMyPolls, loadPollByCode } from '$lib/stores/polls';
 	import { subscription, loadSubscription, getMaxActivePolls } from '$lib/stores/subscription';
+	import { supabase, type PollTimeOption } from '$lib/supabase';
 
 	let joinCode = $state('');
 	let joinError = $state('');
 	let joinLoading = $state(false);
+	let pollTimeRanges = $state<Record<string, { earliest: Date; latest: Date } | null>>({});
+	let participantCounts = $state<Record<string, number>>({});
 
 	$effect(() => {
 		if ($user === null) {
@@ -16,12 +19,65 @@
 	});
 
 	onMount(() => {
-		loadMyPolls();
+		loadMyPolls().then(() => {
+			loadTimeRangesAndParticipants();
+		});
 		// Load subscription separately without blocking poll display
 		loadSubscription().catch((err) => {
 			console.error('Failed to load subscription:', err);
 		});
 	});
+
+	async function loadTimeRangesAndParticipants() {
+		const allPolls = [...$createdPolls, ...$joinedPolls];
+		const timeRanges: Record<string, { earliest: Date; latest: Date } | null> = {};
+		const counts: Record<string, number> = {};
+
+		await Promise.all(
+			allPolls.map(async (poll) => {
+				// Load time options
+				try {
+					const { data: timeOptions, error } = await supabase
+						.from('poll_time_options')
+						.select('*')
+						.eq('poll_id', poll.id)
+						.order('start_time', { ascending: true });
+
+					if (!error && timeOptions && timeOptions.length > 0) {
+						const options = timeOptions as PollTimeOption[];
+						const earliest = new Date(options[0].start_time);
+						const latest = new Date(options[options.length - 1].start_time);
+						timeRanges[poll.id] = { earliest, latest };
+					} else {
+						timeRanges[poll.id] = null;
+					}
+				} catch (err) {
+					console.error(`Failed to load time options for poll ${poll.id}:`, err);
+					timeRanges[poll.id] = null;
+				}
+
+				// Load participant count
+				try {
+					const { data: participants, error } = await supabase
+						.from('poll_participants')
+						.select('id', { count: 'exact', head: true })
+						.eq('poll_id', poll.id);
+
+					if (!error) {
+						counts[poll.id] = participants || 0;
+					} else {
+						counts[poll.id] = 0;
+					}
+				} catch (err) {
+					console.error(`Failed to load participants for poll ${poll.id}:`, err);
+					counts[poll.id] = 0;
+				}
+			})
+		);
+
+		pollTimeRanges = timeRanges;
+		participantCounts = counts;
+	}
 
 	async function handleSignOut() {
 		await signOut();
@@ -75,6 +131,23 @@
 
 	function formatDate(dateString: string): string {
 		return new Date(dateString).toLocaleDateString();
+	}
+
+	function formatTimeRange(pollId: string): string {
+		const range = pollTimeRanges[pollId];
+		if (!range) return 'No time options';
+
+		const formatTime = (date: Date) => {
+			return date.toLocaleString('en-US', {
+				month: 'short',
+				day: 'numeric',
+				hour: 'numeric',
+				minute: '2-digit',
+				hour12: true
+			});
+		};
+
+		return `${formatTime(range.earliest)} - ${formatTime(range.latest)}`;
 	}
 
 	function getStatusBadgeClass(status: string): string {
@@ -160,8 +233,9 @@
 							{#if poll.description}
 								<p class="poll-description">{poll.description}</p>
 							{/if}
-							<div class="poll-meta">
-								<span>Created {formatDate(poll.created_at)}</span>
+							<div class="poll-footer">
+								<span class="time-range">{formatTimeRange(poll.id)}</span>
+								<span class="participant-count">{participantCounts[poll.id] || 0} participant{(participantCounts[poll.id] || 0) !== 1 ? 's' : ''}</span>
 							</div>
 						</a>
 					{/each}
@@ -180,8 +254,9 @@
 							{#if poll.description}
 								<p class="poll-description">{poll.description}</p>
 							{/if}
-							<div class="poll-meta">
-								<span>Created {formatDate(poll.created_at)}</span>
+							<div class="poll-footer">
+								<span class="time-range">{formatTimeRange(poll.id)}</span>
+								<span class="participant-count">{participantCounts[poll.id] || 0} participant{(participantCounts[poll.id] || 0) !== 1 ? 's' : ''}</span>
 							</div>
 						</a>
 					{/each}
@@ -394,7 +469,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: flex-start;
-		gap: 0.5rem;
+		gap: 4px;
 		margin-bottom: 0.5rem;
 	}
 
@@ -416,6 +491,7 @@
 		font-size: 0.75rem;
 		font-weight: 500;
 		text-transform: uppercase;
+		flex-shrink: 0;
 	}
 
 	.badge-draft {
@@ -452,6 +528,25 @@
 		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
+	}
+
+	.poll-footer {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		font-size: 0.75rem;
+		color: #666;
+		margin-top: auto;
+		padding-top: 0.5rem;
+	}
+
+	.time-range {
+		color: #666;
+		font-weight: 500;
+	}
+
+	.participant-count {
+		color: #999;
 	}
 
 	.poll-meta {
