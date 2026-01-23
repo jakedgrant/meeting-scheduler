@@ -44,6 +44,7 @@ fun PollListView(
     var navigateToPollId by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var participantCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var pollTimeRanges by remember { mutableStateOf<Map<String, Pair<Instant, Instant>>>(emptyMap()) }
 
     val scope = rememberCoroutineScope()
 
@@ -52,6 +53,9 @@ fun PollListView(
             pollService.loadMyPolls()
             loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
                 participantCounts = newCounts
+            }
+            loadAllTimeRanges(pollService) { newRanges ->
+                pollTimeRanges = newRanges
             }
         }
     }
@@ -135,6 +139,9 @@ fun PollListView(
                     loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
                         participantCounts = newCounts
                     }
+                    loadAllTimeRanges(pollService) { newRanges ->
+                        pollTimeRanges = newRanges
+                    }
                     isRefreshing = false
                 }
             },
@@ -173,6 +180,7 @@ fun PollListView(
                                 PollRowView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
+                                    timeRange = pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) }
                                 )
                             }
@@ -192,6 +200,7 @@ fun PollListView(
                                 PollRowView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
+                                    timeRange = pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) }
                                 )
                             }
@@ -257,7 +266,12 @@ fun EmptyPollsView(onCreatePoll: () -> Unit) {
 }
 
 @Composable
-fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
+fun PollRowView(
+    poll: Poll,
+    participantCount: Int = 0,
+    timeRange: Pair<Instant, Instant>? = null,
+    onClick: () -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -275,8 +289,11 @@ fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
                 Text(
                     poll.title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
                 )
+
+                Spacer(Modifier.width(4.dp))
 
                 StatusBadge(poll.status)
             }
@@ -297,12 +314,22 @@ fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                Text(
-                    dateFormat.format(Date.from(poll.createdAt.toJavaInstant())),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
+                if (timeRange != null) {
+                    val formatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+                    Text(
+                        "${formatter.format(Date.from(timeRange.first.toJavaInstant()))} - ${formatter.format(Date.from(timeRange.second.toJavaInstant()))}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Text(
+                        "No time options",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 Text(
                     "$participantCount participant${if (participantCount != 1) "s" else ""}",
@@ -394,4 +421,28 @@ private suspend fun loadAllParticipantCounts(
     }
 
     updateCounts(newCounts)
+}
+
+// Helper function to load time ranges for all polls
+private suspend fun loadAllTimeRanges(
+    pollService: PollService,
+    updateRanges: (Map<String, Pair<Instant, Instant>>) -> Unit
+) {
+    val allPolls = pollService.myPolls
+    val newRanges = mutableMapOf<String, Pair<Instant, Instant>>()
+
+    for (poll in allPolls) {
+        try {
+            val timeOptions = pollService.loadTimeOptions(poll.id)
+            if (timeOptions.isNotEmpty()) {
+                val earliest = timeOptions.first().startTime
+                val latest = timeOptions.last().startTime
+                newRanges[poll.id] = Pair(earliest, latest)
+            }
+        } catch (e: Exception) {
+            println("Failed to load time options for poll ${poll.id}: ${e.message}")
+        }
+    }
+
+    updateRanges(newRanges)
 }
