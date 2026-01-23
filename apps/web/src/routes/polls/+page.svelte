@@ -8,6 +8,7 @@
 	let joinCode = $state('');
 	let joinError = $state('');
 	let joinLoading = $state(false);
+	let showPastPolls = $state(false);
 
 	$effect(() => {
 		if ($user === null) {
@@ -89,6 +90,21 @@
 				return 'badge-draft';
 		}
 	}
+
+	function isPollClosed(poll: any): boolean {
+		return poll.status === 'closed' || poll.status === 'archived';
+	}
+
+	function getFilteredPolls(pollsList: any[]) {
+		if (showPastPolls) {
+			return pollsList;
+		}
+		return pollsList.filter(poll => !isPollClosed(poll));
+	}
+
+	$: filteredCreatedPolls = getFilteredPolls($createdPolls);
+	$: filteredJoinedPolls = getFilteredPolls($joinedPolls);
+	$: pastPollsCount = $createdPolls.filter(isPollClosed).length + $joinedPolls.filter(isPollClosed).length;
 </script>
 
 <div class="dashboard">
@@ -104,13 +120,23 @@
 	<main>
 		<div class="page-header">
 			<h1>My Polls</h1>
-			{#if canCreatePoll()}
-				<a href="/polls/new" class="btn primary">Create Poll</a>
-			{:else}
-				<button class="btn secondary" disabled title="Upgrade to create more polls">
-					Upgrade to Pro
-				</button>
-			{/if}
+			<div class="header-actions">
+				{#if pastPollsCount > 0}
+					<button
+						class="btn secondary toggle-past"
+						onclick={() => showPastPolls = !showPastPolls}
+					>
+						{showPastPolls ? 'Hide' : 'Show'} Past Polls ({pastPollsCount})
+					</button>
+				{/if}
+				{#if canCreatePoll()}
+					<a href="/polls/new" class="btn primary">Create Poll</a>
+				{:else}
+					<button class="btn secondary" disabled title="Upgrade to create more polls">
+						Upgrade to Pro
+					</button>
+				{/if}
+			</div>
 		</div>
 
 		<div class="join-by-code">
@@ -144,11 +170,21 @@
 				<p>Create your first poll to start scheduling meetings.</p>
 				<a href="/polls/new" class="btn primary">Create Your First Poll</a>
 			</div>
+		{:else if filteredCreatedPolls.length === 0 && filteredJoinedPolls.length === 0 && !showPastPolls}
+			<div class="empty-state">
+				<h2>No active polls</h2>
+				<p>All your polls are closed or archived.</p>
+				{#if pastPollsCount > 0}
+					<button class="btn primary" onclick={() => showPastPolls = true}>
+						View Past Polls ({pastPollsCount})
+					</button>
+				{/if}
+			</div>
 		{:else}
-			{#if $createdPolls.length > 0}
+			{#if filteredCreatedPolls.length > 0}
 				<h2 class="section-header">My Polls</h2>
 				<div class="polls-grid">
-					{#each $createdPolls as poll}
+					{#each filteredCreatedPolls as poll}
 						<a href="/polls/{poll.id}" class="poll-card">
 							<div class="poll-header">
 								<h3>{poll.title}</h3>
@@ -165,10 +201,10 @@
 				</div>
 			{/if}
 
-			{#if $joinedPolls.length > 0}
+			{#if filteredJoinedPolls.length > 0}
 				<h2 class="section-header">Polls I Joined</h2>
 				<div class="polls-grid">
-					{#each $joinedPolls as poll}
+					{#each filteredJoinedPolls as poll}
 						<a href="/polls/{poll.id}" class="poll-card">
 							<div class="poll-header">
 								<h3>{poll.title}</h3>
@@ -255,6 +291,16 @@
 
 	.page-header h1 {
 		margin: 0;
+	}
+
+	.header-actions {
+		display: flex;
+		gap: 0.75rem;
+		align-items: center;
+	}
+
+	.toggle-past {
+		font-size: 0.875rem;
 	}
 
 	.section-header {

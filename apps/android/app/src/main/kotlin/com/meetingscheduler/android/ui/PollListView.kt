@@ -44,8 +44,29 @@ fun PollListView(
     var navigateToPollId by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var participantCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var showPastPolls by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
+
+    fun isPollClosed(poll: Poll): Boolean {
+        return poll.status == com.meetingscheduler.android.models.PollStatus.CLOSED ||
+               poll.status == com.meetingscheduler.android.models.PollStatus.ARCHIVED
+    }
+
+    val filteredCreatedPolls = if (showPastPolls) {
+        pollService.createdPolls
+    } else {
+        pollService.createdPolls.filter { !isPollClosed(it) }
+    }
+
+    val filteredJoinedPolls = if (showPastPolls) {
+        pollService.joinedPolls
+    } else {
+        pollService.joinedPolls.filter { !isPollClosed(it) }
+    }
+
+    val pastPollsCount = pollService.createdPolls.count { isPollClosed(it) } +
+                         pollService.joinedPolls.count { isPollClosed(it) }
 
     LaunchedEffect(Unit) {
         scope.launch {
@@ -116,6 +137,14 @@ fun PollListView(
             TopAppBar(
                 title = { Text("My Polls") },
                 actions = {
+                    if (pastPollsCount > 0) {
+                        TextButton(onClick = { showPastPolls = !showPastPolls }) {
+                            Text(
+                                if (showPastPolls) "Hide Past" else "Show Past ($pastPollsCount)",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
                     IconButton(onClick = { showJoinByCode = true }) {
                         Icon(Icons.Default.Download, "Join Poll")
                     }
@@ -154,13 +183,20 @@ fun PollListView(
                     EmptyPollsView(onCreatePoll = { handleCreatePoll() })
                 }
 
+                filteredCreatedPolls.isEmpty() && filteredJoinedPolls.isEmpty() && !showPastPolls -> {
+                    NoPollsView(
+                        pastPollsCount = pastPollsCount,
+                        onShowPastPolls = { showPastPolls = true }
+                    )
+                }
+
                 else -> {
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (pollService.createdPolls.isNotEmpty()) {
+                        if (filteredCreatedPolls.isNotEmpty()) {
                             item {
                                 Text(
                                     "My Polls",
@@ -169,7 +205,7 @@ fun PollListView(
                                 )
                             }
 
-                            items(pollService.createdPolls) { poll ->
+                            items(filteredCreatedPolls) { poll ->
                                 PollRowView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
@@ -178,7 +214,7 @@ fun PollListView(
                             }
                         }
 
-                        if (pollService.joinedPolls.isNotEmpty()) {
+                        if (filteredJoinedPolls.isNotEmpty()) {
                             item {
                                 Spacer(Modifier.height(16.dp))
                                 Text(
@@ -188,7 +224,7 @@ fun PollListView(
                                 )
                             }
 
-                            items(pollService.joinedPolls) { poll ->
+                            items(filteredJoinedPolls) { poll ->
                                 PollRowView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
@@ -251,6 +287,45 @@ fun EmptyPollsView(onCreatePoll: () -> Unit) {
 
             Button(onClick = onCreatePoll) {
                 Text("Create Poll")
+            }
+        }
+    }
+}
+
+@Composable
+fun NoPollsView(pastPollsCount: Int, onShowPastPolls: () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Icon(
+                Icons.Default.Add,
+                null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            Text(
+                "No Active Polls",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                "All your polls are closed or archived.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (pastPollsCount > 0) {
+                Button(onClick = onShowPastPolls) {
+                    Text("View Past Polls ($pastPollsCount)")
+                }
             }
         }
     }

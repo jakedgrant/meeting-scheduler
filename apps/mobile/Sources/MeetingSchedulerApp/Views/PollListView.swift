@@ -11,6 +11,23 @@ struct PollListView: View {
     @State var isJoining = false
     @State var navigateToPoll: UUID?
     @State var participantCounts: [UUID: Int] = [:]
+    @State var showPastPolls = false
+
+    private var filteredCreatedPolls: [Poll] {
+        showPastPolls ? pollService.createdPolls : pollService.createdPolls.filter { !isPollClosed($0) }
+    }
+
+    private var filteredJoinedPolls: [Poll] {
+        showPastPolls ? pollService.joinedPolls : pollService.joinedPolls.filter { !isPollClosed($0) }
+    }
+
+    private var pastPollsCount: Int {
+        pollService.createdPolls.filter(isPollClosed).count + pollService.joinedPolls.filter(isPollClosed).count
+    }
+
+    private func isPollClosed(_ poll: Poll) -> Bool {
+        poll.status == .closed || poll.status == .archived
+    }
 
     var body: some View {
         NavigationStack {
@@ -19,6 +36,8 @@ struct PollListView: View {
                     ProgressView("Loading polls...")
                 } else if pollService.createdPolls.isEmpty && pollService.joinedPolls.isEmpty {
                     emptyState
+                } else if filteredCreatedPolls.isEmpty && filteredJoinedPolls.isEmpty && !showPastPolls {
+                    noPollsState
                 } else {
                     pollList
                 }
@@ -26,6 +45,12 @@ struct PollListView: View {
             .navigationTitle("My Polls")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
+                    if pastPollsCount > 0 {
+                        Button(showPastPolls ? "Hide Past" : "Show Past (\(pastPollsCount))") {
+                            showPastPolls.toggle()
+                        }
+                    }
+
                     Button("Join Poll", systemImage: "arrow.down.circle") {
                         showJoinByCode = true
                     }
@@ -79,11 +104,26 @@ struct PollListView: View {
         }
     }
 
+    private var noPollsState: some View {
+        ContentUnavailableView {
+            Label("No Active Polls", systemImage: "calendar")
+        } description: {
+            Text("All your polls are closed or archived.")
+        } actions: {
+            if pastPollsCount > 0 {
+                Button("View Past Polls (\(pastPollsCount))") {
+                    showPastPolls = true
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
     private var pollList: some View {
         List {
-            if !pollService.createdPolls.isEmpty {
+            if !filteredCreatedPolls.isEmpty {
                 Section("My Polls") {
-                    ForEach(pollService.createdPolls) { poll in
+                    ForEach(filteredCreatedPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
                             PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0)
                         }
@@ -91,9 +131,9 @@ struct PollListView: View {
                 }
             }
 
-            if !pollService.joinedPolls.isEmpty {
+            if !filteredJoinedPolls.isEmpty {
                 Section("Polls I Joined") {
-                    ForEach(pollService.joinedPolls) { poll in
+                    ForEach(filteredJoinedPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
                             PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0)
                         }
