@@ -517,7 +517,7 @@
 	.badge-owner {
 		background: #cfe2ff;
 		color: #084298;
-		font-size: 0.7rem;
+		font-size: 0.75rem;
 	}
 
 	.poll-description {
