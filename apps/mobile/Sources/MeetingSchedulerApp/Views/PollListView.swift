@@ -85,7 +85,7 @@ struct PollListView: View {
                 Section("My Polls") {
                     ForEach(pollService.createdPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0)
+                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0, isOwner: true)
                         }
                     }
                 }
@@ -95,7 +95,7 @@ struct PollListView: View {
                 Section("Polls I Joined") {
                     ForEach(pollService.joinedPolls) { poll in
                         NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0)
+                            PollRowView(poll: poll, participantCount: participantCounts[poll.id] ?? 0, isOwner: false)
                         }
                     }
                 }
@@ -235,12 +235,19 @@ struct JoinByCodeSheet: View {
 struct PollRowView: View {
     let poll: Poll
     let participantCount: Int
+    var isOwner: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(poll.title)
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    Text(poll.title)
+                        .font(.headline)
+
+                    if isOwner {
+                        OwnerBadge()
+                    }
+                }
 
                 Spacer()
 
@@ -301,6 +308,21 @@ struct StatusBadge: View {
             .padding(.vertical, 4)
             .background(backgroundColor)
             .foregroundStyle(foregroundColor)
+            .clipShape(Capsule())
+    }
+}
+
+// MARK: - OwnerBadge
+
+struct OwnerBadge: View {
+    var body: some View {
+        Text("Owner")
+            .font(.caption2)
+            .fontWeight(.medium)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Color.blue.opacity(0.15))
+            .foregroundStyle(.blue)
             .clipShape(Capsule())
     }
 }
