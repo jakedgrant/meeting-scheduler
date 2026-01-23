@@ -175,7 +175,8 @@ fun PollListView(
                                     participantCount = participantCounts[poll.id] ?: 0,
                                     timeRange = pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) },
-                                    pollService = pollService
+                                    pollService = pollService,
+                                    isOwner = true
                                 )
                             }
                         }
@@ -196,7 +197,8 @@ fun PollListView(
                                     participantCount = participantCounts[poll.id] ?: 0,
                                     timeRange = pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) },
-                                    pollService = pollService
+                                    pollService = pollService,
+                                    isOwner = false
                                 )
                             }
                         }
@@ -266,7 +268,8 @@ fun PollRowView(
     participantCount: Int = 0,
     timeRange: Pair<Instant, Instant>? = null,
     onClick: () -> Unit,
-    pollService: PollService
+    pollService: PollService,
+    isOwner: Boolean = false
 ) {
     Card(
         modifier = Modifier
@@ -282,12 +285,21 @@ fun PollRowView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    poll.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        poll.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (isOwner) {
+                        OwnerBadge()
+                    }
+                }
 
                 Spacer(Modifier.width(4.dp))
 
@@ -394,6 +406,22 @@ fun JoinByCodeSheet(
             }
         }
     )
+}
+
+@Composable
+fun OwnerBadge() {
+    Surface(
+        color = Color(0xFF1976D2).copy(alpha = 0.15f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(
+            "Owner",
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF0D47A1)
+        )
+    }
 }
 
 // Helper function to load participant counts for all polls
