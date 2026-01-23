@@ -1,6 +1,7 @@
 package com.meetingscheduler.android.ui
 
 import android.content.Intent
+import android.provider.CalendarContract
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -399,7 +400,10 @@ fun PollDetailView(
                             FinalDateDisplay(
                                 selectedStart = selectedStart,
                                 selectedEnd = selectedEnd,
-                                isAllDay = timeOptions.firstOrNull()?.isAllDay ?: false
+                                isAllDay = timeOptions.firstOrNull()?.isAllDay ?: false,
+                                pollTitle = poll?.title ?: "",
+                                pollDescription = poll?.description,
+                                pollLocation = poll?.location
                             )
                         }
                     }
@@ -894,58 +898,99 @@ fun ParticipantRow(participant: PollParticipant, isCurrentUser: Boolean) {
 fun FinalDateDisplay(
     selectedStart: Instant,
     selectedEnd: Instant,
-    isAllDay: Boolean
+    isAllDay: Boolean,
+    pollTitle: String,
+    pollDescription: String?,
+    pollLocation: String?
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = Color.Transparent
-        ),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF6678EB),
-                            Color(0xFF754AA3)
-                        )
-                    ),
-                    RoundedCornerShape(12.dp)
-                )
-                .padding(16.dp)
+    val context = LocalContext.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    "Final Meeting Time Selected",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
+            Text(
+                "Final Meeting Time Selected",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            Button(
+                onClick = {
+                    val intent = Intent(Intent.ACTION_INSERT).apply {
+                        data = CalendarContract.Events.CONTENT_URI
+                        putExtra(CalendarContract.Events.TITLE, pollTitle)
+                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, selectedStart.toEpochMilliseconds())
+                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, selectedEnd.toEpochMilliseconds())
+                        pollDescription?.let {
+                            putExtra(CalendarContract.Events.DESCRIPTION, it)
+                        }
+                        pollLocation?.let {
+                            putExtra(CalendarContract.Events.EVENT_LOCATION, it)
+                        }
+                    }
+                    context.startActivity(intent)
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
                 )
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Add to Calendar", style = MaterialTheme.typography.labelMedium)
+            }
+        }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CalendarToday, null, tint = Color.White)
-                    Spacer(Modifier.width(8.dp))
-                    val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
-                    Text(
-                        dateFormat.format(Date.from(selectedStart.toJavaInstant())),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = Color.Transparent
+            ),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF6678EB),
+                                Color(0xFF754AA3)
+                            )
+                        ),
+                        RoundedCornerShape(12.dp)
                     )
-                }
-
-                if (!isAllDay) {
+                    .padding(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.AccessTime, null, tint = Color.White)
+                        Icon(Icons.Default.CalendarToday, null, tint = Color.White)
                         Spacer(Modifier.width(8.dp))
-                        val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
-                        val start = timeFormat.format(Date.from(selectedStart.toJavaInstant()))
-                        val end = timeFormat.format(Date.from(selectedEnd.toJavaInstant()))
+                        val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
                         Text(
-                            "$start - $end",
-                            style = MaterialTheme.typography.bodyLarge,
+                            dateFormat.format(Date.from(selectedStart.toJavaInstant())),
+                            style = MaterialTheme.typography.titleMedium,
                             color = Color.White
                         )
+                    }
+
+                    if (!isAllDay) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.AccessTime, null, tint = Color.White)
+                            Spacer(Modifier.width(8.dp))
+                            val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+                            val start = timeFormat.format(Date.from(selectedStart.toJavaInstant()))
+                            val end = timeFormat.format(Date.from(selectedEnd.toJavaInstant()))
+                            Text(
+                                "$start - $end",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }

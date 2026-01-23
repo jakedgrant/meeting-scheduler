@@ -19,6 +19,7 @@
 	} from '$lib/stores/polls';
 	import { calendarEnabled, calendarConflicts, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
+	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
 
 	const pollId = $derived($page.params.id as string);
 
@@ -46,6 +47,9 @@
 
 	// Final date selection
 	let selectingFinalDate = $state(false);
+
+	// Add to calendar dropdown
+	let showCalendarDropdown = $state(false);
 
 	// Sort time options by availability (# available, then # maybe)
 	let sortedTimeOptions = $derived(
@@ -270,6 +274,37 @@
 			selectingFinalDate = false;
 		}
 	}
+
+	function addToCalendarICS() {
+		if (!$currentPoll.selected_start_time || !$currentPoll.selected_end_time) return;
+
+		const icsContent = generateICS({
+			title: $currentPoll.title,
+			description: $currentPoll.description || undefined,
+			location: $currentPoll.location || undefined,
+			startTime: $currentPoll.selected_start_time,
+			endTime: $currentPoll.selected_end_time
+		});
+
+		const filename = `${$currentPoll.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.ics`;
+		downloadICS(icsContent, filename);
+		showCalendarDropdown = false;
+	}
+
+	function addToGoogleCalendar() {
+		if (!$currentPoll.selected_start_time || !$currentPoll.selected_end_time) return;
+
+		const url = generateGoogleCalendarUrl({
+			title: $currentPoll.title,
+			description: $currentPoll.description || undefined,
+			location: $currentPoll.location || undefined,
+			startTime: $currentPoll.selected_start_time,
+			endTime: $currentPoll.selected_end_time
+		});
+
+		window.open(url, '_blank');
+		showCalendarDropdown = false;
+	}
 </script>
 
 <div class="poll-detail">
@@ -368,7 +403,26 @@
 			{@const selectedFormatted = formatDateTime($currentPoll.selected_start_time)}
 			{@const selectedEndFormatted = formatDateTime($currentPoll.selected_end_time)}
 			<div class="final-date-display">
-				<h2>Final Meeting Time Selected</h2>
+				<div class="final-date-header">
+					<h2>Final Meeting Time Selected</h2>
+					<div class="calendar-dropdown-container">
+						<button class="btn primary add-to-calendar-btn" onclick={() => (showCalendarDropdown = !showCalendarDropdown)}>
+							📅 Add to Calendar
+						</button>
+						{#if showCalendarDropdown}
+							<div class="calendar-dropdown">
+								<button class="calendar-option" onclick={addToGoogleCalendar}>
+									<span class="option-icon">🌐</span>
+									<span>Google Calendar</span>
+								</button>
+								<button class="calendar-option" onclick={addToCalendarICS}>
+									<span class="option-icon">📱</span>
+									<span>Apple/Outlook Calendar</span>
+								</button>
+							</div>
+						{/if}
+					</div>
+				</div>
 				<div class="final-date-card">
 					<div class="final-date-info">
 						<div class="date">{selectedFormatted.date}</div>
@@ -1033,9 +1087,18 @@
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 	}
 
+	.final-date-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 1rem;
+		gap: 1rem;
+		flex-wrap: wrap;
+	}
+
 	.final-date-display h2,
 	.final-date-selection h2 {
-		margin: 0 0 1rem;
+		margin: 0;
 		font-size: 1.25rem;
 		color: #333;
 	}
@@ -1095,5 +1158,53 @@
 	.select-btn:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
+	}
+
+	.calendar-dropdown-container {
+		position: relative;
+	}
+
+	.add-to-calendar-btn {
+		white-space: nowrap;
+	}
+
+	.calendar-dropdown {
+		position: absolute;
+		top: 100%;
+		right: 0;
+		margin-top: 0.5rem;
+		background: white;
+		border: 1px solid #ddd;
+		border-radius: 6px;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+		min-width: 220px;
+		overflow: hidden;
+		z-index: 10;
+	}
+
+	.calendar-option {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		width: 100%;
+		padding: 0.75rem 1rem;
+		background: white;
+		border: none;
+		cursor: pointer;
+		font-size: 0.875rem;
+		text-align: left;
+		transition: background 0.15s;
+	}
+
+	.calendar-option:hover {
+		background: #f8f9fa;
+	}
+
+	.calendar-option:not(:last-child) {
+		border-bottom: 1px solid #eee;
+	}
+
+	.option-icon {
+		font-size: 1.125rem;
 	}
 </style>
