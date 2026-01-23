@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Download
@@ -11,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.accompanist.swiperefresh.SwipeRefresh
@@ -20,13 +22,6 @@ import com.meetingscheduler.android.services.PollService
 import com.meetingscheduler.android.services.PurchaseService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
-import java.text.SimpleDateFormat
-import java.util.*
-
-// Extension function to convert kotlinx.datetime.Instant to java.time.Instant
-private fun Instant.toJavaInstant(): java.time.Instant {
-    return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +39,7 @@ fun PollListView(
     var navigateToPollId by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
     var participantCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
+    var pollTimeRanges by remember { mutableStateOf<Map<String, Pair<Instant, Instant>>>(emptyMap()) }
 
     val scope = rememberCoroutineScope()
 
@@ -52,6 +48,9 @@ fun PollListView(
             pollService.loadMyPolls()
             loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
                 participantCounts = newCounts
+            }
+            loadAllTimeRanges(pollService) { newRanges ->
+                pollTimeRanges = newRanges
             }
         }
     }
@@ -135,6 +134,9 @@ fun PollListView(
                     loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
                         participantCounts = newCounts
                     }
+                    loadAllTimeRanges(pollService) { newRanges ->
+                        pollTimeRanges = newRanges
+                    }
                     isRefreshing = false
                 }
             },
@@ -173,7 +175,10 @@ fun PollListView(
                                 PollRowView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
-                                    onClick = { onNavigateToPoll(poll.id) }
+                                    timeRange = pollTimeRanges[poll.id],
+                                    onClick = { onNavigateToPoll(poll.id) },
+                                    pollService = pollService,
+                                    isOwner = true
                                 )
                             }
                         }
@@ -192,7 +197,10 @@ fun PollListView(
                                 PollRowView(
                                     poll = poll,
                                     participantCount = participantCounts[poll.id] ?: 0,
-                                    onClick = { onNavigateToPoll(poll.id) }
+                                    timeRange = pollTimeRanges[poll.id],
+                                    onClick = { onNavigateToPoll(poll.id) },
+                                    pollService = pollService,
+                                    isOwner = false
                                 )
                             }
                         }
@@ -257,7 +265,14 @@ fun EmptyPollsView(onCreatePoll: () -> Unit) {
 }
 
 @Composable
-fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
+fun PollRowView(
+    poll: Poll,
+    participantCount: Int = 0,
+    timeRange: Pair<Instant, Instant>? = null,
+    onClick: () -> Unit,
+    pollService: PollService,
+    isOwner: Boolean = false
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -272,11 +287,23 @@ fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    poll.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        poll.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    if (isOwner) {
+                        OwnerBadge()
+                    }
+                }
+
+                Spacer(Modifier.width(4.dp))
 
                 StatusBadge(poll.status)
             }
@@ -297,12 +324,21 @@ fun PollRowView(poll: Poll, participantCount: Int = 0, onClick: () -> Unit) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                Text(
-                    dateFormat.format(Date.from(poll.createdAt.toJavaInstant())),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                )
+                if (timeRange != null) {
+                    Text(
+                        pollService.formatTimeRange(timeRange.first, timeRange.second),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                } else {
+                    Text(
+                        "No time options",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
 
                 Text(
                     "$participantCount participant${if (participantCount != 1) "s" else ""}",
@@ -374,6 +410,22 @@ fun JoinByCodeSheet(
     )
 }
 
+@Composable
+fun OwnerBadge() {
+    Surface(
+        color = Color(0xFF1976D2).copy(alpha = 0.15f),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Text(
+            "Owner",
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Medium,
+            color = Color(0xFF0D47A1)
+        )
+    }
+}
+
 // Helper function to load participant counts for all polls
 private suspend fun loadAllParticipantCounts(
     pollService: PollService,
@@ -394,4 +446,28 @@ private suspend fun loadAllParticipantCounts(
     }
 
     updateCounts(newCounts)
+}
+
+// Helper function to load time ranges for all polls
+private suspend fun loadAllTimeRanges(
+    pollService: PollService,
+    updateRanges: (Map<String, Pair<Instant, Instant>>) -> Unit
+) {
+    val allPolls = pollService.myPolls
+    val newRanges = mutableMapOf<String, Pair<Instant, Instant>>()
+
+    for (poll in allPolls) {
+        try {
+            val timeOptions = pollService.loadTimeOptions(poll.id)
+            if (timeOptions.isNotEmpty()) {
+                val earliest = timeOptions.first().startTime
+                val latest = timeOptions.last().startTime
+                newRanges[poll.id] = Pair(earliest, latest)
+            }
+        } catch (e: Exception) {
+            println("Failed to load time options for poll ${poll.id}: ${e.message}")
+        }
+    }
+
+    updateRanges(newRanges)
 }

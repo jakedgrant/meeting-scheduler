@@ -76,7 +76,15 @@ struct PollDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            if isCreator, let poll = poll, poll.status == .active {
+            
+            ToolbarItem(placement: .principal) {
+                HStack {
+                    Text(poll?.title ?? "Poll")
+                    StatusBadge(status: poll?.status ?? .archived)
+                }
+            }
+            
+            if let poll = poll, poll.status == .active {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Share", systemImage: "square.and.arrow.up") {
                         sharePoll()
@@ -158,11 +166,6 @@ struct PollDetailView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-            }
-            HStack {
-                Text("Status")
-                Spacer()
-                StatusBadge(status: poll.status)
             }
         }
     }
