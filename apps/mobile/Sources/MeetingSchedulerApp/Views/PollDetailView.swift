@@ -76,7 +76,15 @@ struct PollDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            if isCreator, let poll = poll, poll.status == .active {
+            
+            ToolbarItem(placement: .principal) {
+                HStack {
+                    Text(poll?.title ?? "Poll")
+                    StatusBadge(status: poll?.status ?? .archived)
+                }
+            }
+            
+            if let poll = poll, poll.status == .active {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Share", systemImage: "square.and.arrow.up") {
                         sharePoll()
@@ -137,10 +145,27 @@ struct PollDetailView: View {
                 Label(location, systemImage: "mappin")
                     .font(.subheadline)
             }
-            HStack {
-                Text("Status")
-                Spacer()
-                StatusBadge(status: poll.status)
+            if let closesAt = poll.closesAt {
+                let isPastDue = closesAt < Date()
+                let isClosingSoon = !isPastDue && closesAt.timeIntervalSinceNow < 24 * 60 * 60
+
+                HStack {
+                    Label("Response deadline", systemImage: isPastDue ? "exclamationmark.triangle.fill" : "calendar")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(closesAt, style: .date)
+                        .font(.subheadline)
+                        .foregroundStyle(isPastDue ? .red : (isClosingSoon ? .orange : .secondary))
+                }
+                if isPastDue {
+                    Text("Past due")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                } else if isClosingSoon {
+                    Text("Closes soon!")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
         }
     }

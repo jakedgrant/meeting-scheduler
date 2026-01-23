@@ -14,6 +14,8 @@ struct CreatePollView: View {
     @State var title = ""
     @State var description = ""
     @State var location = ""
+    @State var dueDate: Date?
+    @State var hasDueDate = false
     @State var isAllDay = false
     @State var useDateRange = false
     @State var timeOptions: [TimeOption] = [TimeOption()]
@@ -67,6 +69,16 @@ struct CreatePollView: View {
             TextField("Description (optional)", text: $description, axis: .vertical)
                 .lineLimit(3...6)
             TextField("Location (optional)", text: $location)
+
+            Toggle("Set response deadline", isOn: $hasDueDate)
+            if hasDueDate {
+                DatePicker("Due Date", selection: Binding(
+                    get: { dueDate ?? Date() },
+                    set: { dueDate = $0 }
+                ), in: Date()..., displayedComponents: .date)
+                .datePickerStyle(.compact)
+            }
+
             Toggle("All-day events", isOn: $isAllDay)
         }
         .onChange(of: isAllDay) { _, _ in
@@ -271,7 +283,8 @@ struct CreatePollView: View {
                 let poll = try await PollService.shared.createPoll(
                     title: title,
                     description: description.isEmpty ? nil : description,
-                    location: location.isEmpty ? nil : location
+                    location: location.isEmpty ? nil : location,
+                    closesAt: hasDueDate ? dueDate : nil
                 )
 
                 let options = buildTimeOptions()
