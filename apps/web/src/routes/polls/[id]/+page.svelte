@@ -37,6 +37,7 @@
 	let localResponses = $state<Record<string, AvailabilityStatus>>({});
 	let localComment = $state('');
 	let commentError = $state('');
+	let validationError = $state('');
 	let savingResponses = $state(false);
 
 	const MAX_COMMENT_LENGTH = 500;
@@ -185,8 +186,28 @@
 		validateComment(value);
 	}
 
+	function validateAllResponses(): boolean {
+		// Check that all time options have a response
+		const missingResponses = $currentPollTimeOptions.filter(
+			(option) => !localResponses[option.id]
+		);
+
+		if (missingResponses.length > 0) {
+			validationError = 'Please respond to all time options before submitting';
+			return false;
+		}
+
+		validationError = '';
+		return true;
+	}
+
 	async function saveResponses() {
 		if (!myParticipant) return;
+
+		// Validate all time options have responses
+		if (!validateAllResponses()) {
+			return;
+		}
 
 		// Validate comment before saving
 		if (!validateComment(localComment)) {
@@ -541,6 +562,11 @@
 				</div>
 
 				{#if myParticipant && $currentPoll.status === 'active'}
+					{#if validationError}
+						<div class="validation-error">
+							{validationError}
+						</div>
+					{/if}
 					<div class="comment-section">
 						<div class="comment-header">
 							<label for="participant-comment" class="comment-label">Add a comment (optional)</label>
@@ -983,6 +1009,17 @@
 		font-size: 0.8125rem;
 		color: #c00;
 		margin: 0.5rem 0 0 0;
+	}
+
+	.validation-error {
+		background: #f8d7da;
+		color: #721c24;
+		padding: 0.75rem 1rem;
+		border-radius: 6px;
+		margin-bottom: 1rem;
+		border: 1px solid #f5c6cb;
+		font-size: 0.875rem;
+		font-weight: 500;
 	}
 
 	.save-section {

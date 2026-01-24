@@ -63,6 +63,7 @@ fun PollDetailView(
     var localResponses by remember { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
     var localComment by remember { mutableStateOf("") }
     var commentError by remember { mutableStateOf("") }
+    var validationError by remember { mutableStateOf("") }
     var calendarConflicts by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val MAX_COMMENT_LENGTH = 500
@@ -459,6 +460,36 @@ fun PollDetailView(
                     )
                 }
 
+                // Validation Error
+                if (myParticipant != null && poll?.status == PollStatus.ACTIVE && validationError.isNotEmpty()) {
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                                Text(
+                                    validationError,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Comment Field
                 if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
@@ -516,6 +547,16 @@ fun PollDetailView(
                     item {
                         Button(
                             onClick = {
+                                // Validate all time options have responses
+                                val missingResponses = timeOptions.filter { option ->
+                                    !localResponses.containsKey(option.id)
+                                }
+                                if (missingResponses.isNotEmpty()) {
+                                    validationError = "Please respond to all time options before submitting"
+                                    return@Button
+                                }
+                                validationError = ""
+
                                 // Validate comment
                                 if (localComment.length > MAX_COMMENT_LENGTH) {
                                     commentError = "Comment must be $MAX_COMMENT_LENGTH characters or less"

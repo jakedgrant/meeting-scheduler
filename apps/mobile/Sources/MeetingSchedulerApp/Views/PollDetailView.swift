@@ -16,6 +16,7 @@ struct PollDetailView: View {
     @State var localResponses: [UUID: AvailabilityStatus] = [:]
     @State var localComment: String = ""
     @State var commentError: String = ""
+    @State var validationError: String = ""
     @State var calendarConflicts: Set<UUID> = []
 
     private let MAX_COMMENT_LENGTH = 500
@@ -126,6 +127,7 @@ struct PollDetailView: View {
             joinButtonSection(poll)
             finalDateSection(poll)
             timeOptionsSection(poll)
+            validationErrorSection()
             commentSection(poll)
             saveButtonSection(poll)
             participantsSection
@@ -287,6 +289,22 @@ struct PollDetailView: View {
                     )
                 }
                 .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func validationErrorSection() -> some View {
+        if !validationError.isEmpty {
+            Section {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                    Text(validationError)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
+                .padding(.vertical, 4)
             }
         }
     }
@@ -479,8 +497,26 @@ struct PollDetailView: View {
         return true
     }
 
+    private func validateAllResponses() -> Bool {
+        // Check that all time options have a response
+        let missingResponses = timeOptions.filter { option in
+            localResponses[option.id] == nil
+        }
+
+        if !missingResponses.isEmpty {
+            validationError = "Please respond to all time options before submitting"
+            return false
+        }
+
+        validationError = ""
+        return true
+    }
+
     private func saveResponses() {
         guard let myParticipant = myParticipant else { return }
+
+        // Validate all time options have responses
+        guard validateAllResponses() else { return }
 
         // Validate comment
         guard validateComment() else { return }
