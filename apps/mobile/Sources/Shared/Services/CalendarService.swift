@@ -354,15 +354,27 @@ public final class CalendarService {
         notes: String? = nil,
         location: String? = nil
     ) async -> Bool {
+        
         updateAuthorizationStatus()
-
-        // Check if we have permission
-        guard authorizationStatus == .fullAccess else {
-            // Try to request permission
-            let granted = await requestAccess()
-            if !granted {
-                return false
-            }
+        
+        // check permission
+        switch authorizationStatus {
+        case .notDetermined:
+            
+            let _ = await requestAccess()
+            return false //
+            
+        case .restricted, .denied:
+            return false
+            
+        case .fullAccess, .writeOnly:
+            break
+            
+        case .authorized: // (Deprecated) This application is authorized to access the service.
+            break
+            
+        @unknown default:
+            return false
         }
 
         // Create the event
