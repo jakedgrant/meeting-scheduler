@@ -2,7 +2,7 @@ import SwiftUI
 import Shared
 
 struct PollListView: View {
-    @State var pollService = PollService.shared
+    @State var pollService: any PollServiceProtocol
     @State var showCreatePoll = false
     @State var showPaywall = false
     @State var showJoinByCode = false
@@ -12,6 +12,10 @@ struct PollListView: View {
     @State var navigateToPoll: UUID?
     @State var participantCounts: [UUID: Int] = [:]
     @State var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
+
+    init(pollService: any PollServiceProtocol = PollService.shared) {
+        self.pollService = pollService
+    }
 
     var body: some View {
         NavigationStack {
@@ -92,7 +96,8 @@ struct PollListView: View {
                                 poll: poll,
                                 participantCount: participantCounts[poll.id] ?? 0,
                                 isOwner: true,
-                                timeRange: pollTimeRanges[poll.id]
+                                timeRange: pollTimeRanges[poll.id],
+                                pollService: pollService
                             )
                         }
                     }
@@ -107,7 +112,8 @@ struct PollListView: View {
                                 poll: poll,
                                 participantCount: participantCounts[poll.id] ?? 0,
                                 isOwner: false,
-                                timeRange: pollTimeRanges[poll.id]
+                                timeRange: pollTimeRanges[poll.id],
+                                pollService: pollService
                             )
                         }
                     }
@@ -266,6 +272,7 @@ struct PollRowView: View {
     let participantCount: Int
     var isOwner: Bool = false
     let timeRange: (earliest: Date, latest: Date)?
+    var pollService: any PollServiceProtocol
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -291,7 +298,7 @@ struct PollRowView: View {
 
             HStack {
                 if let range = timeRange {
-                    Text(PollService.shared.formatTimeRange(earliest: range.earliest, latest: range.latest))
+                    Text(pollService.formatTimeRange(earliest: range.earliest, latest: range.latest))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -361,6 +368,10 @@ struct OwnerBadge: View {
     }
 }
 
-#Preview {
-    PollListView()
+#Preview("With Polls") {
+    PollListView(pollService: MockPollService.withSamplePolls)
+}
+
+#Preview("Empty") {
+    PollListView(pollService: MockPollService.empty)
 }

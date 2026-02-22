@@ -2,9 +2,11 @@ import SwiftUI
 import Shared
 
 public struct ContentView: View {
-    @State var authService = AuthService.shared
+    @State var authService: any AuthServiceProtocol
 
-    public init() {}
+    public init(authService: any AuthServiceProtocol = AuthService.shared) {
+        self.authService = authService
+    }
 
     public var body: some View {
         Group {
@@ -43,6 +45,14 @@ struct MainTabView: View {
     }
 }
 
-#Preview {
-    ContentView()
+#Preview("Signed In") {
+    ContentView(authService: MockAuthService.signedIn)
+}
+
+#Preview("Signed Out") {
+    ContentView(authService: MockAuthService.signedOut)
+}
+
+#Preview("Loading") {
+    ContentView(authService: MockAuthService.loading)
 }

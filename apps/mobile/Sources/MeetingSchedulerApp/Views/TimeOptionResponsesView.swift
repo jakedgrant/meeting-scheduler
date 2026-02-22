@@ -4,10 +4,21 @@ import Shared
 struct TimeOptionResponsesView: View {
     let pollId: UUID
     let timeOption: PollTimeOption
+    var pollService: any PollServiceProtocol
 
     @State var participants: [PollParticipant] = []
     @State var responses: [AvailabilityResponse] = []
     @State var isLoading = true
+
+    init(
+        pollId: UUID,
+        timeOption: PollTimeOption,
+        pollService: any PollServiceProtocol = PollService.shared
+    ) {
+        self.pollId = pollId
+        self.timeOption = timeOption
+        self.pollService = pollService
+    }
 
     private var groupedResponses: GroupedResponses {
         let optionResponses = responses.filter { $0.timeOptionId == timeOption.id }
@@ -151,9 +162,9 @@ struct TimeOptionResponsesView: View {
     private func loadData() async {
         isLoading = true
 
-        participants = await PollService.shared.loadParticipants(pollId: pollId)
+        participants = await pollService.loadParticipants(pollId: pollId)
         let participantIds = participants.map { $0.id }
-        responses = await PollService.shared.loadResponses(participantIds: participantIds)
+        responses = await pollService.loadResponses(participantIds: participantIds)
 
         isLoading = false
     }
@@ -204,7 +215,8 @@ struct ResponseRow: View {
                 endTime: Date().addingTimeInterval(3600),
                 isAllDay: false,
                 createdAt: Date()
-            )
+            ),
+            pollService: MockPollService.withSamplePolls
         )
     }
 }

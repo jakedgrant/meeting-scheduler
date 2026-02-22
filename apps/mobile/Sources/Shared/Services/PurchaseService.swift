@@ -3,7 +3,7 @@ import RevenueCat
 
 @MainActor
 @Observable
-public final class PurchaseService {
+public final class PurchaseService: PurchaseServiceProtocol {
     public static let shared = PurchaseService()
 
     public private(set) var customerInfo: CustomerInfo?

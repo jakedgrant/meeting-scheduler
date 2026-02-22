@@ -4,13 +4,17 @@ import Shared
 struct ProfileEditView: View {
     @Environment(\.dismiss) var dismiss
 
-    @State var authService = AuthService.shared
+    @State var authService: any AuthServiceProtocol
     @State var displayName: String = ""
     @State var avatarUrl: String = ""
     @State var timezone: String = "UTC"
     @State var isSaving = false
     @State var errorMessage: String?
     @State var showSuccessAlert = false
+
+    init(authService: any AuthServiceProtocol = AuthService.shared) {
+        self.authService = authService
+    }
 
     private let timezones = [
         "UTC",
@@ -177,5 +181,5 @@ struct ProfileEditView: View {
 }
 
 #Preview {
-    ProfileEditView()
+    ProfileEditView(authService: MockAuthService.signedIn)
 }

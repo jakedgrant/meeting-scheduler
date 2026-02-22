@@ -2,15 +2,25 @@ import SwiftUI
 import Shared
 
 struct SettingsView: View {
-    @State var authService = AuthService.shared
-    @State var purchaseService = PurchaseService.shared
-    @State var calendarService = CalendarService.shared
+    @State var authService: any AuthServiceProtocol
+    @State var purchaseService: any PurchaseServiceProtocol
+    @State var calendarService: any CalendarServiceProtocol
     @State var showPaywall = false
     @State var showProfileEdit = false
     @State var isSigningOut = false
 
+    init(
+        authService: any AuthServiceProtocol = AuthService.shared,
+        purchaseService: any PurchaseServiceProtocol = PurchaseService.shared,
+        calendarService: any CalendarServiceProtocol = CalendarService.shared
+    ) {
+        self.authService = authService
+        self.purchaseService = purchaseService
+        self.calendarService = calendarService
+    }
+
     private var displayName: String {
-        authService.profile?.displayName ?? authService.currentUser?.email ?? "User"
+        authService.profile?.displayName ?? authService.currentUserEmail ?? "User"
     }
 
     private var initials: String {
@@ -51,7 +61,7 @@ struct SettingsView: View {
                 ProfileRow(
                     avatarUrl: authService.profile?.avatarUrl,
                     displayName: displayName,
-                    email: authService.currentUser?.email ?? "",
+                    email: authService.currentUserEmail ?? "",
                     initials: initials
                 )
             }
@@ -232,7 +242,7 @@ struct ProfileRow: View {
 // MARK: - AppleCalendarToggle
 
 struct AppleCalendarToggle: View {
-    let calendarService: CalendarService
+    let calendarService: any CalendarServiceProtocol
 
     var body: some View {
         Toggle(isOn: Binding(
@@ -261,7 +271,7 @@ struct AppleCalendarToggle: View {
 // MARK: - GoogleCalendarToggle
 
 struct GoogleCalendarToggle: View {
-    let calendarService: CalendarService
+    let calendarService: any CalendarServiceProtocol
 
     var body: some View {
         Toggle(isOn: Binding(
@@ -294,6 +304,18 @@ struct GoogleCalendarToggle: View {
     }
 }
 
-#Preview {
-    SettingsView()
+#Preview("Signed In") {
+    SettingsView(
+        authService: MockAuthService.signedIn,
+        purchaseService: MockPurchaseService.free,
+        calendarService: MockCalendarService.disabled
+    )
+}
+
+#Preview("Pro User") {
+    SettingsView(
+        authService: MockAuthService.signedIn,
+        purchaseService: MockPurchaseService.pro,
+        calendarService: MockCalendarService.allEnabled
+    )
 }

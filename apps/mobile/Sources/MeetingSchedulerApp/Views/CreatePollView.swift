@@ -11,6 +11,8 @@ struct TimeOption: Identifiable {
 struct CreatePollView: View {
     @Environment(\.dismiss) var dismiss
 
+    var pollService: any PollServiceProtocol
+
     @State var title = ""
     @State var description = ""
     @State var location = ""
@@ -30,6 +32,10 @@ struct CreatePollView: View {
 
     // Multi-date picker for all-day events
     @State var selectedDates = Set<DateComponents>()
+
+    init(pollService: any PollServiceProtocol = PollService.shared) {
+        self.pollService = pollService
+    }
 
     var body: some View {
         NavigationStack {
@@ -280,10 +286,11 @@ struct CreatePollView: View {
 
         Task {
             do {
-                let poll = try await PollService.shared.createPoll(
+                let poll = try await pollService.createPoll(
                     title: title,
                     description: description.isEmpty ? nil : description,
                     location: location.isEmpty ? nil : location,
+                    timezone: TimeZone.current.identifier,
                     closesAt: hasDueDate ? dueDate : nil
                 )
 
@@ -301,7 +308,7 @@ struct CreatePollView: View {
                     }
                 }
 
-                _ = try await PollService.shared.addTimeOptions(pollId: poll.id, options: options)
+                _ = try await pollService.addTimeOptions(pollId: poll.id, options: options)
 
                 await MainActor.run {
                     dismiss()
@@ -402,5 +409,5 @@ struct TimeOptionView: View {
 }
 
 #Preview {
-    CreatePollView()
+    CreatePollView(pollService: MockPollService.empty)
 }

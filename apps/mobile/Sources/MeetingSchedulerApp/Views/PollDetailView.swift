@@ -7,6 +7,9 @@ import UIKit
 
 struct PollDetailView: View {
     let pollId: UUID
+    var authService: any AuthServiceProtocol
+    var pollService: any PollServiceProtocol
+    var calendarService: any CalendarServiceProtocol
 
     @State var poll: Poll?
     @State var timeOptions: [PollTimeOption] = []
@@ -27,8 +30,20 @@ struct PollDetailView: View {
     @State var isSelectingFinalDate = false
     @State var selectedTimeOption: PollTimeOption?
 
+    init(
+        pollId: UUID,
+        authService: any AuthServiceProtocol = AuthService.shared,
+        pollService: any PollServiceProtocol = PollService.shared,
+        calendarService: any CalendarServiceProtocol = CalendarService.shared
+    ) {
+        self.pollId = pollId
+        self.authService = authService
+        self.pollService = pollService
+        self.calendarService = calendarService
+    }
+
     private var isCreator: Bool {
-        poll?.creatorId == AuthService.shared.currentUser?.id
+        poll?.creatorId == authService.currentUserId
     }
 
     private var sortedTimeOptions: [PollTimeOption] {
@@ -76,14 +91,14 @@ struct PollDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .toolbar {
-            
+
             ToolbarItem(placement: .principal) {
                 HStack {
                     Text(poll?.title ?? "Poll")
                     StatusBadge(status: poll?.status ?? .archived)
                 }
             }
-            
+
             if let poll = poll, poll.status == .active {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Share", systemImage: "square.and.arrow.up") {
@@ -112,7 +127,7 @@ struct PollDetailView: View {
             Text("Set \(formattedSelectedOption) as the final meeting time? All participants will be notified.")
         }
         .navigationDestination(item: $selectedTimeOption) { timeOption in
-            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
+            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption, pollService: pollService)
         }
     }
 
@@ -251,7 +266,8 @@ struct PollDetailView: View {
                     isAllDay: timeOptions.first(where: { $0.isAllDay }) != nil,
                     pollTitle: poll.title,
                     pollDescription: poll.description,
-                    pollLocation: poll.location
+                    pollLocation: poll.location,
+                    calendarService: calendarService
                 )
             }
         } else if isCreator && poll.status == .closed {
@@ -372,7 +388,7 @@ struct PollDetailView: View {
                 ForEach(participants) { participant in
                     ParticipantRow(
                         participant: participant,
-                        isCurrentUser: participant.userId == AuthService.shared.currentUser?.id
+                        isCurrentUser: participant.userId == authService.currentUserId
                     )
                 }
             }
@@ -411,18 +427,18 @@ struct PollDetailView: View {
     private func loadPollData() async {
         isLoading = true
 
-        poll = await PollService.shared.loadPoll(id: pollId)
+        poll = await pollService.loadPoll(id: pollId)
 
         if poll != nil {
-            timeOptions = await PollService.shared.loadTimeOptions(pollId: pollId)
-            participants = await PollService.shared.loadParticipants(pollId: pollId)
+            timeOptions = await pollService.loadTimeOptions(pollId: pollId)
+            participants = await pollService.loadParticipants(pollId: pollId)
 
-            if let userId = AuthService.shared.currentUser?.id {
+            if let userId = authService.currentUserId {
                 myParticipant = participants.first { $0.userId == userId }
             }
 
             let participantIds = participants.map { $0.id }
-            responses = await PollService.shared.loadResponses(participantIds: participantIds)
+            responses = await pollService.loadResponses(participantIds: participantIds)
 
             if let myParticipant = myParticipant {
                 let myResponses = responses.filter { $0.participantId == myParticipant.id }
@@ -432,8 +448,8 @@ struct PollDetailView: View {
                 localComment = myParticipant.comment ?? ""
             }
 
-            if CalendarService.shared.isEnabled && !timeOptions.isEmpty {
-                calendarConflicts = await CalendarService.shared.checkConflicts(for: timeOptions)
+            if calendarService.isEnabled && !timeOptions.isEmpty {
+                calendarConflicts = await calendarService.checkConflicts(for: timeOptions)
 
                 for conflictId in calendarConflicts {
                     if localResponses[conflictId] == nil {
@@ -451,7 +467,7 @@ struct PollDetailView: View {
     private func updateStatus(_ status: PollStatus) {
         Task {
             do {
-                try await PollService.shared.updatePollStatus(pollId: pollId, status: status)
+                try await pollService.updatePollStatus(pollId: pollId, status: status)
                 poll?.status = status
             } catch {
                 print("Failed to update status: \(error)")
@@ -462,7 +478,7 @@ struct PollDetailView: View {
     private func joinPoll() {
         Task {
             do {
-                myParticipant = try await PollService.shared.joinPoll(pollId: pollId)
+                myParticipant = try await pollService.joinPoll(pollId: pollId, anonymousName: nil)
                 participants.append(myParticipant!)
             } catch {
                 print("Failed to join poll: \(error)")
@@ -490,10 +506,11 @@ struct PollDetailView: View {
         Task {
             for (optionId, status) in localResponses {
                 do {
-                    try await PollService.shared.submitAvailability(
+                    try await pollService.submitAvailability(
                         participantId: myParticipant.id,
                         timeOptionId: optionId,
-                        status: status
+                        status: status,
+                        note: nil
                     )
                 } catch {
                     print("Failed to save response: \(error)")
@@ -503,7 +520,7 @@ struct PollDetailView: View {
             // Save comment (trimmed, nil if empty)
             do {
                 let trimmedComment = localComment.trimmingCharacters(in: .whitespacesAndNewlines)
-                try await PollService.shared.updateParticipantComment(
+                try await pollService.updateParticipantComment(
                     participantId: myParticipant.id,
                     comment: trimmedComment.isEmpty ? nil : trimmedComment
                 )
@@ -512,8 +529,8 @@ struct PollDetailView: View {
             }
 
             let participantIds = participants.map { $0.id }
-            responses = await PollService.shared.loadResponses(participantIds: participantIds)
-            participants = await PollService.shared.loadParticipants(pollId: pollId)
+            responses = await pollService.loadResponses(participantIds: participantIds)
+            participants = await pollService.loadParticipants(pollId: pollId)
 
             isSaving = false
         }
@@ -526,12 +543,12 @@ struct PollDetailView: View {
 
         Task {
             do {
-                try await PollService.shared.setSelectedFinalDate(
+                try await pollService.setSelectedFinalDate(
                     pollId: pollId,
                     startTime: option.startTime,
                     endTime: option.endTime
                 )
-                poll = await PollService.shared.loadPoll(id: pollId)
+                poll = await pollService.loadPoll(id: pollId)
             } catch {
                 print("Failed to set final date: \(error)")
             }
@@ -620,9 +637,28 @@ struct FinalDateDisplay: View {
     let pollTitle: String
     let pollDescription: String?
     let pollLocation: String?
+    var calendarService: any CalendarServiceProtocol
 
     @State private var showAddToCalendarAlert = false
     @State private var addingToCalendar = false
+
+    init(
+        selectedStart: Date,
+        selectedEnd: Date,
+        isAllDay: Bool,
+        pollTitle: String,
+        pollDescription: String?,
+        pollLocation: String?,
+        calendarService: any CalendarServiceProtocol = CalendarService.shared
+    ) {
+        self.selectedStart = selectedStart
+        self.selectedEnd = selectedEnd
+        self.isAllDay = isAllDay
+        self.pollTitle = pollTitle
+        self.pollDescription = pollDescription
+        self.pollLocation = pollLocation
+        self.calendarService = calendarService
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -696,7 +732,7 @@ struct FinalDateDisplay: View {
     }
 
     private func addToCalendar() async {
-        let success = await CalendarService.shared.addEventToCalendar(
+        let success = await calendarService.addEventToCalendar(
             title: pollTitle,
             startDate: selectedStart,
             endDate: selectedEnd,
@@ -940,8 +976,25 @@ struct ResponseButton: View {
     }
 }
 
-#Preview {
+#Preview("Loading") {
     NavigationStack {
-        PollDetailView(pollId: UUID())
+        PollDetailView(
+            pollId: UUID(),
+            authService: MockAuthService.signedIn,
+            pollService: MockPollService.empty,
+            calendarService: MockCalendarService.disabled
+        )
+    }
+}
+
+#Preview("With Data") {
+    let mock = MockPollService.withSamplePolls
+    NavigationStack {
+        PollDetailView(
+            pollId: mock.myPolls.first?.id ?? UUID(),
+            authService: MockAuthService.signedIn,
+            pollService: mock,
+            calendarService: MockCalendarService.disabled
+        )
     }
 }
