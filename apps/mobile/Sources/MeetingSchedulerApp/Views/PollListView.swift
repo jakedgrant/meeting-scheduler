@@ -2,7 +2,7 @@ import SwiftUI
 import Shared
 
 struct PollListView: View {
-    @State var pollService = PollService.shared
+    @Environment(\.pollService) var pollService
     @State var showCreatePoll = false
     @State var showPaywall = false
     @State var showJoinByCode = false
@@ -262,6 +262,7 @@ struct JoinByCodeSheet: View {
 // MARK: - PollRowView
 
 struct PollRowView: View {
+    @Environment(\.pollService) var pollService
     let poll: Poll
     let participantCount: Int
     var isOwner: Bool = false
@@ -291,7 +292,7 @@ struct PollRowView: View {
 
             HStack {
                 if let range = timeRange {
-                    Text(PollService.shared.formatTimeRange(earliest: range.earliest, latest: range.latest))
+                    Text(pollService.formatTimeRange(earliest: range.earliest, latest: range.latest))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -361,6 +362,12 @@ struct OwnerBadge: View {
     }
 }
 
-#Preview {
+#Preview("With Polls") {
     PollListView()
+        .environment(\.pollService, MockPollService.withSamplePolls)
+}
+
+#Preview("Empty") {
+    PollListView()
+        .environment(\.pollService, MockPollService.empty)
 }

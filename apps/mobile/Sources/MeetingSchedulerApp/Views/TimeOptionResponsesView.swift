@@ -4,6 +4,7 @@ import Shared
 struct TimeOptionResponsesView: View {
     let pollId: UUID
     let timeOption: PollTimeOption
+    @Environment(\.pollService) var pollService
 
     @State var participants: [PollParticipant] = []
     @State var responses: [AvailabilityResponse] = []
@@ -151,9 +152,9 @@ struct TimeOptionResponsesView: View {
     private func loadData() async {
         isLoading = true
 
-        participants = await PollService.shared.loadParticipants(pollId: pollId)
+        participants = await pollService.loadParticipants(pollId: pollId)
         let participantIds = participants.map { $0.id }
-        responses = await PollService.shared.loadResponses(participantIds: participantIds)
+        responses = await pollService.loadResponses(participantIds: participantIds)
 
         isLoading = false
     }
@@ -207,4 +208,5 @@ struct ResponseRow: View {
             )
         )
     }
+    .environment(\.pollService, MockPollService.withSamplePolls)
 }

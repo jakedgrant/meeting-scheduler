@@ -2,6 +2,8 @@ import SwiftUI
 import Shared
 
 struct AuthView: View {
+    @Environment(\.authService) var authService
+
     @State var email = ""
     @State var isLoading = false
     @State var errorMessage: String?
@@ -131,7 +133,7 @@ struct AuthView: View {
 
         Task {
             do {
-                try await AuthService.shared.signInWithGoogle()
+                try await authService.signInWithGoogle()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -145,7 +147,7 @@ struct AuthView: View {
 
         Task {
             do {
-                try await AuthService.shared.signInWithApple()
+                try await authService.signInWithApple()
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -159,7 +161,7 @@ struct AuthView: View {
 
         Task {
             do {
-                try await AuthService.shared.signInWithMagicLink(email: email)
+                try await authService.signInWithMagicLink(email: email)
                 showMagicLinkSent = true
             } catch {
                 errorMessage = error.localizedDescription
@@ -171,4 +173,5 @@ struct AuthView: View {
 
 #Preview {
     AuthView()
+        .environment(\.authService, MockAuthService.signedOut)
 }

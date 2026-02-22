@@ -12,7 +12,7 @@ public enum CalendarSource: String, Codable {
 /// Supports both Apple Calendar (EventKit) and Google Calendar APIs
 @MainActor
 @Observable
-public final class CalendarService {
+public final class CalendarService: CalendarServiceProtocol {
     public static let shared = CalendarService()
 
     private let eventStore = EKEventStore()

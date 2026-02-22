@@ -6,7 +6,7 @@ import CryptoKit
 
 @MainActor
 @Observable
-public final class AuthService: NSObject {
+public final class AuthService: NSObject, AuthServiceProtocol {
     public static let shared = AuthService()
 
     public private(set) var currentUser: User?
@@ -17,6 +17,9 @@ public final class AuthService: NSObject {
     public var isAuthenticated: Bool {
         currentUser != nil
     }
+
+    public var currentUserId: UUID? { currentUser?.id }
+    public var currentUserEmail: String? { currentUser?.email }
 
     private let supabase = SupabaseService.shared.client
     private var currentNonce: String?

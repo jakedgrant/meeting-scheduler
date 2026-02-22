@@ -2,7 +2,7 @@ import SwiftUI
 import Shared
 
 public struct ContentView: View {
-    @State var authService = AuthService.shared
+    @Environment(\.authService) var authService
 
     public init() {}
 
@@ -43,6 +43,17 @@ struct MainTabView: View {
     }
 }
 
-#Preview {
+#Preview("Signed In") {
     ContentView()
+        .environment(\.authService, MockAuthService.signedIn)
+}
+
+#Preview("Signed Out") {
+    ContentView()
+        .environment(\.authService, MockAuthService.signedOut)
+}
+
+#Preview("Loading") {
+    ContentView()
+        .environment(\.authService, MockAuthService.loading)
 }

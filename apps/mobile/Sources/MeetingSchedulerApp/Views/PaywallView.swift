@@ -4,8 +4,8 @@ import RevenueCat
 
 struct PaywallView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.purchaseService) var purchaseService
 
-    @State var purchaseService = PurchaseService.shared
     @State var selectedPackage: Package?
     @State var isPurchasing = false
     @State var errorMessage: String?
@@ -263,6 +263,12 @@ struct FeatureRow: View {
     }
 }
 
-#Preview {
+#Preview("Free User") {
     PaywallView()
+        .environment(\.purchaseService, MockPurchaseService.free)
+}
+
+#Preview("Pro User") {
+    PaywallView()
+        .environment(\.purchaseService, MockPurchaseService.pro)
 }

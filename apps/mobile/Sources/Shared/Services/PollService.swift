@@ -9,7 +9,7 @@ private struct ParticipatedPollsResponse: Decodable {
 
 @MainActor
 @Observable
-public final class PollService {
+public final class PollService: PollServiceProtocol {
     public static let shared = PollService()
 
     public private(set) var myPolls: [Poll] = []

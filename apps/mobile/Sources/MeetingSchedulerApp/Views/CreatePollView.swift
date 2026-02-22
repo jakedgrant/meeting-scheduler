@@ -10,6 +10,7 @@ struct TimeOption: Identifiable {
 
 struct CreatePollView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.pollService) var pollService
 
     @State var title = ""
     @State var description = ""
@@ -280,10 +281,11 @@ struct CreatePollView: View {
 
         Task {
             do {
-                let poll = try await PollService.shared.createPoll(
+                let poll = try await pollService.createPoll(
                     title: title,
                     description: description.isEmpty ? nil : description,
                     location: location.isEmpty ? nil : location,
+                    timezone: TimeZone.current.identifier,
                     closesAt: hasDueDate ? dueDate : nil
                 )
 
@@ -301,7 +303,7 @@ struct CreatePollView: View {
                     }
                 }
 
-                _ = try await PollService.shared.addTimeOptions(pollId: poll.id, options: options)
+                _ = try await pollService.addTimeOptions(pollId: poll.id, options: options)
 
                 await MainActor.run {
                     dismiss()
@@ -403,4 +405,5 @@ struct TimeOptionView: View {
 
 #Preview {
     CreatePollView()
+        .environment(\.pollService, MockPollService.empty)
 }

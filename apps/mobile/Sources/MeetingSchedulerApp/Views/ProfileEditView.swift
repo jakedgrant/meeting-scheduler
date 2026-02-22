@@ -3,8 +3,8 @@ import Shared
 
 struct ProfileEditView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.authService) var authService
 
-    @State var authService = AuthService.shared
     @State var displayName: String = ""
     @State var avatarUrl: String = ""
     @State var timezone: String = "UTC"
@@ -178,4 +178,5 @@ struct ProfileEditView: View {
 
 #Preview {
     ProfileEditView()
+        .environment(\.authService, MockAuthService.signedIn)
 }
