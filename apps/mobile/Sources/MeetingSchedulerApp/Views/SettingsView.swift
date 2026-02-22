@@ -2,22 +2,12 @@ import SwiftUI
 import Shared
 
 struct SettingsView: View {
-    @State var authService: any AuthServiceProtocol
-    @State var purchaseService: any PurchaseServiceProtocol
-    @State var calendarService: any CalendarServiceProtocol
+    @Environment(\.authService) var authService
+    @Environment(\.purchaseService) var purchaseService
+    @Environment(\.calendarService) var calendarService
     @State var showPaywall = false
     @State var showProfileEdit = false
     @State var isSigningOut = false
-
-    init(
-        authService: any AuthServiceProtocol = AuthService.shared,
-        purchaseService: any PurchaseServiceProtocol = PurchaseService.shared,
-        calendarService: any CalendarServiceProtocol = CalendarService.shared
-    ) {
-        self.authService = authService
-        self.purchaseService = purchaseService
-        self.calendarService = calendarService
-    }
 
     private var displayName: String {
         authService.profile?.displayName ?? authService.currentUserEmail ?? "User"
@@ -104,8 +94,8 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                AppleCalendarToggle(calendarService: calendarService)
-                GoogleCalendarToggle(calendarService: calendarService)
+                AppleCalendarToggle()
+                GoogleCalendarToggle()
 
                 if calendarService.googleCalendarLoading {
                     HStack {
@@ -242,7 +232,7 @@ struct ProfileRow: View {
 // MARK: - AppleCalendarToggle
 
 struct AppleCalendarToggle: View {
-    let calendarService: any CalendarServiceProtocol
+    @Environment(\.calendarService) var calendarService
 
     var body: some View {
         Toggle(isOn: Binding(
@@ -271,7 +261,7 @@ struct AppleCalendarToggle: View {
 // MARK: - GoogleCalendarToggle
 
 struct GoogleCalendarToggle: View {
-    let calendarService: any CalendarServiceProtocol
+    @Environment(\.calendarService) var calendarService
 
     var body: some View {
         Toggle(isOn: Binding(
@@ -305,17 +295,15 @@ struct GoogleCalendarToggle: View {
 }
 
 #Preview("Signed In") {
-    SettingsView(
-        authService: MockAuthService.signedIn,
-        purchaseService: MockPurchaseService.free,
-        calendarService: MockCalendarService.disabled
-    )
+    SettingsView()
+        .environment(\.authService, MockAuthService.signedIn)
+        .environment(\.purchaseService, MockPurchaseService.free)
+        .environment(\.calendarService, MockCalendarService.disabled)
 }
 
 #Preview("Pro User") {
-    SettingsView(
-        authService: MockAuthService.signedIn,
-        purchaseService: MockPurchaseService.pro,
-        calendarService: MockCalendarService.allEnabled
-    )
+    SettingsView()
+        .environment(\.authService, MockAuthService.signedIn)
+        .environment(\.purchaseService, MockPurchaseService.pro)
+        .environment(\.calendarService, MockCalendarService.allEnabled)
 }

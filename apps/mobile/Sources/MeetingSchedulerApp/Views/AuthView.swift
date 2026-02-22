@@ -2,16 +2,12 @@ import SwiftUI
 import Shared
 
 struct AuthView: View {
-    var authService: any AuthServiceProtocol
+    @Environment(\.authService) var authService
 
     @State var email = ""
     @State var isLoading = false
     @State var errorMessage: String?
     @State var showMagicLinkSent = false
-
-    init(authService: any AuthServiceProtocol = AuthService.shared) {
-        self.authService = authService
-    }
 
     var body: some View {
         NavigationStack {
@@ -176,5 +172,6 @@ struct AuthView: View {
 }
 
 #Preview {
-    AuthView(authService: MockAuthService.signedOut)
+    AuthView()
+        .environment(\.authService, MockAuthService.signedOut)
 }

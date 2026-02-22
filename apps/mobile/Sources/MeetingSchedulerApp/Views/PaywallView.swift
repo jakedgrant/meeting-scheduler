@@ -4,15 +4,11 @@ import RevenueCat
 
 struct PaywallView: View {
     @Environment(\.dismiss) var dismiss
+    @Environment(\.purchaseService) var purchaseService
 
-    @State var purchaseService: any PurchaseServiceProtocol
     @State var selectedPackage: Package?
     @State var isPurchasing = false
     @State var errorMessage: String?
-
-    init(purchaseService: any PurchaseServiceProtocol = PurchaseService.shared) {
-        self.purchaseService = purchaseService
-    }
 
     var body: some View {
         NavigationStack {
@@ -268,9 +264,11 @@ struct FeatureRow: View {
 }
 
 #Preview("Free User") {
-    PaywallView(purchaseService: MockPurchaseService.free)
+    PaywallView()
+        .environment(\.purchaseService, MockPurchaseService.free)
 }
 
 #Preview("Pro User") {
-    PaywallView(purchaseService: MockPurchaseService.pro)
+    PaywallView()
+        .environment(\.purchaseService, MockPurchaseService.pro)
 }

@@ -7,9 +7,9 @@ import UIKit
 
 struct PollDetailView: View {
     let pollId: UUID
-    var authService: any AuthServiceProtocol
-    var pollService: any PollServiceProtocol
-    var calendarService: any CalendarServiceProtocol
+    @Environment(\.authService) var authService
+    @Environment(\.pollService) var pollService
+    @Environment(\.calendarService) var calendarService
 
     @State var poll: Poll?
     @State var timeOptions: [PollTimeOption] = []
@@ -29,18 +29,6 @@ struct PollDetailView: View {
     @State var finalTimeOption: PollTimeOption?
     @State var isSelectingFinalDate = false
     @State var selectedTimeOption: PollTimeOption?
-
-    init(
-        pollId: UUID,
-        authService: any AuthServiceProtocol = AuthService.shared,
-        pollService: any PollServiceProtocol = PollService.shared,
-        calendarService: any CalendarServiceProtocol = CalendarService.shared
-    ) {
-        self.pollId = pollId
-        self.authService = authService
-        self.pollService = pollService
-        self.calendarService = calendarService
-    }
 
     private var isCreator: Bool {
         poll?.creatorId == authService.currentUserId
@@ -127,7 +115,7 @@ struct PollDetailView: View {
             Text("Set \(formattedSelectedOption) as the final meeting time? All participants will be notified.")
         }
         .navigationDestination(item: $selectedTimeOption) { timeOption in
-            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption, pollService: pollService)
+            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
         }
     }
 
@@ -266,8 +254,7 @@ struct PollDetailView: View {
                     isAllDay: timeOptions.first(where: { $0.isAllDay }) != nil,
                     pollTitle: poll.title,
                     pollDescription: poll.description,
-                    pollLocation: poll.location,
-                    calendarService: calendarService
+                    pollLocation: poll.location
                 )
             }
         } else if isCreator && poll.status == .closed {
@@ -637,28 +624,10 @@ struct FinalDateDisplay: View {
     let pollTitle: String
     let pollDescription: String?
     let pollLocation: String?
-    var calendarService: any CalendarServiceProtocol
+    @Environment(\.calendarService) var calendarService
 
     @State private var showAddToCalendarAlert = false
     @State private var addingToCalendar = false
-
-    init(
-        selectedStart: Date,
-        selectedEnd: Date,
-        isAllDay: Bool,
-        pollTitle: String,
-        pollDescription: String?,
-        pollLocation: String?,
-        calendarService: any CalendarServiceProtocol = CalendarService.shared
-    ) {
-        self.selectedStart = selectedStart
-        self.selectedEnd = selectedEnd
-        self.isAllDay = isAllDay
-        self.pollTitle = pollTitle
-        self.pollDescription = pollDescription
-        self.pollLocation = pollLocation
-        self.calendarService = calendarService
-    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -978,23 +947,19 @@ struct ResponseButton: View {
 
 #Preview("Loading") {
     NavigationStack {
-        PollDetailView(
-            pollId: UUID(),
-            authService: MockAuthService.signedIn,
-            pollService: MockPollService.empty,
-            calendarService: MockCalendarService.disabled
-        )
+        PollDetailView(pollId: UUID())
     }
+    .environment(\.authService, MockAuthService.signedIn)
+    .environment(\.pollService, MockPollService.empty)
+    .environment(\.calendarService, MockCalendarService.disabled)
 }
 
 #Preview("With Data") {
     let mock = MockPollService.withSamplePolls
-    NavigationStack {
-        PollDetailView(
-            pollId: mock.myPolls.first?.id ?? UUID(),
-            authService: MockAuthService.signedIn,
-            pollService: mock,
-            calendarService: MockCalendarService.disabled
-        )
+    return NavigationStack {
+        PollDetailView(pollId: mock.myPolls.first?.id ?? UUID())
     }
+    .environment(\.authService, MockAuthService.signedIn)
+    .environment(\.pollService, mock)
+    .environment(\.calendarService, MockCalendarService.disabled)
 }

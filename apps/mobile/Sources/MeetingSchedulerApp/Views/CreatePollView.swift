@@ -10,8 +10,7 @@ struct TimeOption: Identifiable {
 
 struct CreatePollView: View {
     @Environment(\.dismiss) var dismiss
-
-    var pollService: any PollServiceProtocol
+    @Environment(\.pollService) var pollService
 
     @State var title = ""
     @State var description = ""
@@ -32,10 +31,6 @@ struct CreatePollView: View {
 
     // Multi-date picker for all-day events
     @State var selectedDates = Set<DateComponents>()
-
-    init(pollService: any PollServiceProtocol = PollService.shared) {
-        self.pollService = pollService
-    }
 
     var body: some View {
         NavigationStack {
@@ -409,5 +404,6 @@ struct TimeOptionView: View {
 }
 
 #Preview {
-    CreatePollView(pollService: MockPollService.empty)
+    CreatePollView()
+        .environment(\.pollService, MockPollService.empty)
 }

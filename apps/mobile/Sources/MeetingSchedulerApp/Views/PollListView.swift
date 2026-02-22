@@ -2,7 +2,7 @@ import SwiftUI
 import Shared
 
 struct PollListView: View {
-    @State var pollService: any PollServiceProtocol
+    @Environment(\.pollService) var pollService
     @State var showCreatePoll = false
     @State var showPaywall = false
     @State var showJoinByCode = false
@@ -12,10 +12,6 @@ struct PollListView: View {
     @State var navigateToPoll: UUID?
     @State var participantCounts: [UUID: Int] = [:]
     @State var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
-
-    init(pollService: any PollServiceProtocol = PollService.shared) {
-        self.pollService = pollService
-    }
 
     var body: some View {
         NavigationStack {
@@ -96,8 +92,7 @@ struct PollListView: View {
                                 poll: poll,
                                 participantCount: participantCounts[poll.id] ?? 0,
                                 isOwner: true,
-                                timeRange: pollTimeRanges[poll.id],
-                                pollService: pollService
+                                timeRange: pollTimeRanges[poll.id]
                             )
                         }
                     }
@@ -112,8 +107,7 @@ struct PollListView: View {
                                 poll: poll,
                                 participantCount: participantCounts[poll.id] ?? 0,
                                 isOwner: false,
-                                timeRange: pollTimeRanges[poll.id],
-                                pollService: pollService
+                                timeRange: pollTimeRanges[poll.id]
                             )
                         }
                     }
@@ -268,11 +262,11 @@ struct JoinByCodeSheet: View {
 // MARK: - PollRowView
 
 struct PollRowView: View {
+    @Environment(\.pollService) var pollService
     let poll: Poll
     let participantCount: Int
     var isOwner: Bool = false
     let timeRange: (earliest: Date, latest: Date)?
-    var pollService: any PollServiceProtocol
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -369,9 +363,11 @@ struct OwnerBadge: View {
 }
 
 #Preview("With Polls") {
-    PollListView(pollService: MockPollService.withSamplePolls)
+    PollListView()
+        .environment(\.pollService, MockPollService.withSamplePolls)
 }
 
 #Preview("Empty") {
-    PollListView(pollService: MockPollService.empty)
+    PollListView()
+        .environment(\.pollService, MockPollService.empty)
 }
