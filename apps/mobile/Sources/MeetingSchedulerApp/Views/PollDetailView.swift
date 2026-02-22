@@ -546,18 +546,22 @@ struct PollDetailView: View {
     private func sharePoll() {
         guard let poll = poll else { return }
 
-        let pollURL = "\(Config.webURL)/polls/\(poll.id)"
+        let pollURLString = "\(Config.webURL)/polls/\(poll.id)"
         let shareText = """
         Join my poll: \(poll.title)
 
-        \(pollURL)
+        \(pollURLString)
 
         Share Code: \(poll.shareCode)
         """
 
         #if os(iOS)
+        var activityItems: [Any] = [shareText]
+        if let pollURL = URL(string: pollURLString) {
+            activityItems.append(pollURL)
+        }
         let activityViewController = UIActivityViewController(
-            activityItems: [shareText],
+            activityItems: activityItems,
             applicationActivities: nil
         )
 
