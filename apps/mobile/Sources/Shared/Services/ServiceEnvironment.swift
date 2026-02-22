@@ -3,25 +3,33 @@ import SwiftUI
 // MARK: - AuthService
 
 private struct AuthServiceKey: EnvironmentKey {
-    static let defaultValue: any AuthServiceProtocol = AuthService.shared
+    static var defaultValue: any AuthServiceProtocol {
+        MainActor.assumeIsolated { AuthService.shared }
+    }
 }
 
 // MARK: - PollService
 
 private struct PollServiceKey: EnvironmentKey {
-    static let defaultValue: any PollServiceProtocol = PollService.shared
+    static var defaultValue: any PollServiceProtocol {
+        MainActor.assumeIsolated { PollService.shared }
+    }
 }
 
 // MARK: - CalendarService
 
 private struct CalendarServiceKey: EnvironmentKey {
-    static let defaultValue: any CalendarServiceProtocol = CalendarService.shared
+    static var defaultValue: any CalendarServiceProtocol {
+        MainActor.assumeIsolated { CalendarService.shared }
+    }
 }
 
 // MARK: - PurchaseService
 
 private struct PurchaseServiceKey: EnvironmentKey {
-    static let defaultValue: any PurchaseServiceProtocol = PurchaseService.shared
+    static var defaultValue: any PurchaseServiceProtocol {
+        MainActor.assumeIsolated { PurchaseService.shared }
+    }
 }
 
 // MARK: - EnvironmentValues
