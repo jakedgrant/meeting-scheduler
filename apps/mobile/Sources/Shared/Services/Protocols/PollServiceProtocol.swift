@@ -10,6 +10,12 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     var joinedPolls: [Poll] { get }
     var isLoading: Bool { get }
 
+    /// Participant counts keyed by poll ID — populated as part of loadMyPolls().
+    var pollParticipantCounts: [UUID: Int] { get }
+
+    /// Time ranges keyed by poll ID — populated as part of loadMyPolls().
+    var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] { get }
+
     // MARK: - Formatting
 
     func formatTimeRange(earliest: Date, latest: Date) -> String
@@ -19,6 +25,9 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     func loadMyPolls() async
     func loadPoll(id: UUID) async -> Poll?
     func loadPollByCode(_ code: String) async -> PollLookupResponse?
+
+    /// Loads a poll with all related data (time options, participants, responses) in a single request.
+    func loadPollDetail(id: UUID) async -> PollDetail?
 
     // MARK: - Create Poll
 

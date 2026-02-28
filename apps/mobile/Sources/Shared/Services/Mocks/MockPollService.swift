@@ -14,6 +14,31 @@ public final class MockPollService: PollServiceProtocol {
     public var sampleParticipants: [PollParticipant]
     public var sampleResponses: [AvailabilityResponse]
 
+    /// Derived from sampleParticipants — matches what PollService populates during loadMyPolls().
+    public var pollParticipantCounts: [UUID: Int] {
+        var counts: [UUID: Int] = [:]
+        for participant in sampleParticipants {
+            counts[participant.pollId, default: 0] += 1
+        }
+        return counts
+    }
+
+    /// Derived from sampleTimeOptions — matches what PollService populates during loadMyPolls().
+    public var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] {
+        var ranges: [UUID: (earliest: Date, latest: Date)] = [:]
+        for option in sampleTimeOptions {
+            if let existing = ranges[option.pollId] {
+                ranges[option.pollId] = (
+                    earliest: min(existing.earliest, option.startTime),
+                    latest: max(existing.latest, option.startTime)
+                )
+            } else {
+                ranges[option.pollId] = (earliest: option.startTime, latest: option.startTime)
+            }
+        }
+        return ranges
+    }
+
     public init(
         createdPolls: [Poll] = [],
         joinedPolls: [Poll] = [],
@@ -141,6 +166,15 @@ public final class MockPollService: PollServiceProtocol {
 
     public func loadPollByCode(_ code: String) async -> PollLookupResponse? {
         nil
+    }
+
+    public func loadPollDetail(id: UUID) async -> PollDetail? {
+        guard let poll = myPolls.first(where: { $0.id == id }) else { return nil }
+        let timeOptions = sampleTimeOptions.filter { $0.pollId == id }
+        let participants = sampleParticipants.filter { $0.pollId == id }
+        let participantIds = Set(participants.map { $0.id })
+        let responses = sampleResponses.filter { participantIds.contains($0.participantId) }
+        return PollDetail(poll: poll, timeOptions: timeOptions, participants: participants, responses: responses)
     }
 
     public func createPoll(
