@@ -13,9 +13,9 @@ struct AuthView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
-                logoSection
-                Spacer()
+                logoHeader
                 oauthButtons
+                    .padding(.top, 8)
                 divider
                 magicLinkSection
                 errorMessageView
@@ -31,19 +31,15 @@ struct AuthView: View {
     }
 
     // MARK: - Subviews
-
-    private var logoSection: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
-
-            Text("Meeting Scheduler")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-
+    
+    private var logoHeader: some View {
+        Group {
+            LogoTitle()
+            
             Text("Find the perfect meeting time")
                 .foregroundStyle(.secondary)
+                .fontDesign(.serif)
+                .font(.title2)
         }
     }
 
@@ -55,11 +51,10 @@ struct AuthView: View {
                     Text("Continue with Google")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.gray.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(8)
             }
             .disabled(isLoading)
+            .buttonStyle(.borderedProminent)
 
             Button(action: signInWithApple) {
                 HStack {
@@ -67,12 +62,12 @@ struct AuthView: View {
                     Text("Continue with Apple")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(.black)
+                .padding(8)
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .disabled(isLoading)
+            .buttonStyle(.borderedProminent)
+            .tint(.black)
         }
     }
 
@@ -107,12 +102,10 @@ struct AuthView: View {
                     Text(isLoading ? "Sending..." : "Send Magic Link")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(.blue)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(8)
             }
             .disabled(isLoading || email.isEmpty)
+            .buttonStyle(.borderedProminent)
         }
     }
 

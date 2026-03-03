@@ -24,7 +24,7 @@ struct PollListView: View {
                     pollList
                 }
             }
-            .navigationTitle("My Polls")
+            .navigationTitle("Meets")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Join Poll", systemImage: "arrow.down.circle") {
