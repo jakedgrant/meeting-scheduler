@@ -22,10 +22,10 @@ struct AuthView: View {
                 Spacer()
             }
             .padding()
-            .alert("Check your email", isPresented: $showMagicLinkSent) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("We've sent a sign-in link to \(email)")
+            .navigationDestination(isPresented: $showMagicLinkSent) {
+                MagicLinkSentView(email: email) {
+                    showMagicLinkSent = false
+                }
             }
         }
     }
@@ -83,30 +83,21 @@ struct AuthView: View {
     }
 
     private var magicLinkSection: some View {
-        VStack(spacing: 12) {
-            TextField("Email", text: $email)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.emailAddress)
-                #if os(iOS)
-                .keyboardType(.emailAddress)
-                .autocapitalization(.none)
-                #endif
-                .disabled(isLoading)
-
-            Button(action: signInWithMagicLink) {
-                HStack {
-                    if isLoading {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    }
-                    Text(isLoading ? "Sending..." : "Send Magic Link")
-                }
-                .frame(maxWidth: .infinity)
-                .padding(8)
+        CapsuleTextField(placeholder: "Email", text: $email, action: signInWithMagicLink) {
+            if isLoading {
+                ProgressView()
+                    .tint(.white)
+            } else {
+                Image(systemName: "arrow.right")
+                    .fontWeight(.semibold)
             }
-            .disabled(isLoading || email.isEmpty)
-            .buttonStyle(.borderedProminent)
         }
+        .textContentType(.emailAddress)
+        #if os(iOS)
+        .keyboardType(.emailAddress)
+        .autocapitalization(.none)
+        #endif
+        .disabled(isLoading)
     }
 
     @ViewBuilder
