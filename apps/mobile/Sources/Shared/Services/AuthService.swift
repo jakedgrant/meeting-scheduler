@@ -22,14 +22,22 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     public var currentUserEmail: String? { currentUser?.email }
 
     private let supabase = SupabaseService.shared.client
+    private let persistence: any PersistenceProviderProtocol
     private var currentNonce: String?
     private var appleSignInContinuation: CheckedContinuation<Void, Error>?
 
     private override init() {
+        self.persistence = SwiftDataPersistenceProvider()
         super.init()
         Task {
             await initialize()
         }
+    }
+
+    /// Test-friendly initializer that accepts a custom persistence provider.
+    public init(persistence: any PersistenceProviderProtocol) {
+        self.persistence = persistence
+        super.init()
     }
 
     public func initialize() async {
@@ -75,6 +83,12 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     private func loadProfile(userId: UUID) async {
+        // Return cached profile immediately
+        if let cached = try? persistence.fetchProfile(id: userId) {
+            profile = cached
+        }
+
+        // Then refresh from server
         do {
             let response: Profile = try await supabase
                 .from("profiles")
@@ -84,6 +98,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                 .execute()
                 .value
 
+            try? persistence.saveProfile(response)
             profile = response
         } catch {
             print("Failed to load profile: \(error)")
@@ -170,6 +185,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
 
     public func signOut() async throws {
         try await supabase.auth.signOut()
+        try? persistence.clearAll()
     }
 
     // MARK: - Profile Updates
@@ -199,6 +215,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             .execute()
             .value
 
+        try? persistence.saveProfile(response)
         profile = response
     }
 

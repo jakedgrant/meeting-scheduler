@@ -127,13 +127,21 @@ public final class PollService: PollServiceProtocol {
     public private(set) var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
     private let supabase = SupabaseService.shared.client
+    private let persistence: any PersistenceProviderProtocol
     private let timeRangeFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, h:mm a"
         return formatter
     }()
 
-    private init() {}
+    private init() {
+        self.persistence = SwiftDataPersistenceProvider()
+    }
+
+    /// Test-friendly initializer that accepts a custom persistence provider.
+    public init(persistence: any PersistenceProviderProtocol) {
+        self.persistence = persistence
+    }
 
     // MARK: - Formatting
 
@@ -145,10 +153,24 @@ public final class PollService: PollServiceProtocol {
 
     /// Loads all of the user's polls and — in two parallel batch queries — populates
     /// `pollParticipantCounts` and `pollTimeRanges` so the list view needs no per-poll requests.
+    ///
+    /// Uses a cache-then-network strategy: cached data is returned immediately so the UI renders
+    /// without waiting for the network. A background fetch then refreshes from the server.
     public func loadMyPolls() async {
         guard AuthService.shared.currentUser != nil else { return }
 
-        isLoading = true
+        // 1. Return cached data immediately
+        let userId = AuthService.shared.currentUserId
+        if let cached = try? persistence.fetchAllPolls(), !cached.isEmpty {
+            createdPolls = cached.filter { $0.creatorId == userId }
+            joinedPolls = cached.filter { $0.creatorId != userId }
+            myPolls = createdPolls + joinedPolls
+            pollParticipantCounts = (try? persistence.fetchPollParticipantCounts()) ?? [:]
+            pollTimeRanges = (try? persistence.fetchPollTimeRanges()) ?? [:]
+        }
+
+        // 2. Fetch from server (only show spinner if cache was empty)
+        isLoading = myPolls.isEmpty
         defer { isLoading = false }
 
         do {
@@ -160,6 +182,9 @@ public final class PollService: PollServiceProtocol {
             createdPolls = response.created_polls
             joinedPolls = response.joined_polls
             myPolls = createdPolls + joinedPolls
+
+            // 3. Persist polls
+            try? persistence.savePolls(myPolls)
 
             guard !myPolls.isEmpty else { return }
 
@@ -191,10 +216,21 @@ public final class PollService: PollServiceProtocol {
             }
             pollParticipantCounts = counts
 
+            // 4. Persist metadata
+            for (pollId, range) in pollTimeRanges {
+                try? persistence.savePollTimeRange(earliest: range.earliest, latest: range.latest, for: pollId)
+            }
+            for (pollId, count) in pollParticipantCounts {
+                try? persistence.savePollParticipantCount(count, for: pollId)
+            }
+
         } catch {
             print("Failed to load polls: \(error)")
-            createdPolls = []
-            joinedPolls = []
+            // On network failure, keep cached data visible rather than clearing
+            if myPolls.isEmpty {
+                createdPolls = []
+                joinedPolls = []
+            }
         }
     }
 
@@ -237,10 +273,11 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            try? persistence.savePolls([response])
             return response
         } catch {
             print("Failed to load poll: \(error)")
-            return nil
+            return try? persistence.fetchPoll(id: id)
         }
     }
 
@@ -260,7 +297,16 @@ public final class PollService: PollServiceProtocol {
 
     /// Fetches a poll with all its time options, participants (with profile names), and
     /// availability responses in a single nested Supabase query.
+    ///
+    /// Returns cached detail immediately if fresh, otherwise fetches from the server.
+    /// On network failure, falls back to stale cached data.
     public func loadPollDetail(id: UUID) async -> PollDetail? {
+        // Return fresh cache without hitting the network
+        if let cached = try? persistence.fetchPollDetail(id: id),
+           persistence.isFresh(id, maxAge: 300) {
+            return cached
+        }
+
         do {
             let response: PollDetailResponse = try await supabase
                 .from("polls")
@@ -273,15 +319,19 @@ public final class PollService: PollServiceProtocol {
             let participants = response.pollParticipants.map { $0.participant }
             let responses = response.pollParticipants.flatMap { $0.availabilityResponses }
 
-            return PollDetail(
+            let detail = PollDetail(
                 poll: response.poll,
                 timeOptions: response.pollTimeOptions,
                 participants: participants,
                 responses: responses
             )
+
+            try? persistence.savePollDetail(detail)
+            return detail
         } catch {
             print("Failed to load poll detail: \(error)")
-            return nil
+            // Fall back to stale cache on network failure
+            return try? persistence.fetchPollDetail(id: id)
         }
     }
 
@@ -319,6 +369,7 @@ public final class PollService: PollServiceProtocol {
             .execute()
             .value
 
+        try? persistence.savePolls([response])
         myPolls.insert(response, at: 0)
         return response
     }
@@ -335,10 +386,11 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            try? persistence.saveTimeOptions(response, for: pollId)
             return response
         } catch {
             print("Failed to load time options: \(error)")
-            return []
+            return (try? persistence.fetchTimeOptions(for: pollId)) ?? []
         }
     }
 
@@ -361,6 +413,7 @@ public final class PollService: PollServiceProtocol {
             .execute()
             .value
 
+        try? persistence.saveTimeOptions(response, for: pollId)
         return response
     }
 
@@ -409,10 +462,11 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            try? persistence.saveParticipants(response, for: pollId)
             return response
         } catch {
             print("Failed to load participants: \(error)")
-            return []
+            return (try? persistence.fetchParticipants(for: pollId)) ?? []
         }
     }
 
@@ -452,10 +506,11 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            try? persistence.saveResponses(response)
             return response
         } catch {
             print("Failed to load responses: \(error)")
-            return []
+            return (try? persistence.fetchResponses(for: participantIds)) ?? []
         }
     }
 
