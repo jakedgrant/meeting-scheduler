@@ -413,40 +413,32 @@ struct PollDetailView: View {
 
     private func loadPollData() async {
         isLoading = true
+        defer { isLoading = false }
 
-        poll = await pollService.loadPoll(id: pollId)
+        guard let detail = await pollService.loadPollDetail(id: pollId) else { return }
 
-        if poll != nil {
-            timeOptions = await pollService.loadTimeOptions(pollId: pollId)
-            participants = await pollService.loadParticipants(pollId: pollId)
+        poll = detail.poll
+        timeOptions = detail.timeOptions
+        participants = detail.participants
+        responses = detail.responses
 
-            if let userId = authService.currentUserId {
-                myParticipant = participants.first { $0.userId == userId }
-            }
-
-            let participantIds = participants.map { $0.id }
-            responses = await pollService.loadResponses(participantIds: participantIds)
-
-            if let myParticipant = myParticipant {
-                let myResponses = responses.filter { $0.participantId == myParticipant.id }
-                for response in myResponses {
-                    localResponses[response.timeOptionId] = response.status
-                }
-                localComment = myParticipant.comment ?? ""
-            }
-
-            if calendarService.isEnabled && !timeOptions.isEmpty {
-                calendarConflicts = await calendarService.checkConflicts(for: timeOptions)
-
-                for conflictId in calendarConflicts {
-                    if localResponses[conflictId] == nil {
-                        localResponses[conflictId] = .unavailable
-                    }
-                }
-            }
+        if let userId = authService.currentUserId {
+            myParticipant = participants.first { $0.userId == userId }
         }
 
-        isLoading = false
+        if let myParticipant {
+            for response in responses where response.participantId == myParticipant.id {
+                localResponses[response.timeOptionId] = response.status
+            }
+            localComment = myParticipant.comment ?? ""
+        }
+
+        if calendarService.isEnabled && !timeOptions.isEmpty {
+            calendarConflicts = await calendarService.checkConflicts(for: timeOptions)
+            for conflictId in calendarConflicts where localResponses[conflictId] == nil {
+                localResponses[conflictId] = .unavailable
+            }
+        }
     }
 
     // MARK: - Actions
@@ -505,19 +497,34 @@ struct PollDetailView: View {
             }
 
             // Save comment (trimmed, nil if empty)
+            let trimmedComment = localComment.trimmingCharacters(in: .whitespacesAndNewlines)
+            let savedComment: String? = trimmedComment.isEmpty ? nil : trimmedComment
             do {
-                let trimmedComment = localComment.trimmingCharacters(in: .whitespacesAndNewlines)
                 try await pollService.updateParticipantComment(
                     participantId: myParticipant.id,
-                    comment: trimmedComment.isEmpty ? nil : trimmedComment
+                    comment: savedComment
                 )
             } catch {
                 print("Failed to save comment: \(error)")
             }
 
-            let participantIds = participants.map { $0.id }
-            responses = await pollService.loadResponses(participantIds: participantIds)
-            participants = await pollService.loadParticipants(pollId: pollId)
+            // Update local state instead of re-fetching from the server
+            for (optionId, status) in localResponses {
+                if let idx = responses.firstIndex(where: {
+                    $0.participantId == myParticipant.id && $0.timeOptionId == optionId
+                }) {
+                    responses[idx].status = status
+                } else {
+                    responses.append(AvailabilityResponse(
+                        participantId: myParticipant.id,
+                        timeOptionId: optionId,
+                        status: status
+                    ))
+                }
+            }
+            if let idx = participants.firstIndex(where: { $0.id == myParticipant.id }) {
+                participants[idx].comment = savedComment
+            }
 
             isSaving = false
         }
@@ -535,7 +542,9 @@ struct PollDetailView: View {
                     startTime: option.startTime,
                     endTime: option.endTime
                 )
-                poll = await pollService.loadPoll(id: pollId)
+                // Update local state instead of re-fetching the poll
+                poll?.selectedStartTime = option.startTime
+                poll?.selectedEndTime = option.endTime
             } catch {
                 print("Failed to set final date: \(error)")
             }

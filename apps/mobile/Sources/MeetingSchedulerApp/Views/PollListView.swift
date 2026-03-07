@@ -31,8 +31,6 @@ struct PollListView: View {
     @State var joinError: String?
     @State var isJoining = false
     @State var navigateToPoll: UUID?
-    @State var participantCounts: [UUID: Int] = [:]
-    @State var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
     var body: some View {
         NavigationStack {
@@ -64,9 +62,9 @@ struct PollListView: View {
                         Label(selectedFilter.rawValue, systemImage: "line.3.horizontal.decrease.circle")
                     }
                 }
-                
+
                 ToolbarSpacer(.fixed)
-                
+
                 ToolbarItem(id: "join") {
                     Button("Join Poll", systemImage: "arrow.down.circle") {
                         showJoinByCode = true
@@ -99,13 +97,9 @@ struct PollListView: View {
             }
             .refreshable {
                 await pollService.loadMyPolls()
-                await loadAllParticipantCounts()
-                await loadAllTimeRanges()
             }
             .task {
                 await pollService.loadMyPolls()
-                await loadAllParticipantCounts()
-                await loadAllTimeRanges()
             }
         }
     }
@@ -142,7 +136,7 @@ struct PollListView: View {
         case .active:
             filtered = allPolls.filter { poll in
                 poll.status == .active &&
-                pollTimeRanges[poll.id].map { $0.latest >= now } ?? true
+                pollService.pollTimeRanges[poll.id].map { $0.latest >= now } ?? true
             }
 
         case .upcoming:
@@ -153,7 +147,7 @@ struct PollListView: View {
 
         case .past:
             filtered = allPolls.filter { poll in
-                if let range = pollTimeRanges[poll.id] {
+                if let range = pollService.pollTimeRanges[poll.id] {
                     return range.latest < now
                 }
                 return false
@@ -162,8 +156,8 @@ struct PollListView: View {
 
         let descending = selectedFilter == .all || selectedFilter == .myMeets || selectedFilter == .past
         return filtered.sorted { a, b in
-            let dateA = pollTimeRanges[a.id]?.earliest ?? a.createdAt
-            let dateB = pollTimeRanges[b.id]?.earliest ?? b.createdAt
+            let dateA = pollService.pollTimeRanges[a.id]?.earliest ?? a.createdAt
+            let dateB = pollService.pollTimeRanges[b.id]?.earliest ?? b.createdAt
             return descending ? dateA > dateB : dateA < dateB
         }
     }
@@ -175,9 +169,9 @@ struct PollListView: View {
                 NavigationLink(destination: PollDetailView(pollId: poll.id)) {
                     PollRowView(
                         poll: poll,
-                        participantCount: participantCounts[poll.id] ?? 0,
+                        participantCount: pollService.pollParticipantCounts[poll.id] ?? 0,
                         isOwner: isOwner,
-                        timeRange: pollTimeRanges[poll.id]
+                        timeRange: pollService.pollTimeRanges[poll.id]
                     )
                 }
             }
@@ -236,38 +230,6 @@ struct PollListView: View {
         }
     }
 
-    private func loadAllParticipantCounts() async {
-        let allPolls = pollService.myPolls
-        var newCounts: [UUID: Int] = [:]
-
-        for poll in allPolls {
-            do {
-                let participants = await pollService.loadParticipants(pollId: poll.id)
-                newCounts[poll.id] = participants.count
-            } catch {
-                print("Failed to load participants for poll \(poll.id): \(error)")
-                newCounts[poll.id] = participantCounts[poll.id] ?? 0
-            }
-        }
-
-        participantCounts = newCounts
-    }
-
-    private func loadAllTimeRanges() async {
-        let allPolls = pollService.myPolls
-        var newRanges: [UUID: (earliest: Date, latest: Date)] = [:]
-
-        for poll in allPolls {
-            let timeOptions = await pollService.loadTimeOptions(pollId: poll.id)
-            if !timeOptions.isEmpty {
-                let earliest = timeOptions.first!.startTime
-                let latest = timeOptions.last!.startTime
-                newRanges[poll.id] = (earliest, latest)
-            }
-        }
-
-        pollTimeRanges = newRanges
-    }
 }
 
 #Preview("With Pollss") {

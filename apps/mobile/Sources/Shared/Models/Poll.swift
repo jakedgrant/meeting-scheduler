@@ -196,6 +196,26 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
     }
 }
 
+/// Aggregates all data needed to render a poll detail screen, loaded in a minimal number of requests.
+public struct PollDetail: Sendable {
+    public let poll: Poll
+    public let timeOptions: [PollTimeOption]
+    public let participants: [PollParticipant]
+    public let responses: [AvailabilityResponse]
+
+    public init(
+        poll: Poll,
+        timeOptions: [PollTimeOption],
+        participants: [PollParticipant],
+        responses: [AvailabilityResponse]
+    ) {
+        self.poll = poll
+        self.timeOptions = timeOptions
+        self.participants = participants
+        self.responses = responses
+    }
+}
+
 public struct AvailabilityResponse: Codable, Identifiable, Sendable {
     public let id: UUID
     public let participantId: UUID
