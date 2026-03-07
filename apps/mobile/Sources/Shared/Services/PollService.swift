@@ -301,9 +301,10 @@ public final class PollService: PollServiceProtocol {
     /// Returns cached detail immediately if fresh, otherwise fetches from the server.
     /// On network failure, falls back to stale cached data.
     public func loadPollDetail(id: UUID) async -> PollDetail? {
-        // Return fresh cache without hitting the network
+        // Return fresh cache only if it contains actual detail data (not just a poll stub from loadMyPolls)
         if let cached = try? persistence.fetchPollDetail(id: id),
-           persistence.isFresh(id, maxAge: 300) {
+           persistence.isFresh(id, maxAge: 300),
+           !cached.timeOptions.isEmpty {
             return cached
         }
 
