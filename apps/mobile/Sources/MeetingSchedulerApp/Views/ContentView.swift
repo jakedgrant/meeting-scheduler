@@ -32,7 +32,7 @@ struct MainTabView: View {
         TabView {
             PollListView()
                 .tabItem {
-                    Label("Polls", systemImage: "list.bullet")
+                    Label("Meets", systemImage: "list.bullet")
                 }
 
             SettingsView()

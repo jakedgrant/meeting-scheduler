@@ -13,37 +13,33 @@ struct AuthView: View {
         NavigationStack {
             VStack(spacing: 24) {
                 Spacer()
-                logoSection
-                Spacer()
+                logoHeader
                 oauthButtons
+                    .padding(.top, 8)
                 divider
                 magicLinkSection
                 errorMessageView
                 Spacer()
             }
             .padding()
-            .alert("Check your email", isPresented: $showMagicLinkSent) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("We've sent a sign-in link to \(email)")
+            .navigationDestination(isPresented: $showMagicLinkSent) {
+                MagicLinkSentView(email: email) {
+                    showMagicLinkSent = false
+                }
             }
         }
     }
 
     // MARK: - Subviews
-
-    private var logoSection: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "calendar.badge.clock")
-                .font(.system(size: 60))
-                .foregroundStyle(.blue)
-
-            Text("Meeting Scheduler")
-                .font(.largeTitle)
-                .fontWeight(.bold)
-
+    
+    private var logoHeader: some View {
+        Group {
+            LogoTitle()
+            
             Text("Find the perfect meeting time")
                 .foregroundStyle(.secondary)
+                .fontDesign(.serif)
+                .font(.title2)
         }
     }
 
@@ -55,11 +51,10 @@ struct AuthView: View {
                     Text("Continue with Google")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.gray.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .padding(8)
             }
             .disabled(isLoading)
+            .buttonStyle(.borderedProminent)
 
             Button(action: signInWithApple) {
                 HStack {
@@ -67,12 +62,12 @@ struct AuthView: View {
                     Text("Continue with Apple")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(.black)
+                .padding(8)
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .disabled(isLoading)
+            .buttonStyle(.borderedProminent)
+            .tint(.black)
         }
     }
 
@@ -88,32 +83,21 @@ struct AuthView: View {
     }
 
     private var magicLinkSection: some View {
-        VStack(spacing: 12) {
-            TextField("Email", text: $email)
-                .textFieldStyle(.roundedBorder)
-                .textContentType(.emailAddress)
-                #if os(iOS)
-                .keyboardType(.emailAddress)
-                .autocapitalization(.none)
-                #endif
-                .disabled(isLoading)
-
-            Button(action: signInWithMagicLink) {
-                HStack {
-                    if isLoading {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                    }
-                    Text(isLoading ? "Sending..." : "Send Magic Link")
-                }
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(.blue)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+        CapsuleTextField(placeholder: "Email", text: $email, action: signInWithMagicLink) {
+            if isLoading {
+                ProgressView()
+                    .tint(.white)
+            } else {
+                Image(systemName: "arrow.right")
+                    .fontWeight(.semibold)
             }
-            .disabled(isLoading || email.isEmpty)
         }
+        .textContentType(.emailAddress)
+        #if os(iOS)
+        .keyboardType(.emailAddress)
+        .autocapitalization(.none)
+        #endif
+        .disabled(isLoading)
     }
 
     @ViewBuilder

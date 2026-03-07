@@ -2,7 +2,28 @@ import SwiftUI
 import Shared
 
 struct PollListView: View {
+    enum PollFilter: String, CaseIterable, Identifiable {
+        case all = "All"
+        case myMeets = "My Meets"
+        case active = "Active"
+        case upcoming = "Upcoming"
+        case past = "Past"
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .all: "All Meets"
+            case .myMeets: "My Meets"
+            case .active: "Active Meets"
+            case .upcoming: "Upcoming Meets"
+            case .past: "Past Meets"
+            }
+        }
+    }
+
     @Environment(\.pollService) var pollService
+    @State var selectedFilter: PollFilter = .active
     @State var showCreatePoll = false
     @State var showPaywall = false
     @State var showJoinByCode = false
@@ -20,17 +41,39 @@ struct PollListView: View {
                     ProgressView("Loading polls...")
                 } else if pollService.createdPolls.isEmpty && pollService.joinedPolls.isEmpty {
                     emptyState
+                } else if filteredPolls.isEmpty {
+                    ContentUnavailableView {
+                        Label("No \(selectedFilter.rawValue) Polls", systemImage: "calendar")
+                    } description: {
+                        Text("There are no polls in this category. Tap \(Image(systemName: "line.3.horizontal.decrease.circle")) to change categories.")
+                    }
                 } else {
                     pollList
                 }
             }
-            .navigationTitle("My Polls")
+            .navigationTitle(selectedFilter.title)
             .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
+                ToolbarItem(id: "filter") {
+                    Menu {
+                        Picker("Filter", selection: $selectedFilter) {
+                            ForEach(PollFilter.allCases) { filter in
+                                Text(filter.rawValue).tag(filter)
+                            }
+                        }
+                    } label: {
+                        Label(selectedFilter.rawValue, systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                }
+                
+                ToolbarSpacer(.fixed)
+                
+                ToolbarItem(id: "join") {
                     Button("Join Poll", systemImage: "arrow.down.circle") {
                         showJoinByCode = true
                     }
+                }
 
+                ToolbarItem(id: "new") {
                     Button("Create Poll", systemImage: "plus") {
                         handleCreatePoll()
                     }
@@ -82,35 +125,60 @@ struct PollListView: View {
         }
     }
 
-    private var pollList: some View {
-        List {
-            if !pollService.createdPolls.isEmpty {
-                Section("My Polls") {
-                    ForEach(pollService.createdPolls) { poll in
-                        NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(
-                                poll: poll,
-                                participantCount: participantCounts[poll.id] ?? 0,
-                                isOwner: true,
-                                timeRange: pollTimeRanges[poll.id]
-                            )
-                        }
-                    }
-                }
+    private var filteredPolls: [Poll] {
+        let now = Date()
+        let currentUserId = AuthService.shared.currentUserId
+        let allPolls = pollService.myPolls
+
+        let filtered: [Poll]
+
+        switch selectedFilter {
+        case .all:
+            filtered = allPolls
+
+        case .myMeets:
+            filtered = allPolls.filter { $0.creatorId == currentUserId }
+
+        case .active:
+            filtered = allPolls.filter { poll in
+                poll.status == .active &&
+                pollTimeRanges[poll.id].map { $0.latest >= now } ?? true
             }
 
-            if !pollService.joinedPolls.isEmpty {
-                Section("Polls I Joined") {
-                    ForEach(pollService.joinedPolls) { poll in
-                        NavigationLink(destination: PollDetailView(pollId: poll.id)) {
-                            PollRowView(
-                                poll: poll,
-                                participantCount: participantCounts[poll.id] ?? 0,
-                                isOwner: false,
-                                timeRange: pollTimeRanges[poll.id]
-                            )
-                        }
-                    }
+        case .upcoming:
+            filtered = allPolls.filter { poll in
+                poll.status == .closed &&
+                poll.selectedStartTime.map { $0 > now } ?? false
+            }
+
+        case .past:
+            filtered = allPolls.filter { poll in
+                if let range = pollTimeRanges[poll.id] {
+                    return range.latest < now
+                }
+                return false
+            }
+        }
+
+        let descending = selectedFilter == .all || selectedFilter == .myMeets || selectedFilter == .past
+        return filtered.sorted { a, b in
+            let dateA = pollTimeRanges[a.id]?.earliest ?? a.createdAt
+            let dateB = pollTimeRanges[b.id]?.earliest ?? b.createdAt
+            return descending ? dateA > dateB : dateA < dateB
+        }
+    }
+
+    private var pollList: some View {
+        List {
+            ForEach(filteredPolls) { poll in
+                let isOwner = poll.creatorId == AuthService.shared.currentUserId
+                NavigationLink(destination: PollDetailView(pollId: poll.id)) {
+                    PollRowView(
+                        poll: poll,
+                        participantCount: participantCounts[poll.id] ?? 0,
+                        isOwner: isOwner,
+                        timeRange: pollTimeRanges[poll.id]
+                    )
                 }
             }
         }
@@ -202,167 +270,7 @@ struct PollListView: View {
     }
 }
 
-// MARK: - JoinByCodeSheet
-
-struct JoinByCodeSheet: View {
-    @Binding var joinCode: String
-    @Binding var joinError: String?
-    @Binding var isJoining: Bool
-    let onJoin: () -> Void
-    let onDismiss: () -> Void
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("ABC123", text: $joinCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.system(.body, design: .monospaced))
-                } header: {
-                    Text("Share Code")
-                } footer: {
-                    Text("Enter the 6-character code shared by the poll creator")
-                }
-
-                if let error = joinError {
-                    Section {
-                        Text(error)
-                            .foregroundStyle(.red)
-                            .font(.footnote)
-                    }
-                }
-
-                Section {
-                    Button(action: onJoin) {
-                        if isJoining {
-                            ProgressView()
-                        } else {
-                            Text("Join Poll")
-                        }
-                    }
-                    .disabled(isJoining || joinCode.count != 6)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
-            .navigationTitle("Join by Code")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") {
-                        onDismiss()
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-}
-
-// MARK: - PollRowView
-
-struct PollRowView: View {
-    @Environment(\.pollService) var pollService
-    let poll: Poll
-    let participantCount: Int
-    var isOwner: Bool = false
-    let timeRange: (earliest: Date, latest: Date)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Text(poll.title)
-                    .font(.headline)
-
-                if isOwner {
-                    OwnerBadge()
-                }
-
-                Spacer()
-
-                StatusBadge(status: poll.status)
-            }
-
-            if let description = poll.description {
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-
-            HStack {
-                if let range = timeRange {
-                    Text(pollService.formatTimeRange(earliest: range.earliest, latest: range.latest))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("No time options")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Spacer()
-
-                Text("^[\(participantCount) participant](inflect: true)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-}
-
-// MARK: - StatusBadge
-
-struct StatusBadge: View {
-    let status: PollStatus
-
-    private var backgroundColor: Color {
-        switch status {
-        case .draft: return Color.gray.opacity(0.2)
-        case .active: return Color.green.opacity(0.2)
-        case .closed: return Color.orange.opacity(0.2)
-        case .archived: return Color.gray.opacity(0.3)
-        }
-    }
-
-    private var foregroundColor: Color {
-        switch status {
-        case .draft: return .secondary
-        case .active: return .green
-        case .closed: return .orange
-        case .archived: return .secondary
-        }
-    }
-
-    var body: some View {
-        Text(status.rawValue.capitalized)
-            .font(.caption)
-            .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(backgroundColor)
-            .foregroundStyle(foregroundColor)
-            .clipShape(Capsule())
-    }
-}
-
-// MARK: - OwnerBadge
-
-struct OwnerBadge: View {
-    var body: some View {
-        Text("Owner")
-            .font(.caption)
-            .fontWeight(.medium)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.15))
-            .foregroundStyle(.blue)
-            .clipShape(Capsule())
-    }
-}
-
-#Preview("With Polls") {
+#Preview("With Pollss") {
     PollListView()
         .environment(\.pollService, MockPollService.withSamplePolls)
 }
