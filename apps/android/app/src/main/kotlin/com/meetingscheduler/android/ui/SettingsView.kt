@@ -293,7 +293,7 @@ fun SettingsView(
                                     Text("Google Calendar", style = MaterialTheme.typography.bodyMedium)
                                     if (calendarService.googleCalendarEnabled) {
                                         Text(
-                                            "Connected",
+                                            calendarService.googleCalendarAccountEmail ?: "Connected",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = Color.Green
                                         )
@@ -316,6 +316,11 @@ fun SettingsView(
                                 },
                                 enabled = !calendarService.googleCalendarLoading
                             )
+                        }
+
+                        calendarService.calendarError?.let { message ->
+                            Text(message, style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
 
                         if (calendarService.googleCalendarLoading) {

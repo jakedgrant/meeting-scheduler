@@ -41,6 +41,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             if let userId = currentUser?.id {
                 await loadProfile(userId: userId)
                 await PurchaseService.shared.login(userId: userId.uuidString)
+                Task { await CalendarService.shared.refreshGoogleCalendarConnection() }
             }
         } catch {
             print("No existing session: \(error)")
@@ -57,6 +58,9 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     private func handleAuthChange(event: AuthChangeEvent, session: Session?) async {
+        if currentUser?.id != session?.user.id {
+            CalendarService.shared.resetGoogleCalendarState()
+        }
         currentSession = session
         currentUser = session?.user
 
@@ -65,6 +69,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             if let userId = session?.user.id {
                 await loadProfile(userId: userId)
                 await PurchaseService.shared.login(userId: userId.uuidString)
+                Task { await CalendarService.shared.refreshGoogleCalendarConnection() }
             }
         case .signedOut:
             profile = nil
@@ -97,33 +102,6 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             provider: .google,
             redirectTo: URL(string: "\(Config.appScheme)://auth/callback")
         )
-    }
-
-    /// Sign in with Google and request calendar access
-    /// Returns true if calendar tokens were successfully obtained
-    public func authorizeGoogleCalendar() async throws -> Bool {
-        let session = try await supabase.auth.signInWithOAuth(
-            provider: .google,
-            redirectTo: URL(string: "\(Config.appScheme)://auth/callback"),
-            scopes: "openid email profile https://www.googleapis.com/auth/calendar.readonly",
-            queryParams: [
-                (name: "access_type", value: "offline"),
-                (name: "prompt", value: "consent")
-            ]
-        )
-
-        // Persist calendar tokens if present
-        if let providerToken = session.providerToken,
-           let providerRefreshToken = session.providerRefreshToken {
-            await persistCalendarTokens(
-                accessToken: providerToken,
-                refreshToken: providerRefreshToken,
-                userId: session.user.id
-            )
-            return true
-        }
-
-        return false
     }
 
     public func signInWithApple() async throws {
@@ -205,44 +183,14 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     // MARK: - Handle OAuth Callback
 
     public func handleDeepLink(url: URL) async {
+        guard url.scheme == Config.appScheme, url.host == "auth", url.path == "/callback" else { return }
         do {
-            let session = try await supabase.auth.session(from: url)
-
-            // If OAuth callback includes provider tokens (Google Calendar), persist them
-            if let providerToken = session.providerToken,
-               let providerRefreshToken = session.providerRefreshToken {
-                await persistCalendarTokens(
-                    accessToken: providerToken,
-                    refreshToken: providerRefreshToken,
-                    userId: session.user.id
-                )
-            }
+            _ = try await supabase.auth.session(from: url)
         } catch {
-            print("Failed to handle deep link: \(error)")
+            print("Authentication callback failed")
         }
     }
 
-    private func persistCalendarTokens(accessToken: String, refreshToken: String, userId: UUID) async {
-        do {
-            let expiresAt = Date.now.addingTimeInterval(3600).ISO8601Format()
-
-            var updates: [String: AnyJSON] = [:]
-            updates["google_calendar_access_token"] = .string(accessToken)
-            updates["google_calendar_refresh_token"] = .string(refreshToken)
-            updates["google_calendar_token_expires_at"] = .string(expiresAt)
-            updates["calendar_integration_enabled"] = .bool(true)
-
-            try await supabase
-                .from("profiles")
-                .update(updates)
-                .eq("id", value: userId.uuidString)
-                .execute()
-
-            print("✓ Calendar tokens persisted successfully")
-        } catch {
-            print("Failed to persist calendar tokens: \(error)")
-        }
-    }
 }
 
 public enum AuthError: Error {

@@ -58,13 +58,13 @@
 
 				// Load participant count
 				try {
-					const { data: participants, error } = await supabase
+					const { count, error } = await supabase
 						.from('poll_participants')
 						.select('id', { count: 'exact', head: true })
 						.eq('poll_id', poll.id);
 
 					if (!error) {
-						counts[poll.id] = participants || 0;
+						counts[poll.id] = count ?? 0;
 					} else {
 						counts[poll.id] = 0;
 					}

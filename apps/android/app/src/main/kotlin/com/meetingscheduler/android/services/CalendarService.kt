@@ -3,6 +3,8 @@ package com.meetingscheduler.android.services
 import android.Manifest
 import android.content.ContentResolver
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.provider.CalendarContract
@@ -15,9 +17,16 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
-import io.github.jan.supabase.postgrest.from
-import io.github.jan.supabase.postgrest.query.filter.PostgrestFilterBuilder
+import com.meetingscheduler.android.models.PollTimeOption
+import io.github.jan.supabase.functions.functions
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.isSuccess
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -38,6 +47,12 @@ class CalendarService(
     private val scope: CoroutineScope
 ) {
     private val supabase = SupabaseService.client
+    private val json = Json { ignoreUnknownKeys = true }
+    private var connectionGeneration = 0
+    var calendarError by mutableStateOf<String?>(null)
+        private set
+    var googleCalendarAccountEmail by mutableStateOf<String?>(null)
+        private set
 
     var hasCalendarPermission by mutableStateOf(false)
         private set
@@ -81,9 +96,7 @@ class CalendarService(
                 .map { it[appleKey] ?: false }
                 .firstOrNull() ?: false
 
-            googleCalendarEnabled = context.dataStore.data
-                .map { it[googleKey] ?: false }
-                .firstOrNull() ?: false
+            context.dataStore.edit { it.remove(googleKey) }
         }
     }
 
@@ -97,100 +110,134 @@ class CalendarService(
         val key = booleanPreferencesKey("appleCalendarEnabled")
         context.dataStore.edit { it[key] = enabled }
 
-        syncPreferencesToSupabase()
+    }
+
+    fun resetGoogleCalendarState() {
+        connectionGeneration++
+        googleCalendarEnabled = false
+        googleCalendarLoading = false
+        calendarError = null
+        googleCalendarAccountEmail = null
+    }
+
+    private suspend fun connection(action: String, target: String? = null): String {
+        val response = supabase.functions.invoke("calendar-connection", body = buildJsonObject {
+            put("action", action)
+            target?.let { put("target", it) }
+        })
+        if (!response.status.isSuccess()) throw IllegalStateException("Calendar request failed")
+        return response.bodyAsText()
+    }
+
+    suspend fun refreshGoogleCalendarConnection() {
+        if (googleCalendarLoading) return
+        val userId = authService.currentUser?.id ?: run { resetGoogleCalendarState(); return }
+        val generation = connectionGeneration
+        try {
+            val status = json.decodeFromString<ConnectionStatus>(connection("status"))
+            if (authService.currentUser?.id != userId || generation != connectionGeneration) return
+            googleCalendarEnabled = status.connected
+            googleCalendarAccountEmail = status.accountEmail
+            calendarError = when {
+                status.revocationPending -> "Disconnected. Google access revocation is being retried."
+                status.requiresReconnect -> "Reconnect Google Calendar in Settings."
+                else -> null
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (authService.currentUser?.id != userId || generation != connectionGeneration) return
+            googleCalendarEnabled = false
+            googleCalendarAccountEmail = null
+            calendarError = "Google Calendar connection could not be checked."
+        }
     }
 
     suspend fun setGoogleCalendarEnabled(enabled: Boolean) {
-        if (enabled) {
-            val hasToken = hasGoogleCalendarToken()
-            if (hasToken) {
-                googleCalendarEnabled = true
-                val key = booleanPreferencesKey("googleCalendarEnabled")
-                context.dataStore.edit { it[key] = true }
-                syncPreferencesToSupabase()
+        val userId = authService.currentUser?.id ?: return
+        connectionGeneration++
+        val generation = connectionGeneration
+        googleCalendarLoading = true
+        calendarError = null
+        try {
+            if (!enabled) {
+                val status = json.decodeFromString<ConnectionStatus>(connection("disconnect"))
+                if (authService.currentUser?.id != userId || generation != connectionGeneration) return
+                googleCalendarEnabled = status.connected
+                googleCalendarAccountEmail = status.accountEmail
+                if (status.revocationPending) calendarError = "Disconnected. Google access revocation is being retried."
                 return
             }
-
-            // No token exists, need to authorize
-            // This should trigger OAuth flow in UI
-            googleCalendarEnabled = false
-            return
-        }
-
-        googleCalendarEnabled = false
-        val key = booleanPreferencesKey("googleCalendarEnabled")
-        context.dataStore.edit { it[key] = false }
-
-        // Clear tokens from Supabase
-        try {
-            val userId = authService.currentUser?.id ?: return
-            val updates = buildJsonObject {
-                put("google_calendar_refresh_token", "")
-                put("google_calendar_token_expires_at", "")
-                put("google_calendar_access_token", "")
+            val status = json.decodeFromString<ConnectionStatus>(connection("status"))
+            if (authService.currentUser?.id != userId || generation != connectionGeneration) return
+            googleCalendarEnabled = status.connected
+            googleCalendarAccountEmail = status.accountEmail
+            if (googleCalendarEnabled) return
+            val start = json.decodeFromString<AuthorizationStart>(connection("start", "android"))
+            if (authService.currentUser?.id != userId || generation != connectionGeneration) return
+            val uri = Uri.parse(start.authorizationURL)
+            if (uri.scheme != "https" || uri.host != "accounts.google.com" || uri.path != "/o/oauth2/v2/auth") {
+                throw IllegalStateException("Invalid calendar authorization URL")
             }
-
-            supabase
-                .from("profiles")
-                .update(updates) {
-                    filter {
-                        eq("id", userId)
-                    }
-                }
-        } catch (e: Exception) {
-            println("Failed to clear calendar tokens: ${e.message}")
-        }
-    }
-
-    private suspend fun syncPreferencesToSupabase() {
-        try {
-            val userId = authService.currentUser?.id ?: return
-            val updates = buildJsonObject {
-                put("calendar_integration_enabled", isEnabled)
+            context.startActivity(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (authService.currentUser?.id == userId && generation == connectionGeneration) {
+                calendarError = "Google Calendar could not be updated. Try again."
             }
+        } finally {
+            if (generation == connectionGeneration) googleCalendarLoading = false
+        }
+    }
 
-            supabase
-                .from("profiles")
-                .update(updates) {
-                    filter {
-                        eq("id", userId)
-                    }
+    /** One bounded backend call for all options; no provider tokens reach Android. */
+    suspend fun checkPollConflicts(options: List<PollTimeOption>): Set<String> {
+        if (options.isEmpty()) return emptySet()
+        val userId = authService.currentUser?.id
+        val generation = connectionGeneration
+        calendarError = null
+        val conflicts = mutableSetOf<String>()
+        if (appleCalendarEnabled) {
+            try {
+                conflicts.addAll(withContext(Dispatchers.IO) {
+                    options.filter { checkAppleCalendarConflicts(it.startTime, it.endTime).isNotEmpty() }.map { it.id }
+                })
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (authService.currentUser?.id == userId && generation == connectionGeneration) {
+                    calendarError = "Device calendar conflicts could not be checked."
                 }
-        } catch (e: Exception) {
-            println("Failed to sync calendar preferences: ${e.message}")
+            }
         }
-    }
-
-    private suspend fun hasGoogleCalendarToken(): Boolean {
-        return try {
-            val userId = authService.currentUser?.id ?: return false
-            val profile = authService.profile
-            // Check if profile has google_calendar_refresh_token
-            // This would require extending the Profile model
-            false
-        } catch (e: Exception) {
-            false
+        if (googleCalendarEnabled) {
+            try {
+                val response = supabase.functions.invoke("check-calendar-conflicts", body = buildJsonObject {
+                    put("timeOptions", kotlinx.serialization.json.buildJsonArray {
+                        options.forEach { option ->
+                            add(buildJsonObject {
+                                put("id", option.id)
+                                put("start_time", option.startTime.toString())
+                                put("end_time", option.endTime.toString())
+                            })
+                        }
+                    })
+                })
+                if (!response.status.isSuccess()) throw IllegalStateException("Calendar coverage unknown")
+                val result = json.decodeFromString<ConflictResponse>(response.bodyAsText())
+                if (!result.success) throw IllegalStateException("Calendar coverage unknown")
+                if (authService.currentUser?.id != userId || generation != connectionGeneration) return emptySet()
+                conflicts.addAll(result.conflictingIds)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (authService.currentUser?.id == userId && generation == connectionGeneration) {
+                    calendarError = "Google Calendar could not be checked. Review your availability before saving."
+                }
+            }
         }
-    }
-
-    // MARK: - Calendar Access
-
-    suspend fun checkConflicts(
-        startTime: Instant,
-        endTime: Instant,
-        sources: List<CalendarSource> = listOf(CalendarSource.APPLE_CALENDAR, CalendarSource.GOOGLE_CALENDAR)
-    ): List<CalendarEvent> {
-        val conflicts = mutableListOf<CalendarEvent>()
-
-        if (sources.contains(CalendarSource.APPLE_CALENDAR) && appleCalendarEnabled) {
-            conflicts.addAll(checkAppleCalendarConflicts(startTime, endTime))
-        }
-
-        if (sources.contains(CalendarSource.GOOGLE_CALENDAR) && googleCalendarEnabled) {
-            conflicts.addAll(checkGoogleCalendarConflicts(startTime, endTime))
-        }
-
-        return conflicts
+        return if (authService.currentUser?.id == userId && generation == connectionGeneration) conflicts else emptySet()
     }
 
     private fun checkAppleCalendarConflicts(
@@ -203,46 +250,39 @@ class CalendarService(
         val contentResolver: ContentResolver = context.contentResolver
 
         val projection = arrayOf(
-            CalendarContract.Events._ID,
+            CalendarContract.Instances.EVENT_ID,
             CalendarContract.Events.TITLE,
-            CalendarContract.Events.DTSTART,
-            CalendarContract.Events.DTEND,
+            CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.END,
             CalendarContract.Events.ALL_DAY,
-            CalendarContract.Events.AVAILABILITY
+            CalendarContract.Events.AVAILABILITY,
+            CalendarContract.Events.STATUS,
+            CalendarContract.Events.SELF_ATTENDEE_STATUS
         )
 
-        val selection = "(${CalendarContract.Events.DTSTART} < ?) AND (${CalendarContract.Events.DTEND} > ?)"
-        val selectionArgs = arrayOf(
-            endTime.toEpochMilliseconds().toString(),
-            startTime.toEpochMilliseconds().toString()
-        )
-
-        val cursor: Cursor? = contentResolver.query(
-            CalendarContract.Events.CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            null
+        val cursor: Cursor? = CalendarContract.Instances.query(
+            contentResolver, projection, startTime.toEpochMilliseconds(), endTime.toEpochMilliseconds()
         )
 
         cursor?.use {
-            val idIndex = it.getColumnIndex(CalendarContract.Events._ID)
+            val idIndex = it.getColumnIndex(CalendarContract.Instances.EVENT_ID)
             val titleIndex = it.getColumnIndex(CalendarContract.Events.TITLE)
-            val startIndex = it.getColumnIndex(CalendarContract.Events.DTSTART)
-            val endIndex = it.getColumnIndex(CalendarContract.Events.DTEND)
-            val allDayIndex = it.getColumnIndex(CalendarContract.Events.ALL_DAY)
+            val startIndex = it.getColumnIndex(CalendarContract.Instances.BEGIN)
+            val endIndex = it.getColumnIndex(CalendarContract.Instances.END)
             val availabilityIndex = it.getColumnIndex(CalendarContract.Events.AVAILABILITY)
+            val statusIndex = it.getColumnIndex(CalendarContract.Events.STATUS)
+            val attendeeIndex = it.getColumnIndex(CalendarContract.Events.SELF_ATTENDEE_STATUS)
 
             while (it.moveToNext()) {
                 val id = it.getString(idIndex)
                 val title = it.getString(titleIndex) ?: "Busy"
                 val start = Instant.fromEpochMilliseconds(it.getLong(startIndex))
                 val end = Instant.fromEpochMilliseconds(it.getLong(endIndex))
-                val allDay = it.getInt(allDayIndex) == 1
                 val availability = it.getInt(availabilityIndex)
 
-                // Filter out all-day events and free/transparent events
-                if (!allDay && availability == CalendarContract.Events.AVAILABILITY_BUSY) {
+                if (availability != CalendarContract.Events.AVAILABILITY_FREE &&
+                    it.getInt(statusIndex) != CalendarContract.Events.STATUS_CANCELED &&
+                    it.getInt(attendeeIndex) != CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED) {
                     events.add(
                         CalendarEvent(
                             id = id,
@@ -257,21 +297,6 @@ class CalendarService(
         }
 
         return events
-    }
-
-    private suspend fun checkGoogleCalendarConflicts(
-        startTime: Instant,
-        endTime: Instant
-    ): List<CalendarEvent> {
-        // Call Supabase Edge Function to check Google Calendar
-        return try {
-            // This would call the same edge function as iOS
-            // Implementation depends on your edge function setup
-            emptyList()
-        } catch (e: Exception) {
-            println("Failed to check Google Calendar conflicts: ${e.message}")
-            emptyList()
-        }
     }
 
     data class CalendarEvent(
@@ -291,8 +316,16 @@ class CalendarService(
             scope: CoroutineScope
         ): CalendarService {
             return instance ?: synchronized(this) {
-                instance ?: CalendarService(context, authService, scope).also { instance = it }
+                instance ?: CalendarService(context.applicationContext, authService, scope).also { instance = it }
             }
         }
     }
 }
+
+@Serializable
+private data class ConnectionStatus(val connected: Boolean, val accountEmail: String?,
+    val requiresReconnect: Boolean, val revocationPending: Boolean)
+@Serializable
+private data class AuthorizationStart(val authorizationURL: String)
+@Serializable
+private data class ConflictResponse(val success: Boolean, val conflictingIds: List<String>)

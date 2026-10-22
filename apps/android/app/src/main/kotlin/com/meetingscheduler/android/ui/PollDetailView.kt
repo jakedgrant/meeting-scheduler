@@ -117,19 +117,10 @@ fun PollDetailView(
                 localComment = participant.comment ?: ""
             }
 
-            // Check calendar conflicts
+            // Refresh safe connection metadata, then check all slots in one call.
+            calendarService.refreshGoogleCalendarConnection()
             if (calendarService.isEnabled && timeOptions.isNotEmpty()) {
-                val conflicts = mutableSetOf<String>()
-                timeOptions.forEach { option ->
-                    val conflictEvents = calendarService.checkConflicts(
-                        option.startTime,
-                        option.endTime,
-                        listOf(CalendarSource.APPLE_CALENDAR, CalendarSource.GOOGLE_CALENDAR)
-                    )
-                    if (conflictEvents.isNotEmpty()) {
-                        conflicts.add(option.id)
-                    }
-                }
+                val conflicts = calendarService.checkPollConflicts(timeOptions)
                 calendarConflicts = conflicts
 
                 // Auto-mark conflicts as unavailable
@@ -213,6 +204,12 @@ fun PollDetailView(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                calendarService.calendarError?.let { message ->
+                    item {
+                        Text(message, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 // Poll Info
                 if (poll?.description != null || poll?.location != null || poll?.closesAt != null) {
                     item {

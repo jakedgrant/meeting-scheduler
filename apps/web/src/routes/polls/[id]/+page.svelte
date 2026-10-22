@@ -17,7 +17,7 @@
 		submitAvailability,
 		updateParticipantComment
 	} from '$lib/stores/polls';
-	import { calendarEnabled, calendarConflicts, checkCalendarConflicts } from '$lib/stores/calendar';
+	import { calendarEnabled, calendarConflicts, calendarStatusError, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
 	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
 
@@ -276,7 +276,7 @@
 	}
 
 	function addToCalendarICS() {
-		if (!$currentPoll.selected_start_time || !$currentPoll.selected_end_time) return;
+		if (!$currentPoll?.selected_start_time || !$currentPoll.selected_end_time) return;
 
 		const icsContent = generateICS({
 			title: $currentPoll.title,
@@ -292,7 +292,7 @@
 	}
 
 	function addToGoogleCalendar() {
-		if (!$currentPoll.selected_start_time || !$currentPoll.selected_end_time) return;
+		if (!$currentPoll?.selected_start_time || !$currentPoll.selected_end_time) return;
 
 		const url = generateGoogleCalendarUrl({
 			title: $currentPoll.title,
@@ -308,6 +308,9 @@
 </script>
 
 <div class="poll-detail">
+	{#if $calendarStatusError}
+		<p role="status">{$calendarStatusError}</p>
+	{/if}
 	{#if $pollsLoading && !$currentPoll}
 		<div class="loading">Loading poll...</div>
 	{:else if !$currentPoll}

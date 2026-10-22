@@ -1,6 +1,8 @@
 package com.meetingscheduler.android
 
 import android.os.Bundle
+import android.content.Intent
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -52,4 +54,21 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+    override fun onResume() {
+        super.onResume()
+        if (::calendarService.isInitialized) {
+            lifecycleScope.launch { calendarService.refreshGoogleCalendarConnection() }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val uri = intent.data
+        if (uri?.scheme == "meetingscheduler" && uri.host == "calendar" && uri.path == "/callback") {
+            // Treat the link as a signal only; verify connection state with the API.
+            lifecycleScope.launch { calendarService.refreshGoogleCalendarConnection() }
+        }
+    }
+
 }
