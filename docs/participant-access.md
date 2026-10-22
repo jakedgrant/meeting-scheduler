@@ -60,7 +60,7 @@ All five are exposed as `public` invoker wrappers over `poll_private` definers, 
 
 `update_guest_participant` replaces both editable fields, so clients send the current display name with the new comment. It cannot change any other column. The returned `participant.anonymous_email` is always `NULL`; a supplied contact email is stored privately and has no client read path yet. Join and edit take a `FOR SHARE` lock on the poll row, so they cannot interleave with a concurrent close.
 
-`poll_private.verified_guest_participant(participant_uuid, guest_token)` returns the verified guest row ID or `NULL`. It is not executable by API roles and is the verifier later elevated commands should reuse: F04 for claiming a guest record and F06/F10 for guest availability saves. A row with a non-null `user_id` never verifies as a guest. No API exists to claim a guest row; that belongs to F04.
+`poll_private.verified_guest_participant(participant_uuid, guest_token)` returns the verified guest row ID or `NULL`. It is not executable by API roles and is the verifier later elevated commands should reuse: F04 for claiming a guest record and F06/F10 for guest availability saves. A row with a non-null `user_id` never verifies as a guest. [F04](membership-integrity.md) adds `claim_guest_participant`, which uses this verifier, and extends `join_poll_as_guest` with an optional client-generated capability for idempotent retries.
 
 ## Previously exposed tokens and emails
 

@@ -2,6 +2,7 @@
   "scripts": {
     "test:rpc:db": "node --test tests/rpc-authorization.test.mjs",
     "test:participants:db": "node --test tests/participant-access.test.mjs",
+    "test:membership:db": "node --test tests/membership-integrity.test.mjs",
     "test:calendar:db": "node --test tests/calendar-database.test.mjs",
     "test:calendar:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/calendar/",
     "test:billing:db": "node --test tests/billing-database.test.mjs",
