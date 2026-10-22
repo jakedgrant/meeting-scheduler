@@ -148,6 +148,90 @@ const customer = `/v2/projects/${config.projectId}/customers/${alice}`;
 const resource =
   `/v2/projects/${config.projectId}/subscriptions/sub_fixture/entitlements`;
 
+Deno.test("active promotional grants retain canonical identity without invented product/receipt; inactive promos cannot block paid access", async () => {
+  const state = await fetchSnapshot(
+    alice,
+    config,
+    fakeProvider({
+      [`${customer}/subscriptions`]: list([
+        subscription({
+          id: "promo_expired",
+          product_id: null,
+          store: "promotional",
+          gives_access: false,
+          store_subscription_identifier: null,
+          starts_at: null,
+          ends_at: null,
+        }),
+        subscription(),
+        subscription({
+          id: "promo_active",
+          product_id: null,
+          store: "promotional",
+          store_subscription_identifier: null,
+          entitlements: list([entitlement("team_access")]),
+        }),
+      ]),
+      [`${customer}/purchases`]: list(),
+    }),
+    () => now,
+  );
+  assert.equal(state.entitlements.length, 2);
+  const promo = state.entitlements.find((e) =>
+    e.entitlement === "team_access"
+  )!;
+  assert.equal(promo.resource_id, "subscriptions/promo_active");
+  assert.equal(promo.product_id, null);
+  assert.equal(promo.transaction_id, null);
+  assert.equal(promo.store, "PROMOTIONAL");
+  assert.equal(state.passes.length, 0);
+  assert.ok(
+    state.entitlements.some((e) =>
+      e.entitlement === "pro_access" && e.product_id === "prod_sub"
+    ),
+  );
+});
+
+Deno.test("custom provider IDs match exactly; only UUID identities accept case variants or explicit verified canonical ownership", async () => {
+  const custom = "CustomUser";
+  const path = `/v2/projects/${config.projectId}/customers/${custom}`;
+  const read = (actual: string, canonical = custom) =>
+    fetchSnapshot(
+      custom,
+      config,
+      fakeProvider({
+        [`${path}/subscriptions`]: list([
+          subscription({ customer_id: actual }),
+        ]),
+        [`${path}/purchases`]: list(),
+      }),
+      () => now,
+      canonical,
+    );
+  assert.equal((await read(custom)).entitlements.length, 1);
+  for (const wrong of ["customuser", "CUSTOMUSER", "OtherUser", bob]) {
+    await assert.rejects(() => read(wrong, alice), {
+      code: "provider_identity_mismatch",
+    });
+  }
+  assert.equal((await read(alice.toUpperCase(), alice)).entitlements.length, 1);
+  await assert.rejects(() => read(alice), {
+    code: "provider_identity_mismatch",
+  });
+  const uuidState = await fetchSnapshot(
+    alice,
+    config,
+    fakeProvider({
+      [`${customer}/subscriptions`]: list([
+        subscription({ customer_id: alice.toUpperCase() }),
+      ]),
+      [`${customer}/purchases`]: list(),
+    }),
+    () => now,
+  );
+  assert.equal(uuidState.entitlements.length, 1);
+});
+
 Deno.test("webhook authenticates, rejects wrong methods/configuration and never leaks request data", async () => {
   const repo = new Repository();
   const handler = webhookHandler(config, repo);

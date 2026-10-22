@@ -59,13 +59,16 @@ CREATE TABLE private.billing_entitlements (
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     resource_id TEXT NOT NULL,
     entitlement TEXT NOT NULL CHECK (entitlement IN ('pro_access','team_access')),
-    product_id TEXT NOT NULL,
+    product_id TEXT,
     store TEXT NOT NULL,
-    transaction_id TEXT NOT NULL,
+    transaction_id TEXT,
     purchased_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ,
     valid_until TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY(user_id, resource_id, entitlement)
+    PRIMARY KEY(user_id, resource_id, entitlement),
+    -- Promotional grants have a canonical resource/entitlement, but may have
+    -- neither a store product nor a store receipt. Never manufacture either.
+    CHECK ((product_id IS NOT NULL AND transaction_id IS NOT NULL) OR store='PROMOTIONAL')
 );
 
 ALTER TABLE public.subscriptions

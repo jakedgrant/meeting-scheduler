@@ -143,6 +143,23 @@ test('billing migration, privileges, transactional recovery and fencing on Postg
   });
   await reset();
 
+  await t.test('active promotional access projects null product/receipt using its canonical resource and never mints passes', async () => {
+    await accept(event('promo', [alice], { type: 'TEMPORARY_ENTITLEMENT_GRANT' }));
+    await complete(await claim(), snapshot([entitlement('team_access', { resource_id: 'subscriptions/promo',
+      store: 'PROMOTIONAL', product_id: null, transaction_id: null })]));
+    assert.deepEqual(await one('SELECT entitlement,is_active,product_id,original_transaction_id FROM public.subscriptions'),
+      { entitlement: 'team_access', is_active: true, product_id: null, original_transaction_id: null });
+    assert.equal((await one(`SELECT private.billing_effective_entitlement('${alice}') AS tier`)).tier, 'team_access');
+    assert.equal((await one('SELECT count(*)::int AS n FROM public.event_passes')).n, 0);
+    assert.equal((await one('SELECT resource_id FROM private.billing_entitlements')).resource_id, 'subscriptions/promo');
+    await db.exec(`SET ROLE authenticated; SELECT set_config('request.jwt.claim.sub','${alice}',false)`);
+    try {
+      assert.equal((await one('SELECT public.has_active_subscription() AS active')).active, true);
+      assert.equal((await one('SELECT public.get_user_entitlement() AS tier')).tier, 'team_access');
+    } finally { await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false)"); }
+  });
+  await reset();
+
   await t.test('environment and stale snapshot rejection leaves outputs and completion untouched; store identities do not collide', async () => {
     await accept(event('environment'));
     const job = await claim();

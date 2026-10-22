@@ -7,12 +7,19 @@ import {
   record,
   Snapshot,
   string,
+  uuidPattern,
 } from "./types.ts";
 import { boundedBody } from "./webhook.ts";
 
 type Json = Record<string, unknown>;
 const origin = "https://api.revenuecat.com";
 const relevant = new Set(["pro_access", "team_access"]);
+
+function sameIdentity(actual: string, expected: string): boolean {
+  return uuidPattern.test(actual) && uuidPattern.test(expected)
+    ? actual.toLowerCase() === expected.toLowerCase()
+    : actual === expected;
+}
 
 // Fetch complete customer resource lists in ONE environment. A failed/truncated
 // page must never become an empty, access-revoking snapshot.
@@ -129,41 +136,49 @@ export async function fetchSnapshot(
       }
       if (
         typeof resource.customer_id !== "string" ||
-        ![customerId.toLowerCase(), canonicalUserId.toLowerCase()].includes(
-          resource.customer_id.toLowerCase(),
+        ![customerId, canonicalUserId].some((expected) =>
+          sameIdentity(resource.customer_id as string, expected)
         )
       ) throw new BillingError("provider_identity_mismatch", 3600);
-      const product = string(resource.product_id, 255);
+      let expires: number | null = null;
+      if (kind === "subscriptions") {
+        if (typeof resource.gives_access !== "boolean") {
+          throw new BillingError("provider_invalid_response", 300);
+        }
+        if (!resource.gives_access) continue;
+        expires = resource.ends_at === null ? null : millis(resource.ends_at);
+      } else {
+        string(resource.status, 80);
+        if (resource.status !== "owned") continue;
+      }
       const store = string(resource.store, 80).toUpperCase();
+      const promotional = kind === "subscriptions" && store === "PROMOTIONAL";
+      const product = promotional && resource.product_id === null
+        ? null
+        : string(resource.product_id, 255);
       const rawTransaction = resource[
         kind === "subscriptions"
           ? "store_subscription_identifier"
           : "store_purchase_identifier"
       ];
       if (
+        !(promotional && rawTransaction == null) &&
         typeof rawTransaction !== "string" &&
         !(typeof rawTransaction === "number" &&
           Number.isSafeInteger(rawTransaction) && rawTransaction >= 0)
       ) {
         throw new BillingError("provider_invalid_transaction", 300);
       }
-      const transaction = string(String(rawTransaction), 1000);
+      const transaction = promotional && rawTransaction == null
+        ? null
+        : string(String(rawTransaction), 1000);
       const purchased = millis(
         resource[kind === "subscriptions" ? "starts_at" : "purchased_at"],
       );
-      let active: boolean;
-      let expires: number | null = null;
-      if (kind === "subscriptions") {
-        if (typeof resource.gives_access !== "boolean") {
-          throw new BillingError("provider_invalid_response", 300);
-        }
-        active = resource.gives_access;
-        expires = resource.ends_at === null ? null : millis(resource.ends_at);
-      } else {
-        string(resource.status, 80);
-        active = resource.status === "owned";
-      }
-      if (kind === "purchases" && config.passProductIds.includes(product)) {
+      if (
+        kind === "purchases" && product !== null && transaction !== null &&
+        config.passProductIds.includes(product)
+      ) {
         const quantity = resource.quantity;
         if (
           typeof quantity !== "number" || !Number.isSafeInteger(quantity) ||
@@ -171,19 +186,16 @@ export async function fetchSnapshot(
         ) {
           throw new BillingError("provider_invalid_quantity", 300);
         }
-        if (active) {
-          passes.push({
-            purchase_id: id,
-            product_id: product,
-            store,
-            transaction_id: transaction,
-            purchased_at: new Date(purchased).toISOString(),
-            quantity,
-          });
-        }
+        passes.push({
+          purchase_id: id,
+          product_id: product,
+          store,
+          transaction_id: transaction,
+          purchased_at: new Date(purchased).toISOString(),
+          quantity,
+        });
         continue;
       }
-      if (!active) continue;
       const associated = await list(
         `${root}/${kind}/${encodeURIComponent(id)}/entitlements`,
         resource.entitlements,

@@ -43,9 +43,9 @@ export interface Claim {
 export interface Entitlement {
   resource_id: string;
   entitlement: "pro_access" | "team_access";
-  product_id: string;
+  product_id: string | null;
   store: string;
-  transaction_id: string;
+  transaction_id: string | null;
   purchased_at: string;
   expires_at: string | null;
   valid_until: string;
