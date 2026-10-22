@@ -8,7 +8,7 @@ Both workers started from `29bbf439161a5f507d255e6e8288cad40b4a0f22`, which cont
 
 | Finding | Worker task | Branch | Worktree | Latest progress |
 | --- | --- | --- | --- | --- |
-| F02: RPC authorization | [F02: Authorize database RPCs](codex://threads/01a164d4-109e-7a50-ad0e-ea921f381feb) | `codex/f02-rpc-authorization` | `/Users/jake/.codex/worktrees/a8fa/meeting-scheduler` | Active: setup confirmed; inventorying functions/grants and preparing isolated PGlite authorization checks. Resource rule acknowledged. |
+| F02: RPC authorization | [F02: Authorize database RPCs](codex://threads/01a164d4-109e-7a50-ad0e-ea921f381feb) | `codex/f02-rpc-authorization` | `/Users/jake/.codex/worktrees/a8fa/meeting-scheduler` | Active: RPC/caller inventory complete; implementing guarded compatible signatures and private access helpers. CLI migration allocated; offline validation planned. Resource rule acknowledged. |
 | F08: Billing webhook reliability | [F08: Make billing webhooks reliable](codex://threads/01a164d4-4f33-76d0-960c-27dcad12e371) | `codex/f08-billing-webhooks` | `/Users/jake/.codex/worktrees/c5a4/meeting-scheduler` | Active: proposed private immutable inbox with leased canonical reconciliation/replay; preserving the public subscription projection. Resource rule acknowledged. |
 
 Coordinator: [architecture review thread](codex://threads/01a164c2-5bc9-7272-b4be-5fe2147930c9), branch `codex/architecture-review`, checkout `/Users/jake/Developer/meeting-scheduler`.
@@ -41,7 +41,7 @@ Static checks, pure compilation, and isolated in-process PGlite/offline Deno tes
 - [x] Commit the common work plan at `29bbf43`.
 - [x] Verify both new branches and separate managed worktrees.
 - [x] Receive both workers' progress-report and resource-rule acknowledgements.
-- [ ] Review F02's RPC inventory, access model, and compatibility decisions.
+- [x] Review F02's initial RPC inventory, access model, and compatibility direction; implementation review remains pending.
 - [ ] Review F08's inbox/reconciliation design and output contract for F05.
 - [ ] Record migration filenames and verify distinct version prefixes/ordering.
 - [ ] Review each worker's implementation, local commits, and focused validation evidence.
@@ -51,3 +51,4 @@ Static checks, pure compilation, and isolated in-process PGlite/offline Deno tes
 
 - **October 22, setup:** F02 and F08 independently verified the user's delegation/reporting authorization, created the assigned branches at the common baseline, and acknowledged that shared runtime access requires a reservation. Both began offline analysis; neither requested a runtime reservation.
 - **October 22, initial coordination:** F08 proposed authoritative provider snapshot reconciliation, private entitlement/transaction/environment state, and a compatible public subscription projection with `team_access` precedence. The coordinator relayed this interface to F02 and requested concurrency/recovery tests from F08. The design remains subject to implementation review; no provider customer API or shared runtime use is authorized for validation.
+- **October 22, F02 design:** allocated CLI migration `20261022181851_privileged_rpc_authorization.sql`. Proposed helpers live in unexposed `poll_private`, with guarded legacy signatures, owner/member summary access, and minimal active share-code preview. F02 changes authorization of read-only subscription/pass helpers, not billing storage, and avoids blanket grant changes. The coordinator relayed this boundary and migration version to F08. F03/F04 remain open.
