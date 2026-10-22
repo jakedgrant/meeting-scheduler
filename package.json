@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:rpc:db": "node --test tests/rpc-authorization.test.mjs",
     "test:calendar:db": "node --test tests/calendar-database.test.mjs",
     "test:calendar:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/calendar/"
   },
