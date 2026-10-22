@@ -22,8 +22,8 @@ Second wave, started October 22 from `main` at `6f2c547`. Each finding has its o
 | --- | --- | --- | --- | --- |
 | F03: Participant access | A (backend owner) | `claude/f03-participant-access` | `main` `6f2c547` | In progress |
 | F04: Membership integrity | A (same backend owner) | `claude/f04-membership-integrity` | F03 branch (depends on F03's guest ownership contract) | Queued after F03 |
-| F25: Reproducible iOS checkout | C | `claude/f25-ios-checkout` | `main` `6f2c547` | In progress |
-| F26: Android release signing | D | `claude/f26-android-signing` | `main` `6f2c547` (independent of F25) | Queued after F25 |
+| F25: Reproducible iOS checkout | C | `claude/f25-ios-checkout` | `main` `6f2c547` | Done locally at `608750f`. Pushed; draft PR not yet opened. A clean `--no-local` clone builds (Debug sim, build-for-testing, Release device; generic destinations, no simulator). Coordinator review done. |
+| F26: Android release signing | D | `claude/f26-android-signing` | `main` `6f2c547` (independent of F25) | Done locally at `66df259`. Pushed; draft PR not yet opened. **Gradle not run:** only JDK 25/26 are installed and there is no SDK 36. The iOS `#if DEBUG` gate compiles. Coordinator review done. Before merging, run the doc's steps 1–4 on JDK 17/21 with SDK 36. |
 
 Coordinator: branch `claude/remediation-status-2026-10-22` (this status update).
 
@@ -65,7 +65,8 @@ Merging code does not change hosted state. None of the items below has been esta
 | F08 backfill | Drain the queue seeded by the migration; resolve quarantined identities and legacy passes with provider evidence; verify fresh `reconciled_at` values and pass counts | Same |
 | F08 live validation | Run real sandbox purchase, renewal, cancellation, grace, refund, transfer, and duplicate-delivery tests through the hosted gateway; then check production key scopes and schedule health | Same |
 | F03/F04 (when merged) | Apply the new migrations after F02 and F08; rotate or invalidate previously exposed guest capabilities; roll out client adapters in the documented order | Worker docs (pending) |
-| F25/F26 (when merged) | Hook iOS and Android builds into CI (F24); provide release signing secrets; verify the release certificate | Worker docs (pending) |
+| F25 (when merged) | Before pulling, move the untracked local `apps/mobile/MeetingScheduler` aside in the main checkout, then diff and delete it. Add an iOS CI build job (F24); a cold runner needs github.com access for SwiftPM | [iOS checkout](ios-checkout.md) (on the F25 branch) |
+| F26 (when merged) | Run the Gradle verification on JDK 17/21 with SDK 36; add the keystore, passwords, alias, and expected certificate SHA-256 as CI secrets; confirm the upload/app-signing key and register its SHA-1 with the Google OAuth client; supply `google-services.json` from a secret | [Android release signing](android-release-signing.md) (on the F26 branch) |
 
 ## Coordinator follow-ups
 
@@ -73,7 +74,7 @@ Merging code does not change hosted state. None of the items below has been esta
 - [x] Start the F03→F04 backend worker and the F25→F26 delivery worker in separate worktrees.
 - [ ] Review the F03 design and implementation against the F02 access contract.
 - [ ] Review F04's duplicate reconciliation and join command.
-- [ ] Verify F25 with a clean disposable checkout build, then review F26's signing failure behavior.
+- [x] Verify F25 with a clean disposable checkout build (worker evidence plus coordinator diff review), and review F26's signing failure behavior (static only; Gradle run outstanding).
 - [ ] Replay the combined migrations (`main` + F03 + F04) with all suites, from the 44 DB / 38 Edge / seven entry-point baseline, before delivery.
 - [ ] Publish draft PRs for each finding.
 - [ ] Continue the dependency sequence: F06/F10, then F05/F09 for Stream A; F12/F13 and F24 for the client streams.
@@ -103,3 +104,4 @@ Merging code does not change hosted state. None of the items below has been esta
 - **October 22, PR delivery:** pushed all three branches and opened/attached documentation [#58](https://github.com/jakedgrant/meeting-scheduler/pull/58), F02 [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59), and F08 [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60). All target main, preserve separate review scope, and link the planned merge order. No integration merge or hosted deployment was performed.
 
 - **October 22, merged baseline:** the owner merged #58, #59, and #60 (`main` is at `6f2c547`). The coordinator updated the F02/F08 statuses from "integration pending" to merged, with hosted rollout pending. Hosted owner actions now live in their own section. The second wave started: F03→F04 with one backend owner, and F25 followed by F26 (independent) with the delivery worker. No shared runtime reservation has been requested or granted.
+- **October 22, F25/F26 delivery:** the delivery worker finished both on separate branches from `6f2c547`. It kept them in one worktree because its sandbox blocked git in a second worktree. F25: the gitlink commit `079a8b1` doesn't exist locally or on GitHub, so the wrapper is now tracked monorepo source (14 files, plus narrowed ignore rules). Clean-clone builds succeeded. F26: release builds can no longer fall back to the debug key; a `validateReleaseSigning` gate and an explicit unsigned opt-in were added; billing log levels follow the build type on both platforms. F26's Gradle run is outstanding because no compatible JDK or SDK is installed. The worker also found that `apps/android/gradle.properties` is tracked despite `.gitignore`, so the setup docs now steer credentials away from it. Both branches were pushed; draft PR creation was blocked by the permission check and awaits the owner. The two branches merge with no conflicts. No runtime reservation was used.
