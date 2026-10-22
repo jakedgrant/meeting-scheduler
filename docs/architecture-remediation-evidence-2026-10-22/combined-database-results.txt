@@ -1,0 +1,55 @@
+▶ billing migration, privileges, transactional recovery and fencing on Postgres
+  ✔ legacy purchases fail closed, remain replayable, and retain spent IDs/poll links after verified adoption (13.193416ms)
+  ✔ private tables/RPCs are unavailable to clients, use RLS, and all billing functions pin invoker search paths (3.899083ms)
+  ✔ acceptance is durable, duplicates do not requeue, conflicting IDs and environment changes fail atomically (3.850959ms)
+  ✔ new events invalidate in-flight snapshots and expired/replaced leases cannot commit or acknowledge targets (8.530333ms)
+  ✔ an old expiration delivered after renewal cannot revoke a current canonical entitlement (4.974167ms)
+  ✔ active promotional access projects null product/receipt using its canonical resource and never mints passes (3.806208ms)
+  ✔ environment and stale snapshot rejection leaves outputs and completion untouched; store identities do not collide (2.822125ms)
+  ✔ a pass write failure rolls back subscription and receipt writes; accepted work replays exactly once after recovery (7.133959ms)
+  ✔ missing profiles retry after signup and anonymous identities quarantine durably instead of losing purchases (9.65525ms)
+  ✔ unknown/test events never activate; an operator can explicitly replay an unknown event as reconciliation (4.527542ms)
+  ✔ case-sensitive RevenueCat UUID spellings share one fenced Supabase account job (2.485458ms)
+  ✔ refund/transfer/quantity reconciliation preserves spent units and completes all affected event targets (6.675875ms)
+  ✔ all entitlement grants are retained; team precedence, natural expiry and freshness horizons are enforced (3.401583ms)
+  ✔ authenticated pass counts reject other accounts and exclude expired, revoked, legacy and spent rows (4.467209ms)
+✔ billing migration, privileges, transactional recovery and fencing on Postgres (689.302917ms)
+▶ calendar migration and backend-only repository contract on real Postgres
+  ✔ public profile payloads no longer contain token or calendar columns (4.758375ms)
+  ✔ anonymous and authenticated roles cannot read private tables or execute repository helpers (2.590125ms)
+  ✔ new objects enable RLS, pin elevated search paths and keep the exposed RPC as invoker (1.986958ms)
+  ✔ verified identities must still have a live, matching session (3.401083ms)
+  ✔ OAuth state is single-use, expiring, and replaced by the latest attempt (5.778792ms)
+  ✔ disconnect fences callbacks and stale refresh writes (5.597166ms)
+  ✔ revocation leases prevent duplicate workers and only matching acknowledgements delete jobs (3.844791ms)
+  ✔ an exchanging callback fences reconnect until cleanup is queued; failed and abandoned revocations are retried (7.347ms)
+  ✔ refresh uses compare-and-swap and rewrap preserves connection semantics (5.139541ms)
+  ✔ sign-out prevents a consumed callback from storing credentials (3.41325ms)
+  ✔ deleting an account queues revocation instead of orphaning its Google grant (2.728792ms)
+✔ calendar migration and backend-only repository contract on real Postgres (669.927084ms)
+▶ F02 migration replay and direct role-based RPC authorization on Postgres
+  ✔ catalog inventory covers every legacy signature and removes effective anonymous self-service grants (3.617292ms)
+  ✔ anonymous callers cannot invoke any legacy user/summary signature, including explicit UUIDs (3.847125ms)
+  ✔ every self-service RPC rejects another UUID and explicit NULL under authenticated role (7.934875ms)
+  ✔ default and explicit self calls retain subscription, pass, capacity and list result shapes (9.251042ms)
+  ✔ expired or inactive subscription access cannot bypass free creation limits (4.133667ms)
+  ✔ owners and current members can read summaries in every poll state (13.768125ms)
+  ✔ unrelated callers cannot read even active summaries, and missing polls have the same denial (2.182875ms)
+  ✔ revoked membership immediately removes closed-poll list, preview and summary access (2.561875ms)
+  ✔ authorized summary includes only same-poll responses and omits guest emails/capabilities (1.434209ms)
+  ✔ legacy and private membership helpers answer only for the current caller (8.535333ms)
+  ✔ anonymous reads actually execute RLS without recursion or missing helper privileges (2.8185ms)
+  ✔ share-code and direct private preview paths preserve active invitations with the same minimal projection (6.8945ms)
+  ✔ private schema is not exposed and API roles can neither create helpers nor access calendar tables (6.434125ms)
+  ✔ invoker reads cannot bypass table grants and elevated helpers resist a hostile search path (4.250375ms)
+  ✔ signup, generated share codes and timestamp triggers still work after execute revocation (4.6855ms)
+  ✔ calendar service-role definitions/grants and global default privileges remain unchanged (3.723417ms)
+✔ F02 migration replay and direct role-based RPC authorization on Postgres (714.848458ms)
+ℹ tests 44
+ℹ suites 0
+ℹ pass 44
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2260.501625

@@ -1,0 +1,25 @@
+{
+  "f02": "f86d55cfab9236a1c5dd045c58f59ef71d73e1a6",
+  "f08": "ec1238202d0760cd4a9d25ffaeae5ef8f97c7784",
+  "base": "29bbf439161a5f507d255e6e8288cad40b4a0f22",
+  "snapshot": "/private/tmp/architecture-combined-666oj6fo",
+  "method": "F08 git archive plus exact F02 committed files and merged package scripts; branches unchanged",
+  "verified_by": "coordinator",
+  "database_tests": {
+    "passed": 44,
+    "failed": 0,
+    "billing": 15,
+    "calendar": 12,
+    "rpc_authorization": 17
+  },
+  "edge_tests": {
+    "passed": 38,
+    "failed": 0,
+    "billing": 15,
+    "calendar": 23
+  },
+  "entrypoints_type_checked": 7,
+  "shared_runtime_resources_used": false,
+  "live_provider_or_hosted_validation": false,
+  "billing_migration_sha256": "a7abbea7e35b41356bd94aee7ac5a0d686db6e115c36db5eec17ed33b5a05807"
+}
