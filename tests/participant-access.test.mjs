@@ -130,12 +130,12 @@ test('F03 participant access, guest capabilities and identity protection on Post
   });
 
   await t.test('catalog: no permissive participant policies, narrow grants, private storage, pinned helpers', async () => {
-    const policies = (await db.query(`SELECT policyname, cmd, roles::text, qual, with_check FROM pg_policies
-      WHERE schemaname='public' AND tablename='poll_participants' ORDER BY policyname`)).rows;
-    assert.deepEqual(policies.map(p => [p.policyname, p.cmd]), [
-      ['Anyone can join active polls', 'INSERT'],
-      ['Members can update their own participant record', 'UPDATE'],
-      ['Participants are visible through invitation or membership', 'SELECT'],
+    // Insert (join) policies belong to F04; F03 owns the read/update policies.
+    const policies = (await db.query(`SELECT policyname, cmd, roles::text AS roles, qual, with_check FROM pg_policies
+      WHERE schemaname='public' AND tablename='poll_participants' AND cmd <> 'INSERT' ORDER BY policyname`)).rows;
+    assert.deepEqual(policies.map(p => [p.policyname, p.cmd, p.roles]), [
+      ['Members can update their own participant record', 'UPDATE', '{authenticated}'],
+      ['Participants are visible to the poll owner and members', 'SELECT', '{authenticated}'],
     ]);
     for (const policy of policies) {
       assert.notEqual(policy.qual, 'true');
@@ -168,31 +168,36 @@ test('F03 participant access, guest capabilities and identity protection on Post
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE (n.nspname='poll_private' AND p.proname IN ('protect_participant_identity','store_participant_contact',
         'can_view_participants','new_guest_token','guest_token_hash','verified_guest_participant',
-        'join_poll_as_guest','get_guest_participant','update_guest_participant','rotate_guest_token'))
-        OR (n.nspname='public' AND p.proname IN ('join_poll_as_guest','get_guest_participant',
+        'join_poll_as_guest','get_guest_participant','get_guest_poll_detail','update_guest_participant','rotate_guest_token'))
+        OR (n.nspname='public' AND p.proname IN ('join_poll_as_guest','get_guest_participant','get_guest_poll_detail',
         'update_guest_participant','rotate_guest_token'))
       ORDER BY 1,2`)).rows;
-    assert.equal(helpers.length, 14);
-    const callable = new Set(['can_view_participants', 'join_poll_as_guest', 'get_guest_participant',
-      'update_guest_participant', 'rotate_guest_token']);
+    assert.equal(helpers.length, 16);
+    const guestCommands = ['join_poll_as_guest', 'get_guest_participant', 'get_guest_poll_detail',
+      'update_guest_participant', 'rotate_guest_token'];
+    const anonCallable = new Set(guestCommands);
+    const authCallable = new Set([...guestCommands, 'can_view_participants']);
     const elevated = new Set(['store_participant_contact', 'can_view_participants', 'verified_guest_participant',
-      'join_poll_as_guest', 'get_guest_participant', 'update_guest_participant', 'rotate_guest_token']);
+      ...guestCommands]);
     for (const fn of helpers) {
       const label = `${fn.nspname}.${fn.proname}`;
       assert.ok(fn.proconfig.includes('search_path=""'), label);
       assert.equal(fn.public_execute, false, label);
-      assert.equal(fn.anon, callable.has(fn.proname), label);
-      assert.equal(fn.authenticated, callable.has(fn.proname), label);
+      assert.equal(fn.anon, anonCallable.has(fn.proname), label);
+      assert.equal(fn.authenticated, authCallable.has(fn.proname), label);
       assert.equal(fn.prosecdef, fn.nspname === 'poll_private' && elevated.has(fn.proname), label);
     }
   });
 
-  await t.test('anonymous and unrelated callers see only active-invitation participants, never closed-poll lists', async () => {
+  await t.test('anonymous and unrelated callers read no participant rows in any poll state, including active', async () => {
     for (const [role, userId] of [['anon', null], ['authenticated', unrelated]]) {
       await asRole(role, userId, async () => {
-        const rows = await visible();
-        assert.deepEqual([...new Set(rows.map(row => row.poll_id))], [polls.active.id]);
-        for (const status of ['draft', 'closed', 'archived']) {
+        assert.deepEqual(await visible(), []);
+        // Nested embeds (iOS detail, web list counts) return empty lists rather than errors.
+        const embedded = (await db.query(`SELECT p.id, (SELECT count(*)::int FROM public.poll_participants pp
+          WHERE pp.poll_id=p.id) AS n FROM public.polls p WHERE p.id=$1`, [polls.active.id])).rows;
+        assert.deepEqual(embedded, [{ id: polls.active.id, n: 0 }]);
+        for (const status of ['draft', 'active', 'closed', 'archived']) {
           assert.deepEqual(await visible(polls[status].id), [], status);
           assert.deepEqual((await db.query('SELECT id FROM public.poll_participants WHERE id=$1',
             [memberships[status].id])).rows, [], status);
@@ -325,6 +330,40 @@ test('F03 participant access, guest capabilities and identity protection on Post
     second.guest_token = rotated;
   });
 
+  await t.test('a verified guest reads its poll detail and participant list through the capability only', async () => {
+    const before = await asRole('authenticated', member, () => db.query(`INSERT INTO public.availability_responses
+      (participant_id,time_option_id,status) SELECT $1, id, 'available' FROM public.poll_time_options WHERE poll_id=$2
+      RETURNING id`, [memberships.active.id, polls.active.id]));
+    try {
+      for (const [role, userId] of [['anon', null], ['authenticated', unrelated]]) {
+        await asRole(role, userId, async () => {
+          const detail = await scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [guest.id, guestToken]);
+          assert.equal(detail.participant_id, guest.id);
+          assert.equal(detail.poll.id, polls.active.id);
+          assert.equal(detail.time_options.length, 1);
+          const ids = detail.participants.map(p => p.id).sort();
+          const expected = (await asRole('authenticated', owner, () => visible(polls.active.id))).map(p => p.id).sort();
+          assert.deepEqual(ids, expected);
+          const memberRow = detail.participants.find(p => p.id === memberships.active.id);
+          assert.deepEqual(memberRow.profiles, { display_name: 'Member' });
+          assert.equal(detail.participants.find(p => p.id === guest.id).profiles, null);
+          assert.deepEqual(detail.responses.map(r => r.id), before.rows.map(r => r.id));
+          const payload = JSON.stringify(detail);
+          for (const secret of [guestToken, second.guest_token, 'guest@example.test', legacyEmail]) {
+            assert.equal(payload.includes(secret), false, secret);
+          }
+          for (const token of [second.guest_token, '0'.repeat(64), null]) {
+            await assert.rejects(scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [guest.id, token]), guestDenied);
+          }
+          await assert.rejects(scalar('SELECT public.get_guest_poll_detail($1,$2) AS result',
+            [legacyGuest.id, legacyToken]), guestDenied);
+        });
+      }
+    } finally {
+      await db.query('DELETE FROM public.availability_responses WHERE id=ANY($1::uuid[])', [before.rows.map(r => r.id)]);
+    }
+  });
+
   await t.test('guest capability reads a closed poll row but cannot edit it after closing', async () => {
     await db.query("UPDATE public.polls SET status='closed' WHERE id=$1", [polls.active.id]);
     try {
@@ -409,18 +448,25 @@ test('F03 participant access, guest capabilities and identity protection on Post
       assert.equal((await db.query(`UPDATE public.poll_participants SET comment='x' WHERE id=$1 RETURNING id`,
         [guest.id])).rows.length, 0, 'members cannot edit another participant');
     });
-    // Installed web guest join: direct insert with RETURNING, as PostgREST issues it.
+    // Installed web guest join (.insert().select()): signed-out callers cannot
+    // read participant rows, so RETURNING is refused. This is the documented
+    // break that requires the join_poll_as_guest web adapter.
     await asRole('anon', null, async () => {
-      const row = (await db.query(`INSERT INTO public.poll_participants(poll_id,anonymous_name,anonymous_email,access_token,created_at)
-        VALUES ($1,'Legacy web guest','web-guest@example.test',$2,'2000-01-01') RETURNING *`, [polls.active.id, legacyToken])).rows[0];
-      assert.equal(row.access_token, row.id);
-      assert.equal(row.anonymous_email, null);
-      assert.ok(new Date(row.created_at).getFullYear() > 2000);
+      await assert.rejects(db.query(`INSERT INTO public.poll_participants(poll_id,anonymous_name)
+        VALUES ($1,'Returning guest') RETURNING *`, [polls.active.id]), deny);
+      // Without RETURNING (Prefer: return=minimal) the legacy insert is still normalized.
+      await db.query(`INSERT INTO public.poll_participants(poll_id,anonymous_name,anonymous_email,access_token,created_at)
+        VALUES ($1,'Legacy web guest','web-guest@example.test',$2,'2000-01-01')`, [polls.active.id, legacyToken]);
       await assert.rejects(db.query(`INSERT INTO public.poll_participants(poll_id,anonymous_name)
         VALUES ($1,'Closed guest')`, [polls.closed.id]), deny);
-      // Such guests have no capability and cannot be edited by anyone.
-      await assert.rejects(getGuest(row.id, row.access_token), guestDenied);
     });
+    const row = (await db.query("SELECT * FROM public.poll_participants WHERE anonymous_name='Legacy web guest'")).rows[0];
+    assert.equal(row.access_token, row.id);
+    assert.equal(row.anonymous_email, null);
+    assert.ok(new Date(row.created_at).getFullYear() > 2000);
+    assert.equal((await db.query("SELECT 1 FROM public.poll_participants WHERE anonymous_name='Returning guest'")).rows.length, 0);
+    // Such guests have no capability and cannot be edited by anyone.
+    await asRole('anon', null, () => assert.rejects(getGuest(row.id, row.access_token), guestDenied));
     assert.equal(await scalar(`SELECT contact_email AS result FROM private.participant_guest_credentials c
       JOIN public.poll_participants pp ON pp.id=c.participant_id WHERE pp.anonymous_name='Legacy web guest'`), 'web-guest@example.test');
     await asRole('authenticated', unrelated, async () => {

@@ -1,8 +1,9 @@
 -- F03: participant access.
 --
--- * Participant rows are visible only through an active invitation, poll
---   ownership, or current authenticated membership. The global USING (true)
---   read policy from 00010 is removed.
+-- * Participant rows are visible only to the poll owner and current
+--   authenticated members, in every poll state including active. The global
+--   USING (true) read policy from 00010 is removed. Guests read through
+--   their capability (get_guest_participant, get_guest_poll_detail).
 -- * The public table no longer stores secrets. access_token becomes a
 --   deprecated, non-secret alias of id (kept for installed clients that decode
 --   it), and guest contact emails move to private storage.
@@ -147,36 +148,38 @@ GRANT UPDATE (comment) ON public.poll_participants TO authenticated;
 -- ---------------------------------------------------------------------------
 -- Read and update policies.
 -- ---------------------------------------------------------------------------
--- An active poll is an open invitation: its participant list (safe columns
--- only, after the changes above) is visible to anyone who opens it. Draft,
--- closed, and archived participant lists require ownership or membership.
+-- Participant lists are member data in every poll state, including active:
+-- only the poll owner and current authenticated members can read them. An
+-- active share link or poll id grants a preview (F02), not the list. Guests
+-- read through their capability (get_guest_poll_detail below).
 CREATE FUNCTION poll_private.can_view_participants(poll_uuid UUID)
 RETURNS BOOLEAN
 LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = ''
 AS $$
-    SELECT EXISTS (
+    SELECT (SELECT auth.uid()) IS NOT NULL AND EXISTS (
         SELECT 1 FROM public.polls p
         WHERE p.id = poll_uuid AND (
-            p.status = 'active'
-            OR ((SELECT auth.uid()) IS NOT NULL AND (
-                p.creator_id = (SELECT auth.uid())
-                OR poll_private.is_poll_participant(p.id)
-            ))
+            p.creator_id = (SELECT auth.uid())
+            OR poll_private.is_poll_participant(p.id)
         )
     );
 $$;
 REVOKE ALL ON FUNCTION poll_private.can_view_participants(UUID) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION poll_private.can_view_participants(UUID) TO anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION poll_private.can_view_participants(UUID) TO authenticated, service_role;
 
 DROP POLICY IF EXISTS "Participants can view poll participants" ON public.poll_participants;
 DROP POLICY IF EXISTS "Users can view participants for accessible polls" ON public.poll_participants;
 DROP POLICY IF EXISTS "Users can update their own comment" ON public.poll_participants;
 DROP POLICY IF EXISTS "Participants can update own record" ON public.poll_participants;
 
-CREATE POLICY "Participants are visible through invitation or membership"
-    ON public.poll_participants FOR SELECT TO anon, authenticated
-    USING (poll_private.can_view_participants(poll_id));
+-- The explicit own-row condition keeps INSERT ... RETURNING working for a
+-- member's first join: the membership helper reads the statement snapshot,
+-- which does not yet contain the row being inserted. Signed-out callers have
+-- no read policy at all.
+CREATE POLICY "Participants are visible to the poll owner and members"
+    ON public.poll_participants FOR SELECT TO authenticated
+    USING (user_id = (SELECT auth.uid()) OR poll_private.can_view_participants(poll_id));
 
 CREATE POLICY "Members can update their own participant record"
     ON public.poll_participants FOR UPDATE TO authenticated
@@ -290,6 +293,50 @@ BEGIN
 END;
 $$;
 
+-- The guest's view of its poll, equivalent to what a member reads through the
+-- tables: the poll row, its time options, the safe participant list (with the
+-- same profiles(display_name) embed shape), and same-poll responses.
+CREATE FUNCTION poll_private.get_guest_poll_detail(participant_uuid UUID, guest_token TEXT)
+RETURNS JSON
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    guest_poll UUID;
+BEGIN
+    SELECT pp.poll_id INTO guest_poll
+    FROM public.poll_participants pp
+    WHERE pp.id = poll_private.verified_guest_participant(participant_uuid, guest_token);
+    IF guest_poll IS NULL THEN
+        RAISE EXCEPTION 'Guest access denied' USING ERRCODE = '42501';
+    END IF;
+    RETURN (
+        SELECT json_build_object(
+            'participant_id', participant_uuid,
+            'poll', row_to_json(p),
+            'time_options', COALESCE((
+                SELECT json_agg(row_to_json(pto) ORDER BY pto.start_time, pto.id)
+                FROM public.poll_time_options pto WHERE pto.poll_id = p.id), '[]'::json),
+            'participants', COALESCE((
+                SELECT json_agg(to_jsonb(pp) || jsonb_build_object('profiles',
+                    CASE WHEN pr.id IS NULL THEN NULL
+                         ELSE jsonb_build_object('display_name', pr.display_name) END)
+                    ORDER BY pp.created_at, pp.id)
+                FROM public.poll_participants pp
+                LEFT JOIN public.profiles pr ON pr.id = pp.user_id
+                WHERE pp.poll_id = p.id), '[]'::json),
+            'responses', COALESCE((
+                SELECT json_agg(row_to_json(ar) ORDER BY ar.participant_id, ar.time_option_id)
+                FROM public.availability_responses ar
+                JOIN public.poll_participants pp ON pp.id = ar.participant_id
+                JOIN public.poll_time_options pto ON pto.id = ar.time_option_id
+                WHERE pp.poll_id = p.id AND pto.poll_id = p.id), '[]'::json)
+        )
+        FROM public.polls p WHERE p.id = guest_poll
+    );
+END;
+$$;
+
 -- Replaces both guest-editable fields: send the current display name and the
 -- desired comment (NULL clears it). Accepted only while the poll is open.
 CREATE FUNCTION poll_private.update_guest_participant(
@@ -351,10 +398,12 @@ $$;
 
 REVOKE ALL ON FUNCTION poll_private.join_poll_as_guest(UUID, TEXT, TEXT),
     poll_private.get_guest_participant(UUID, TEXT),
+    poll_private.get_guest_poll_detail(UUID, TEXT),
     poll_private.update_guest_participant(UUID, TEXT, TEXT, TEXT),
     poll_private.rotate_guest_token(UUID, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION poll_private.join_poll_as_guest(UUID, TEXT, TEXT),
     poll_private.get_guest_participant(UUID, TEXT),
+    poll_private.get_guest_poll_detail(UUID, TEXT),
     poll_private.update_guest_participant(UUID, TEXT, TEXT, TEXT),
     poll_private.rotate_guest_token(UUID, TEXT) TO anon, authenticated, service_role;
 
@@ -372,6 +421,12 @@ LANGUAGE sql STABLE SECURITY INVOKER
 SET search_path = ''
 AS $$ SELECT poll_private.get_guest_participant(participant_uuid, guest_token); $$;
 
+CREATE FUNCTION public.get_guest_poll_detail(participant_uuid UUID, guest_token TEXT)
+RETURNS JSON
+LANGUAGE sql STABLE SECURITY INVOKER
+SET search_path = ''
+AS $$ SELECT poll_private.get_guest_poll_detail(participant_uuid, guest_token); $$;
+
 CREATE FUNCTION public.update_guest_participant(
     participant_uuid UUID, guest_token TEXT, display_name TEXT, comment TEXT DEFAULT NULL)
 RETURNS JSON
@@ -387,10 +442,12 @@ AS $$ SELECT poll_private.rotate_guest_token(participant_uuid, guest_token); $$;
 
 REVOKE ALL ON FUNCTION public.join_poll_as_guest(UUID, TEXT, TEXT),
     public.get_guest_participant(UUID, TEXT),
+    public.get_guest_poll_detail(UUID, TEXT),
     public.update_guest_participant(UUID, TEXT, TEXT, TEXT),
     public.rotate_guest_token(UUID, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.join_poll_as_guest(UUID, TEXT, TEXT),
     public.get_guest_participant(UUID, TEXT),
+    public.get_guest_poll_detail(UUID, TEXT),
     public.update_guest_participant(UUID, TEXT, TEXT, TEXT),
     public.rotate_guest_token(UUID, TEXT) TO anon, authenticated, service_role;
 
