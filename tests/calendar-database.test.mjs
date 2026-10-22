@@ -84,7 +84,7 @@ test('calendar migration and backend-only repository contract on real Postgres',
   });
 
   await t.test('new objects enable RLS, pin elevated search paths and keep the exposed RPC as invoker', async () => {
-    const tables = await db.query("SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='private' AND c.relkind='r'");
+    const tables = await db.query("SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='private' AND c.relkind='r' AND c.relname LIKE 'calendar_%'");
     assert.equal(tables.rows.length, 3);
     assert.equal(tables.rows.every(row => row.relrowsecurity), true);
     const functions = await db.query(`SELECT n.nspname,p.proname,p.prosecdef,p.proconfig FROM pg_proc p
