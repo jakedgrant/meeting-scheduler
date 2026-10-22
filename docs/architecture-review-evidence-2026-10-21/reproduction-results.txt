@@ -1,0 +1,11 @@
+REPRODUCED: Calendar handler accepts a forged JWT when called without the gateway. This does not test deployed gateway protection.
+REPRODUCED: Calendar handler accepts a caller-supplied x-user-id without a bearer token when called without the gateway.
+REPRODUCED: A Google Calendar HTTP 503 becomes success=true with zero conflicting slots.
+REPRODUCED: Twelve submitted slots cause twelve separate Google Calendar requests.
+REPRODUCED: A stale expiration delivered after a renewal overwrites the newer active subscription.
+REPRODUCED: An unrecognized webhook event writes an active subscription.
+REPRODUCED: A non-duplicate event-pass database failure is acknowledged with HTTP 200.
+REPRODUCED: The web one-shot subscription pattern leaves a listener that throws on the next user-store update.
+REPRODUCED: The web date-range loop drops November 3 and duplicates March 8 across Chicago daylight-saving changes.
+
+9 offline reproductions completed. These are audit demonstrations, not a passing application test suite.

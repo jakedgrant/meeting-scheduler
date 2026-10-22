@@ -1,0 +1,30 @@
+
+> web@0.0.1 check
+> svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --output machine
+
+1792632797137 START "/Users/jake/Developer/meeting-scheduler/apps/web"
+1792632798219 WARNING "src/lib/components/Paywall.svelte" 68:1 "Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type=\"button\">` or `<a>` might be more appropriate\nhttps://svelte.dev/e/a11y_click_events_have_key_events"
+1792632798219 WARNING "src/lib/components/Paywall.svelte" 68:1 "`<div>` with a click handler must have an ARIA role\nhttps://svelte.dev/e/a11y_no_static_element_interactions"
+1792632798219 WARNING "src/lib/components/Paywall.svelte" 69:2 "Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type=\"button\">` or `<a>` might be more appropriate\nhttps://svelte.dev/e/a11y_click_events_have_key_events"
+1792632798219 WARNING "src/lib/components/Paywall.svelte" 69:2 "`<div>` with a click handler must have an ARIA role\nhttps://svelte.dev/e/a11y_no_static_element_interactions"
+1792632798219 WARNING "src/routes/polls/+page.svelte" 528:3 "Also define the standard property 'line-clamp' for compatibility"
+1792632798219 ERROR "src/routes/polls/+page.svelte" 67:7 "Type '{ id: any; }[]' is not assignable to type 'number'."
+1792632798219 WARNING "src/routes/polls/[id]/+page.svelte" 443:7 "Visible, non-interactive elements with a click event must be accompanied by a keyboard event handler. Consider whether an interactive element such as `<button type=\"button\">` or `<a>` might be more appropriate\nhttps://svelte.dev/e/a11y_click_events_have_key_events"
+1792632798219 WARNING "src/routes/polls/[id]/+page.svelte" 443:7 "`<div>` with a click handler must have an ARIA role\nhttps://svelte.dev/e/a11y_no_static_element_interactions"
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 279:8 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 279:45 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 282:11 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 283:17 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 284:14 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 285:15 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 286:13 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 289:23 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 295:8 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 295:45 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 298:11 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 299:17 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 300:14 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 301:15 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/polls/[id]/+page.svelte" 302:13 "'$currentPoll' is possibly 'null'."
+1792632798219 ERROR "src/routes/settings/+page.svelte" 149:80 "Property 'style' does not exist on type 'EventTarget & Element'."
+1792632798219 COMPLETED 319 FILES 17 ERRORS 7 WARNINGS 4 FILES_WITH_PROBLEMS
