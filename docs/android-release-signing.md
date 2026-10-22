@@ -57,7 +57,20 @@ Example GitHub Actions step:
     ./gradlew --no-daemon :app:bundleRelease
 ```
 
-A release build also needs `app/google-services.json` for the release application ID. That file is ignored by Git, so CI must supply it from a secret as well. Crashlytics uploads the R8 mapping file for minified release builds, which needs network access and a real Firebase app ID.
+A release build also needs `app/google-services.json` for the release application ID. That file is ignored by Git, so CI must supply it from a secret as well. Without it, the Google Services plugin fails the build (`processReleaseGoogleServices`). Crashlytics uploads the R8 mapping file for minified release builds, which needs network access and a real Firebase app ID. `-PdisableCrashlyticsMappingUpload=true` (or the environment variable `ORG_GRADLE_PROJECT_disableCrashlyticsMappingUpload=true`) turns the upload off. Only verification builds should use it.
+
+## Automated check (`.github/workflows/android.yml`)
+
+The `Android` workflow runs on pull requests and `main` pushes that touch `apps/android/**` or the workflow itself. It uses Temurin 21, installs SDK platform 36 and build-tools 36.0.0 on the runner's preinstalled SDK, and needs no secrets, emulator, or device. It covers the four checks in [Verification steps](#verification-steps-for-this-change):
+
+1. `assembleDebug` and `testDebugUnitTest` pass, and the debug APK is signed with `CN=Android Debug`.
+2. `assembleRelease` with no signing inputs fails in `:app:validateReleaseSigning`, and the job asserts the error message and all four missing inputs. No release APK is produced.
+3. With a throwaway PKCS12 keystore generated in `$RUNNER_TEMP` (random password, one-day validity, deleted afterwards), `assembleRelease` succeeds. The SHA-256 from `apksigner verify --print-certs` must equal the throwaway certificate's fingerprint, and the certificate must not be the debug one.
+4. `-PallowUnsignedRelease=true` produces `app-release-unsigned.apk`, which `apksigner verify` rejects.
+
+The job writes a clearly fake `app/google-services.json` (project `ci-placeholder-not-a-real-project`, with clients for the release and `.debug` package names) and sets `ORG_GRADLE_PROJECT_disableCrashlyticsMappingUpload=true`, so it never contacts Firebase. Never commit a real `google-services.json`.
+
+The job checks behaviour with a throwaway key. It does not prove which production certificate is used. For that, see the next section with the real fingerprint.
 
 With Play App Signing, the key configured here is the **upload key**, and Google re-signs with the app signing key. Register the app signing key's SHA-1 (from Play Console) with the Google Sign-In Android OAuth client, or Google Sign-In fails in Play-distributed builds.
 
@@ -123,7 +136,7 @@ The workstation had no Gradle-compatible JDK. Only Temurin 25 and 26 are install
 - Confirmed that only the release build type referenced a signing config and that nothing else selects the debug key for release.
 - Compiled the iOS `Shared` package in both configurations with `xcodebuild -scheme Shared -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO`. Both succeeded. The Debug compile passes `-DDEBUG` to the module and the Release compile doesn't, so the `#if DEBUG` log-level gate selects `.warn` in Release.
 
-Run steps 1–4 above (or the equivalent CI job) before merging.
+The `Android` workflow above runs steps 1–4 on GitHub's runners. Its first run on the pull request is the actual Gradle verification of this change. Locally, the workflow YAML was parsed, each `run` script passed `bash -n`, the placeholder JSON was validated, and the keystore fingerprint parsing was checked against `openssl x509 -fingerprint -sha256` with a throwaway key. `actionlint` is not installed on this workstation, so it was not run.
 
 ## Native billing log levels (F26/F27)
 

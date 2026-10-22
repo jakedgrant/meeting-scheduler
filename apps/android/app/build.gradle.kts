@@ -1,3 +1,5 @@
+import com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -28,6 +30,12 @@ val releaseKeyPassword = releaseSigningInput("KEY_PASSWORD")
 // signs later. Never use it for builds meant for distribution as they are.
 val allowUnsignedRelease =
     providers.gradleProperty("allowUnsignedRelease").orNull?.toBoolean() == true
+
+// CI's signing check builds against a placeholder google-services.json with no Firebase
+// project, so it passes -PdisableCrashlyticsMappingUpload=true. Real release builds
+// keep uploading the R8 mapping file.
+val disableCrashlyticsMappingUpload =
+    providers.gradleProperty("disableCrashlyticsMappingUpload").orNull?.toBoolean() == true
 
 val releaseSigningProblems: List<String> = buildList {
     val keystore = releaseKeystoreFile
@@ -85,6 +93,10 @@ android {
                 signingConfigs.getByName("release")
             } else {
                 null
+            }
+
+            configure<CrashlyticsExtension> {
+                mappingFileUploadEnabled = !disableCrashlyticsMappingUpload
             }
         }
 
