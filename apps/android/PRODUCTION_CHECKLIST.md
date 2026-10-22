@@ -274,52 +274,29 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
 - [ ] Ensure you have a Google account with calendar events
 - [ ] Events should be on Google Calendar (not local device calendar)
 
-#### Enable Google Calendar Scope
+#### Configure backend calendar authorization
 
-- [ ] In Google Cloud Console, go to OAuth consent screen
-- [ ] Click "Edit App"
-- [ ] On "Scopes" step, click "Add or Remove Scopes"
-- [ ] Search for "Google Calendar API"
-- [ ] Select: `https://www.googleapis.com/auth/calendar.readonly`
-- [ ] Click "Update" then "Save and Continue"
-
-#### Enable Google Calendar API
-
-- [ ] Go to "APIs & Services" > "Library"
-- [ ] Search for "Google Calendar API"
-- [ ] Click on it and click "Enable"
-
-#### Update AuthService for Calendar Scope
-
-**Note:** This requires updating the Google Sign-In flow to request calendar scope.
-
-- [ ] Open `apps/android/app/src/main/kotlin/com/meetingscheduler/android/ui/AuthView.kt`
-- [ ] In the `signInWithGoogle()` function, add calendar scope:
-  ```kotlin
-  val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-      .requestIdToken("YOUR_WEB_CLIENT_ID")
-      .requestEmail()
-      .requestScopes(Scope("https://www.googleapis.com/auth/calendar.readonly"))
-      .build()
-  ```
+- [ ] Complete the [calendar credentials rollout](../../docs/calendar-credentials.md), including the private storage migration, dedicated Google Web OAuth client, Edge secrets, functions, and maintenance worker.
+- [ ] Confirm the Google Calendar API is enabled and the backend requests `https://www.googleapis.com/auth/calendar.events.freebusy`.
+- [ ] Calendar permission is granted through Settings in the external browser. Keep the app's Supabase sign-in flow separate; provider credentials belong only to the backend.
 
 #### Test Google Calendar
 
-- [ ] Sign out from the app
-- [ ] Sign in again with Google
-- [ ] Accept calendar permission when prompted
 - [ ] Go to Settings > Calendar Integration
 - [ ] Toggle "Google Calendar" on
-- [ ] Verify it shows "Connected" in green
+- [ ] Accept calendar permission in the browser and return to the app
+- [ ] Verify the connected Google account appears in Settings
 - [ ] Create a poll with times that conflict with your Google Calendar
 - [ ] Verify conflicts are detected
+- [ ] Disconnect, verify app access stops, and confirm queued Google revocation completes
+- [ ] Reconnect and verify sign-out clears the displayed calendar state
 
 **Troubleshooting:**
 - If Google Calendar toggle doesn't work:
   - [ ] Check that Google Calendar API is enabled
-  - [ ] Verify calendar scope is in OAuth consent screen
-  - [ ] Check that user granted calendar permission during sign-in
-  - [ ] Look at Logcat for errors (`adb logcat | grep MeetingScheduler`)
+  - [ ] Verify the dedicated client's redirect URI and Edge Function secrets match the rollout guide
+  - [ ] Check the safe connection error shown in Settings and the backend request/error codes
+  - [ ] Confirm revocation maintenance is running before attempting to reconnect
 
 ---
 

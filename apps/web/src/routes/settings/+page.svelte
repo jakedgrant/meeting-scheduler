@@ -1,7 +1,8 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user, profile, updateProfile } from '$lib/stores/auth';
-	import { calendarEnabled, calendarLoading, enableCalendarIntegration, disableCalendarIntegration } from '$lib/stores/calendar';
+	import { calendarEnabled, calendarLoading, calendarStatusError, calendarAccountEmail, calendarRequiresReconnect, calendarRevocationPending, initCalendar, enableCalendarIntegration, disableCalendarIntegration } from '$lib/stores/calendar';
 
 	let displayName = $state('');
 	let avatarUrl = $state('');
@@ -10,6 +11,12 @@
 	let errorMessage = $state('');
 	let successMessage = $state('');
 	let calendarError = $state('');
+
+	onMount(() => {
+		const result = new URLSearchParams(window.location.search).get('calendar');
+		if (result === 'failed') calendarError = 'Google Calendar connection failed. Please try again.';
+		if (result === 'cancelled') calendarError = 'Google Calendar connection was cancelled.';
+	});
 
 	// Common timezones for the dropdown
 	const timezones = [
@@ -79,25 +86,14 @@
 		try {
 			if (enabled) {
 				await enableCalendarIntegration();
-				successMessage = 'Calendar integration enabled!';
+				if ($calendarEnabled) successMessage = 'Google Calendar connected.';
 			} else {
 				await disableCalendarIntegration();
 				successMessage = 'Calendar integration disabled';
 			}
 		} catch (err) {
-			const errorMsg = err instanceof Error ? err.message : 'Failed to update calendar settings';
-
-			// Handle specific error cases
-			if (errorMsg === 'Calendar scope request was cancelled') {
-				calendarError = 'Calendar integration setup was cancelled. Please try again when ready.';
-			} else if (errorMsg.includes('Unauthorized')) {
-				calendarError = 'Authorization failed. Please try signing in again.';
-			} else {
-				calendarError = errorMsg;
-			}
-
-			// Reset the toggle on error
-			calendarEnabled.set(!enabled);
+			calendarError = err instanceof Error ? err.message : 'Failed to update calendar settings';
+			await initCalendar();
 		}
 	}
 </script>
@@ -146,7 +142,7 @@
 
 			{#if avatarUrl}
 				<div class="avatar-preview">
-					<img src={avatarUrl} alt="Avatar preview" onerror={(e) => e.currentTarget.style.display = 'none'} />
+					<img src={avatarUrl} alt="Avatar preview" onerror={(e) => { if (e.currentTarget instanceof HTMLImageElement) e.currentTarget.style.display = 'none'; }} />
 				</div>
 			{/if}
 
@@ -173,12 +169,18 @@
 						disabled={$calendarLoading || loading}
 					/>
 				</div>
-				<small class="help-text">Automatically mark times when you have calendar conflicts</small>
+				<small class="help-text">Check busy times in your primary Google Calendar</small>
 				{#if $calendarEnabled}
-					<div class="calendar-status">✓ Connected to Google Calendar</div>
+					<div class="calendar-status">✓ Connected to {$calendarAccountEmail || 'Google Calendar'}</div>
 				{/if}
-				{#if calendarError}
-					<div class="calendar-error">{calendarError}</div>
+				{#if $calendarRequiresReconnect}
+					<div class="calendar-error">Reconnect Google Calendar to resume conflict checks.</div>
+				{/if}
+				{#if $calendarRevocationPending}
+					<div class="help-text">Disconnected. Google access revocation is being retried.</div>
+				{/if}
+				{#if calendarError || $calendarStatusError}
+					<div class="calendar-error">{calendarError || $calendarStatusError}</div>
 				{/if}
 			</div>
 

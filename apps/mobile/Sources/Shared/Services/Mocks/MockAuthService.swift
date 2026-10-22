@@ -68,7 +68,6 @@ public final class MockAuthService: AuthServiceProtocol {
     public func initialize() async {}
     public func handleDeepLink(url: URL) async {}
     public func signInWithGoogle() async throws {}
-    public func authorizeGoogleCalendar() async throws -> Bool { false }
     public func signInWithApple() async throws {}
     public func signInWithMagicLink(email: String) async throws {}
     public func signOut() async throws {}

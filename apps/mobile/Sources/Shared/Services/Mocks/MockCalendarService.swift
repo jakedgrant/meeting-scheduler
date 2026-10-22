@@ -7,6 +7,8 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public var appleCalendarEnabled: Bool
     public var googleCalendarEnabled: Bool
     public var googleCalendarLoading: Bool
+    public var googleCalendarError: String?
+    public var googleCalendarAccountEmail: String?
 
     public var isEnabled: Bool {
         appleCalendarEnabled || googleCalendarEnabled
@@ -45,6 +47,8 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public func setGoogleCalendarEnabled(_ enabled: Bool) async {
         googleCalendarEnabled = enabled
     }
+
+    public func refreshGoogleCalendarConnection() async {}
 
     public func checkConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
         Set()

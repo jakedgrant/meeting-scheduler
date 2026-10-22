@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store'
+import { writable, derived, get } from 'svelte/store'
 import type { CustomerInfo, Package } from '@revenuecat/purchases-js'
 import { supabase, type Subscription } from '$lib/supabase'
 import {
@@ -30,12 +30,7 @@ export async function loadSubscription() {
 
   try {
     // Get current user
-    const currentUser = await new Promise<{ id: string } | null>(resolve => {
-      const unsubscribe = user.subscribe(value => {
-        resolve(value)
-        unsubscribe()
-      })
-    })
+    const currentUser = get(user)
 
     if (!currentUser) {
       subscription.set(null)
