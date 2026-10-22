@@ -19,7 +19,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/supabase-community/supabase-swift.git", from: "2.0.0"),
-        .package(url: "https://github.com/RevenueCat/purchases-ios.git", from: "5.0.0"),
+        // Includes the upstream PaywallColor initializer fix for Xcode 27 / Swift 6.4.
+        .package(url: "https://github.com/RevenueCat/purchases-ios.git", from: "5.97.0"),
     ],
     targets: [
         // Shared cross-platform code
