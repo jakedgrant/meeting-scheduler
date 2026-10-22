@@ -14,18 +14,11 @@ import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Instant
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
-import kotlin.time.Duration.Companion.hours
-
-private val currentSystemTime: Instant
-    get() = Instant.fromEpochMilliseconds(System.currentTimeMillis())
 
 class AuthService(private val context: Context, private val scope: CoroutineScope) {
     private val supabase = SupabaseService.client
@@ -117,29 +110,6 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
         }
     }
 
-    suspend fun authorizeGoogleCalendar(idToken: String, scopes: String): Boolean {
-        try {
-            // TODO: Update Google OAuth configuration for Supabase 3.x
-            supabase.auth.signInWith(Google)
-
-            val session = supabase.auth.currentSessionOrNull()
-            val providerToken = session?.accessToken
-            val providerRefreshToken = session?.refreshToken
-
-            if (providerToken != null && providerRefreshToken != null) {
-                persistCalendarTokens(
-                    accessToken = providerToken,
-                    refreshToken = providerRefreshToken,
-                    userId = session.user?.id ?: return false
-                )
-                return true
-            }
-        } catch (e: Exception) {
-            println("Google Calendar authorization failed: ${e.message}")
-        }
-        return false
-    }
-
     suspend fun signInWithMagicLink(email: String) {
         supabase.auth.signInWith(OTP) {
             this.email = email
@@ -182,35 +152,6 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
             // Additional token persistence if needed
         } catch (e: Exception) {
             println("Failed to handle deep link: ${e.message}")
-        }
-    }
-
-    private suspend fun persistCalendarTokens(
-        accessToken: String,
-        refreshToken: String,
-        userId: String
-    ) {
-        try {
-            val expiresAt = currentSystemTime.plus(1.hours)
-
-            val updates = buildJsonObject {
-                put("google_calendar_access_token", accessToken)
-                put("google_calendar_refresh_token", refreshToken)
-                put("google_calendar_token_expires_at", expiresAt.toString())
-                put("calendar_integration_enabled", true)
-            }
-
-            supabase
-                .from("profiles")
-                .update(updates) {
-                    filter {
-                        eq("id", userId)
-                    }
-                }
-
-            println("✓ Calendar tokens persisted successfully")
-        } catch (e: Exception) {
-            println("Failed to persist calendar tokens: ${e.message}")
         }
     }
 

@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store'
+import { writable, derived, get } from 'svelte/store'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, type Profile } from '$lib/supabase'
 import { initRevenueCat } from '$lib/revenuecat'
@@ -30,20 +30,25 @@ export async function initAuth() {
   authLoading.set(false)
 
   // Listen for auth changes
-  supabase.auth.onAuthStateChange(async (event, newSession) => {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
     session.set(newSession)
     user.set(newSession?.user ?? null)
 
     if (event === 'SIGNED_IN' && newSession?.user) {
-      await loadProfile(newSession.user.id)
-      await initRevenueCat(newSession.user.id)
+      const userId = newSession.user.id
+      setTimeout(() => {
+        if (get(user)?.id !== userId) return
+        void loadProfile(userId)
+        void initRevenueCat(userId)
+      }, 0)
     }
 
     if (event === 'SIGNED_OUT') {
       profile.set(null)
-      await initRevenueCat() // Reset to anonymous
+      setTimeout(() => { if (!get(user)) void initRevenueCat() }, 0)
     }
   })
+  return () => subscription.unsubscribe()
 }
 
 async function loadProfile(userId: string) {
@@ -58,7 +63,7 @@ async function loadProfile(userId: string) {
     return
   }
 
-  profile.set(data as Profile)
+  if (get(user)?.id === userId) profile.set(data as Profile)
 }
 
 // Auth actions
@@ -70,34 +75,6 @@ export async function signInWithGoogle() {
     }
   })
   if (error) throw error
-}
-
-/**
- * Request calendar scope from Google
- * Called when user enables calendar integration
- * User will be prompted to re-authenticate and grant calendar access
- */
-export async function requestCalendarScope() {
-  console.log('requestCalendarScope - Starting OAuth flow with calendar scope')
-
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      // Request calendar scope along with standard auth scopes
-      scopes: 'openid email profile https://www.googleapis.com/auth/calendar.readonly',
-      queryParams: {
-        access_type: 'offline',
-        prompt: 'consent',
-        include_granted_scopes: 'true'
-      }
-    }
-  })
-
-  if (error) {
-    console.error('OAuth error:', error)
-    throw error
-  }
 }
 
 export async function signInWithApple() {
@@ -126,12 +103,7 @@ export async function signOut() {
 }
 
 export async function updateProfile(updates: Partial<Profile>) {
-  const currentUser = await new Promise<User | null>(resolve => {
-    const unsubscribe = user.subscribe(value => {
-      resolve(value)
-      unsubscribe()
-    })
-  })
+  const currentUser = get(user)
 
   if (!currentUser) throw new Error('Not authenticated')
 

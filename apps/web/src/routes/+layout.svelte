@@ -1,15 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { initAuth, authLoading } from '$lib/stores/auth';
-	import { initCalendar, watchCalendarToken } from '$lib/stores/calendar';
+	import { watchCalendarConnection } from '$lib/stores/calendar';
 	import favicon from '$lib/assets/favicon.svg';
 
 	let { children } = $props();
 
-	onMount(async () => {
-		await initAuth();
-		await initCalendar();
-		watchCalendarToken();
+	onMount(() => {
+		let disposed = false;
+		let stopAuth: (() => void) | undefined;
+		let stopCalendar: (() => void) | undefined;
+		void initAuth().then(cleanup => {
+			stopAuth = cleanup;
+			if (disposed) { stopAuth?.(); return; }
+			stopCalendar = watchCalendarConnection();
+		});
+		return () => { disposed = true; stopCalendar?.(); stopAuth?.(); };
 	});
 </script>
 

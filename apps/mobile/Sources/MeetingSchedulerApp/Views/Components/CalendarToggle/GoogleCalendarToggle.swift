@@ -17,7 +17,8 @@ struct GoogleCalendarToggle: View {
             icon: "globe",
             iconColor: .red,
             title: "Google Calendar",
-            subtitle: calendarService.googleCalendarEnabled ? "Connected" : "Not connected",
+            subtitle: calendarService.googleCalendarEnabled
+                ? (calendarService.googleCalendarAccountEmail ?? "Connected") : "Not connected",
             subtitleColor: calendarService.googleCalendarEnabled ? .green : .secondary
         )
         .disabled(calendarService.googleCalendarLoading)

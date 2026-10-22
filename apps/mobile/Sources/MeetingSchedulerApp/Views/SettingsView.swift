@@ -32,6 +32,9 @@ struct SettingsView: View {
                 signOutSection
             }
             .navigationTitle("Settings")
+            .task(id: authService.currentUserId) {
+                await calendarService.refreshGoogleCalendarConnection()
+            }
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
             }
@@ -96,6 +99,10 @@ struct SettingsView: View {
 
                 AppleCalendarToggle()
                 GoogleCalendarToggle()
+
+                if let error = calendarService.googleCalendarError {
+                    Text(error).font(.caption).foregroundStyle(.secondary)
+                }
 
                 if calendarService.googleCalendarLoading {
                     HStack {

@@ -23,7 +23,6 @@ public protocol AuthServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Sign In
 
     func signInWithGoogle() async throws
-    func authorizeGoogleCalendar() async throws -> Bool
     func signInWithApple() async throws
     func signInWithMagicLink(email: String) async throws
 

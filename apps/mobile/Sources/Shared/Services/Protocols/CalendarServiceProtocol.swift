@@ -8,12 +8,15 @@ public protocol CalendarServiceProtocol: AnyObject, Observable, Sendable {
     var appleCalendarEnabled: Bool { get }
     var googleCalendarEnabled: Bool { get }
     var googleCalendarLoading: Bool { get }
+    var googleCalendarError: String? { get }
+    var googleCalendarAccountEmail: String? { get }
     var isEnabled: Bool { get }
 
     // MARK: - Settings
 
     func setAppleCalendarEnabled(_ enabled: Bool) async
     func setGoogleCalendarEnabled(_ enabled: Bool) async
+    func refreshGoogleCalendarConnection() async
 
     // MARK: - Conflict Checking
 
