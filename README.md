@@ -21,7 +21,9 @@ A multiplatform meeting scheduling service (similar to Doodle/When2meet) that al
 meeting-scheduler/
 ├── apps/
 │   ├── web/                 # SvelteKit web app
-│   └── mobile/              # Skip iOS + Android
+│   ├── android/             # Native Android app (Kotlin, Gradle)
+│   └── mobile/              # iOS: Swift package (Sources/, Tests/)
+│       └── MeetingScheduler/  # Xcode app wrapper (tracked; see docs/ios-checkout.md)
 ├── packages/
 │   └── shared-config/       # Shared configuration
 ├── supabase/
@@ -89,6 +91,10 @@ Subscription events are processed via the `/functions/revenuecat-webhook` Edge F
 - `team_access`: Team tier features (includes Pro)
 
 ## Development
+
+### iOS
+
+Open `apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj` in Xcode and run the `MeetingScheduler` scheme. The project uses the Swift package at `apps/mobile` as a local package. For a command-line build that needs no simulator device or signing, and for the clean-checkout check, see [docs/ios-checkout.md](docs/ios-checkout.md).
 
 ### Web
 
