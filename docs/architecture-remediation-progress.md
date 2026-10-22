@@ -20,8 +20,8 @@ Second wave, started October 22 from `main` at `6f2c547`. Each finding has its o
 
 | Finding | Stream | Branch | Base | Status |
 | --- | --- | --- | --- | --- |
-| F03: Participant access | A (backend owner) | `claude/f03-participant-access` | `main` `6f2c547` | In progress |
-| F04: Membership integrity | A (same backend owner) | `claude/f04-membership-integrity` | F03 branch (depends on F03's guest ownership contract) | Queued after F03 |
+| F03: Participant access | A (backend owner) | `claude/f03-participant-access` | `main` `6f2c547` | Done locally at `d6b704b`; migration `20261022212301_participant_access.sql`; 14 new DB tests. Coordinator review done. |
+| F04: Membership integrity | A (same backend owner) | `claude/f04-membership-integrity` | F03 `d6b704b` | Done locally at `09c2189`; migration `20261022213242_membership_integrity.sql`; 11 new DB tests. Coordinator review done. |
 | F25: Reproducible iOS checkout | C | `claude/f25-ios-checkout` | `main` `6f2c547` | Done locally at `608750f`. Pushed; draft PR not yet opened. A clean `--no-local` clone builds (Debug sim, build-for-testing, Release device; generic destinations, no simulator). Coordinator review done. |
 | F26: Android release signing | D | `claude/f26-android-signing` | `main` `6f2c547` (independent of F25) | Done locally at `66df259`. Pushed; draft PR not yet opened. **Gradle not run:** only JDK 25/26 are installed and there is no SDK 36. The iOS `#if DEBUG` gate compiles. Coordinator review done. Before merging, run the doc's steps 1–4 on JDK 17/21 with SDK 36. |
 
@@ -64,7 +64,8 @@ Merging code does not change hosted state. None of the items below has been esta
 | F08 scheduling | Deploy `billing-worker` and `revenuecat-webhook`; install and verify the worker schedule **before** routing paid notifications to the new handler | Same |
 | F08 backfill | Drain the queue seeded by the migration; resolve quarantined identities and legacy passes with provider evidence; verify fresh `reconciled_at` values and pass counts | Same |
 | F08 live validation | Run real sandbox purchase, renewal, cancellation, grace, refund, transfer, and duplicate-delivery tests through the hosted gateway; then check production key scopes and schedule health | Same |
-| F03/F04 (when merged) | Apply the new migrations after F02 and F08; rotate or invalidate previously exposed guest capabilities; roll out client adapters in the documented order | Worker docs (pending) |
+| F03 (when merged) | Inventory any dashboard-created `poll_participants` policies, which the migration doesn't drop; extra permissive policies still combine with OR. Keep `private` and `poll_private` unexposed and check live grants, including custom roles (the identity trigger recognizes API callers by role name). Run the PostgREST and Realtime smoke checks. Decide on disclosure for guest emails that were readable while 00010 was deployed. Old `access_token` values become inert, so no rotation is needed | [Participant access](participant-access.md) (on the F03 branch) |
+| F04 (when merged) | Run the read-only duplicate inspection and keep its output. Apply F03 then F04 (each takes a brief table lock). Compare the `private.participant_merge_audit` counts with the inspection output and verify the unique index. Confirm the only live INSERT policies are F04's. Then ship client `join_poll` adapters and retire direct inserts in a later migration | [Membership integrity](membership-integrity.md) (on the F04 branch) |
 | F25 (when merged) | Before pulling, move the untracked local `apps/mobile/MeetingScheduler` aside in the main checkout, then diff and delete it. Add an iOS CI build job (F24); a cold runner needs github.com access for SwiftPM | [iOS checkout](ios-checkout.md) (on the F25 branch) |
 | F26 (when merged) | Run the Gradle verification on JDK 17/21 with SDK 36; add the keystore, passwords, alias, and expected certificate SHA-256 as CI secrets; confirm the upload/app-signing key and register its SHA-1 with the Google OAuth client; supply `google-services.json` from a secret | [Android release signing](android-release-signing.md) (on the F26 branch) |
 
@@ -72,11 +73,13 @@ Merging code does not change hosted state. None of the items below has been esta
 
 - [x] Merge #58, #59, and #60 (done by the owner). Fetch `main` at `6f2c547` and correct the stale "integration pending" statuses.
 - [x] Start the F03→F04 backend worker and the F25→F26 delivery worker in separate worktrees.
-- [ ] Review the F03 design and implementation against the F02 access contract.
-- [ ] Review F04's duplicate reconciliation and join command.
+- [x] Review the F03 design and implementation against the F02 access contract.
+- [x] Review F04's duplicate reconciliation and join command.
 - [x] Verify F25 with a clean disposable checkout build (worker evidence plus coordinator diff review), and review F26's signing failure behavior (static only; Gradle run outstanding).
-- [ ] Replay the combined migrations (`main` + F03 + F04) with all suites, from the 44 DB / 38 Edge / seven entry-point baseline, before delivery.
-- [ ] Publish draft PRs for each finding.
+- [x] Replay the combined migrations with all suites. The combined tree was `main` + F03 + F04 + F25 + F26 + this branch, at temporary merge `cb9554f`: 69 DB tests (17 RPC, 14 participants, 11 membership, 12 calendar, 15 billing), 38 Edge tests (23 calendar, 15 billing), and seven entry-point `deno check`s passed, with `git diff --check` clean. Sequential merges had no conflicts. (An octopus merge refuses the F25 gitlink-to-directory change; use ordinary merges.)
+- [ ] Publish draft PRs for each finding. All branches are pushed. Creating PRs from the coordinator session was blocked by the permission check, so it awaits the owner.
+- [ ] Decide on account deletion (an existing defect): `poll_participants.user_id ON DELETE SET NULL` conflicts with the `participant_identity` check, so deleting an account that has joined a poll fails. Choose between cascade deletion and anonymizing the row.
+- [ ] F06/F10: accept guest capabilities for availability saves through `poll_private.verified_guest_participant`. F05: enforce `max_participants` at join.
 - [ ] Continue the dependency sequence: F06/F10, then F05/F09 for Stream A; F12/F13 and F24 for the client streams.
 
 ## Progress log
@@ -105,3 +108,18 @@ Merging code does not change hosted state. None of the items below has been esta
 
 - **October 22, merged baseline:** the owner merged #58, #59, and #60 (`main` is at `6f2c547`). The coordinator updated the F02/F08 statuses from "integration pending" to merged, with hosted rollout pending. Hosted owner actions now live in their own section. The second wave started: F03→F04 with one backend owner, and F25 followed by F26 (independent) with the delivery worker. No shared runtime reservation has been requested or granted.
 - **October 22, F25/F26 delivery:** the delivery worker finished both on separate branches from `6f2c547`. It kept them in one worktree because its sandbox blocked git in a second worktree. F25: the gitlink commit `079a8b1` doesn't exist locally or on GitHub, so the wrapper is now tracked monorepo source (14 files, plus narrowed ignore rules). Clean-clone builds succeeded. F26: release builds can no longer fall back to the debug key; a `validateReleaseSigning` gate and an explicit unsigned opt-in were added; billing log levels follow the build type on both platforms. F26's Gradle run is outstanding because no compatible JDK or SDK is installed. The worker also found that `apps/android/gradle.properties` is tracked despite `.gitignore`, so the setup docs now steer credentials away from it. Both branches were pushed; draft PR creation was blocked by the permission check and awaits the owner. The two branches merge with no conflicts. No runtime reservation was used.
+- **October 22, F03/F04 delivery:** the backend worker committed F03 (`d6b704b`) and F04 (`09c2189`, based on F03).
+  - **F03:**
+    - Removed the global read policy and the null-user update policy. Participant lists are readable for active invitations; draft, closed, and archived lists need ownership or membership. Members can update only their own `comment`, and an invoker trigger rejects client identity changes.
+    - Guest emails moved to `private.participant_guest_credentials`. `access_token` is now always the row id, so it is no longer a credential, and every previously published token became inert.
+    - New SHA-256-verified guest capability commands: `join_poll_as_guest`, `get_guest_participant`, `update_guest_participant`, `rotate_guest_token`.
+    - Installed clients need no changes.
+  - **F04:**
+    - Merges duplicate authenticated memberships deterministically, keeping an audit copy of every merged row, then adds a partial unique index.
+    - Adds an idempotent `join_poll` that takes identity from the session, an optional idempotency token for guest joins, and `claim_guest_participant`, which requires the capability.
+    - Binds direct-insert policies to the caller and blocks poll/user reassignment for every role.
+    - Duplicate direct joins now return 409, and joins after `closes_at` fail.
+  - Both workers scoped one existing test assertion each, without changing its intent.
+  - The coordinator's independent combined replay passed (see the follow-ups above).
+  - The worker's sandbox only allows git in its own worktree, so it committed both branches there. F04 also has a clean separate worktree.
+  - No shared runtime or hosted resource was used.
