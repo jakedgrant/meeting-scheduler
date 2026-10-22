@@ -27,3 +27,11 @@ deno check --frozen --config supabase/functions/deno.json supabase/functions/rev
 The database suites execute actual anonymous/authenticated/service roles in PGlite's PostgreSQL 18.6 engine. Provider pages, credentials, and identities are synthetic fixtures. No simulator, emulator, local server, Docker/Supabase stack, or live provider customer API was used. Hosted engine/configuration, advisors, gateway behavior, provider key scopes, real purchases, worker scheduling, backfill, and deployed grants remain unverified.
 
 The local features are ready for review in their separate branches. Before integration, retain `test:rpc:db` and the two billing scripts when resolving `package.json`. Before deployment, follow the feature guides and the [progress tracker](../architecture-remediation-progress.md). F03/F04 direct-table participant/membership bypasses remain separate work; these test results do not establish complete poll isolation.
+
+## PR branch verification
+
+Before publication, both feature branches were rebased onto main `457eeebf64b15a492d7874c80b124911f7831806` to remove shared planning commits from their diffs. F02 is now `3ef2d0a749918f8202f25f06517b5e9ac78b54ac`; F08 is now `c6b9f432080fc922cbcff6c8a3c0362cd41819d1`. Git range comparison confirmed unchanged feature commits. F08 then received a package-script ordering cleanup to avoid a merge conflict with F02.
+
+Every feature source, test, workflow, migration, and guide remains byte-identical to its validated predecessor. Each branch's package JSON has identical semantics. The combined Git merge tree `4a730322ccc6fefb0832924aa21b9e75c453488f` merges without conflicts and retains all five RPC, billing, and calendar test commands. All **44 database tests passed again** against an archive of that exact tree, in process with no shared runtime. The previous 38 Edge tests and seven type checks apply to unchanged source files.
+
+[Publication verification](publication-verification.json) maps the original tested commits to the publication commits and records the file comparison. [Publication database output](publication-database-results.txt) contains the fresh combined-tree replay. Original evidence above remains unchanged.

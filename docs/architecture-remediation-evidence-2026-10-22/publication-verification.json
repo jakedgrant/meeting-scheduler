@@ -1,0 +1,48 @@
+{
+  "main": "457eeebf64b15a492d7874c80b124911f7831806",
+  "branches": {
+    "f02": {
+      "validated_source": "f86d55cfab9236a1c5dd045c58f59ef71d73e1a6",
+      "published_commit": "3ef2d0a749918f8202f25f06517b5e9ac78b54ac",
+      "identical_feature_files": [
+        "docs/rpc-authorization.md",
+        "supabase/migrations/20261022181851_privileged_rpc_authorization.sql",
+        "tests/rpc-authorization.test.mjs"
+      ],
+      "package_json_semantically_identical": true
+    },
+    "f08": {
+      "validated_source": "ec1238202d0760cd4a9d25ffaeae5ef8f97c7784",
+      "published_commit": "c6b9f432080fc922cbcff6c8a3c0362cd41819d1",
+      "identical_feature_files": [
+        ".github/workflows/billing-webhooks.yml",
+        "docs/billing-webhooks.md",
+        "supabase/config.toml",
+        "supabase/functions/_shared/billing/billing_test.ts",
+        "supabase/functions/_shared/billing/provider.ts",
+        "supabase/functions/_shared/billing/runtime.ts",
+        "supabase/functions/_shared/billing/types.ts",
+        "supabase/functions/_shared/billing/webhook.ts",
+        "supabase/functions/_shared/billing/worker.ts",
+        "supabase/functions/billing-worker/index.ts",
+        "supabase/functions/revenuecat-webhook/index.ts",
+        "supabase/migrations/20261022181918_durable_billing_webhooks.sql",
+        "tests/billing-database.test.mjs",
+        "tests/calendar-database.test.mjs"
+      ],
+      "package_json_semantically_identical": true
+    }
+  },
+  "merge_tree": "4a730322ccc6fefb0832924aa21b9e75c453488f",
+  "all_five_test_scripts_retained": true,
+  "test_snapshot": "/private/tmp/architecture-pr-merge-z4gcx4w0",
+  "database_tests": {
+    "passed": 44,
+    "failed": 0,
+    "billing": 15,
+    "calendar": 12,
+    "rpc_authorization": 17,
+    "output": "publication-database-results.txt"
+  },
+  "prior_edge_and_typecheck_evidence_applies": "All feature source and test files are byte-identical to the prior validated sources; package.json is semantically identical within each feature branch."
+}
