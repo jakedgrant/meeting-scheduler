@@ -1,0 +1,39 @@
+name: Billing webhooks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  billing-webhooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.3
+      - name: Install locked offline database test runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Replay migrations and verify billing roles, recovery and fencing
+        run: npm run test:billing:db
+      - name: Type-check billing entry points
+        run: >-
+          deno check --frozen --config supabase/functions/deno.json
+          supabase/functions/revenuecat-webhook/index.ts
+          supabase/functions/billing-worker/index.ts
+      - name: Verify billing behavior with network and environment access denied
+        run: npm run test:billing:edge
+      - name: Lint billing functions
+        run: >-
+          deno lint --config supabase/functions/deno.json
+          supabase/functions/_shared/billing
+          supabase/functions/revenuecat-webhook
+          supabase/functions/billing-worker
