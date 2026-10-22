@@ -2,14 +2,27 @@
 
 Setup verified October 22, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers and shared runtime reservations; the coordinator owns updates.
 
+## Pull requests
+
+Opened October 22, 2026, in the agreed review/merge order. All three target `main` and remain unmerged; each feature PR contains only its own changes.
+
+| Order | Pull request | Branch |
+| --- | --- | --- |
+| 1 | [#58: Architecture plan and validation evidence](https://github.com/jakedgrant/meeting-scheduler/pull/58) | `codex/architecture-review` |
+| 2 | [#59: F02 RPC authorization](https://github.com/jakedgrant/meeting-scheduler/pull/59) | `codex/f02-rpc-authorization` |
+| 3 | [#60: F08 billing reliability](https://github.com/jakedgrant/meeting-scheduler/pull/60) | `codex/f08-billing-webhooks` |
+
+PR descriptions link the merge order and document remaining security work and hosted rollout requirements. Both feature branches merge without conflicts, including all five test commands. PRs are attached to the coordinator task. GitHub CI status is reported on each PR; local evidence does not establish hosted deployment.
+
+
 ## Active work
 
 Both workers started from `29bbf439161a5f507d255e6e8288cad40b4a0f22`, which contains the merged calendar remediation and the architecture work plan. For PR preparation, the coordinator rebased each feature onto main `457eeebf64b15a492d7874c80b124911f7831806` to remove shared planning commits from the feature diffs. Branches and worktree paths were verified with Git.
 
 | Finding | Worker task | Branch | Worktree | Latest progress |
 | --- | --- | --- | --- | --- |
-| F02: RPC authorization | [F02: Authorize database RPCs](codex://threads/01a164d4-109e-7a50-ad0e-ea921f381feb) | `codex/f02-rpc-authorization` | `/Users/jake/.codex/worktrees/a8fa/meeting-scheduler` | Prepared for PR at `3ef2d0a` (unchanged feature files from `f86d55c`); clean worktree verified. Combined validation passes 44 DB/38 Edge tests and seven entry-point checks with F08; 44 DB tests passed again after branch cleanup. Integration and hosted rollout remain pending. No shared runtime used. |
-| F08: Billing webhook reliability | [F08: Make billing webhooks reliable](codex://threads/01a164d4-4f33-76d0-960c-27dcad12e371) | `codex/f08-billing-webhooks` | `/Users/jake/.codex/worktrees/c5a4/meeting-scheduler` | Prepared for PR at `c6b9f43` (unchanged feature files from `ec12382`, plus mergeable script ordering); clean worktree verified. Combined checks pass, including a fresh 44-test DB replay. Integration, scheduling/backfill, and hosted validation remain pending. No shared runtime used. |
+| F02: RPC authorization | [F02: Authorize database RPCs](codex://threads/01a164d4-109e-7a50-ad0e-ea921f381feb) | `codex/f02-rpc-authorization` | `/Users/jake/.codex/worktrees/a8fa/meeting-scheduler` | Published in [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59) at `3ef2d0a` (unchanged feature files from `f86d55c`); clean worktree verified. Combined validation passes 44 DB/38 Edge tests and seven entry-point checks with F08; 44 DB tests passed again after branch cleanup. Integration and hosted rollout remain pending. No shared runtime used. |
+| F08: Billing webhook reliability | [F08: Make billing webhooks reliable](codex://threads/01a164d4-4f33-76d0-960c-27dcad12e371) | `codex/f08-billing-webhooks` | `/Users/jake/.codex/worktrees/c5a4/meeting-scheduler` | Published in [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60) at `c6b9f43` (unchanged feature files from `ec12382`, plus mergeable script ordering); clean worktree verified. Combined checks pass, including a fresh 44-test DB replay. Integration, scheduling/backfill, and hosted validation remain pending. No shared runtime used. |
 
 Coordinator: [architecture review thread](codex://threads/01a164c2-5bc9-7272-b4be-5fe2147930c9), branch `codex/architecture-review`, checkout `/Users/jake/Developer/meeting-scheduler`.
 
@@ -54,7 +67,7 @@ Static checks, pure compilation, and isolated in-process PGlite/offline Deno tes
 - [x] Verify F08 handles provider-valid promotional subscription nulls and exact custom-ID identity matching, with regression tests.
 - [x] Replay the final committed combined history independently and verify calendar/security compatibility: 44 DB tests, 38 Edge tests, seven entry-point checks passed. [Evidence](architecture-remediation-evidence-2026-10-22/README.md).
 - [x] Remove shared planning commits from feature diffs, verify unchanged source, and confirm a conflict-free combined tree with all five test scripts and 44 passing DB tests. [Publication evidence](architecture-remediation-evidence-2026-10-22/README.md#pr-branch-verification).
-- [ ] Publish the documentation, F02, and F08 PRs in the agreed review order.
+- [x] Publish and attach documentation [#58](https://github.com/jakedgrant/meeting-scheduler/pull/58), F02 [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59), and F08 [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60), with linked review order and rollout requirements.
 - [ ] Integrate only when requested; retain all RPC/billing scripts in `package.json` and run required CI checks.
 - [ ] Complete hosted F02 grant/PostgREST/advisor checks and F08 secrets/scheduling/maintenance/backfill/real-store validation before rollout.
 
@@ -79,3 +92,5 @@ Static checks, pure compilation, and isolated in-process PGlite/offline Deno tes
 - **October 22, final local deliveries:** F08 completed `ec1238202d0760cd4a9d25ffaeae5ef8f97c7784` with promotional metadata/custom-ID fixes, consistent SQL/types/F05 docs, and new provider/database fixtures. Both feature worktrees are clean. The coordinator independently assembled the exact F02 `f86d55c` plus F08 `ec12382` committed snapshot and verified all 44 DB tests (17 RPC/15 billing/12 calendar), 38 Edge tests (15 billing/23 calendar), and seven frozen entry-point type checks. Full outputs and source identities are saved in [combined evidence](architecture-remediation-evidence-2026-10-22/README.md). The first type-check invocation used an unsupported CLI flag; it was corrected after inspecting CLI help, and the valid command passed without source changes. Branches remain separate, with no push, PR, integration merge, hosted rollout, live provider call, or shared runtime use.
 
 - **October 22, PR preparation:** the user authorized three PRs. F02 was rebased to `3ef2d0a`; F08 was rebased and received only a package-script ordering cleanup at `c6b9f43` so both feature branches merge cleanly. All feature files match the validated predecessors, and all five test scripts survive the merge. The coordinator replayed the actual merged Git tree in a temporary archive: all 44 DB tests passed. Shared runtime and hosted resources were not used.
+
+- **October 22, PR delivery:** pushed all three branches and opened/attached documentation [#58](https://github.com/jakedgrant/meeting-scheduler/pull/58), F02 [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59), and F08 [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60). All target main, preserve separate review scope, and link the planned merge order. No integration merge or hosted deployment was performed.
