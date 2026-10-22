@@ -1,41 +1,41 @@
 # Architecture remediation progress
 
-Setup verified October 22, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers and shared runtime reservations; the coordinator owns updates.
+Setup verified October 22, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
-## Pull requests
+## Merged baseline
 
-Opened October 22, 2026, in the agreed review/merge order. All three target `main` and remain unmerged; each feature PR contains only its own changes.
+As of October 22, 2026, `main` is at `6f2c547`. These PRs were merged in the agreed order:
 
-| Order | Pull request | Branch |
-| --- | --- | --- |
-| 1 | [#58: Architecture plan and validation evidence](https://github.com/jakedgrant/meeting-scheduler/pull/58) | `codex/architecture-review` |
-| 2 | [#59: F02 RPC authorization](https://github.com/jakedgrant/meeting-scheduler/pull/59) | `codex/f02-rpc-authorization` |
-| 3 | [#60: F08 billing reliability](https://github.com/jakedgrant/meeting-scheduler/pull/60) | `codex/f08-billing-webhooks` |
+| Order | Pull request | Branch | Status |
+| --- | --- | --- | --- |
+| 1 | [#58: Architecture plan and validation evidence](https://github.com/jakedgrant/meeting-scheduler/pull/58) | `codex/architecture-review` | Merged |
+| 2 | [#59: F02 RPC authorization](https://github.com/jakedgrant/meeting-scheduler/pull/59) | `codex/f02-rpc-authorization` | Merged; hosted rollout pending |
+| 3 | [#60: F08 billing reliability](https://github.com/jakedgrant/meeting-scheduler/pull/60) | `codex/f08-billing-webhooks` | Merged; hosted rollout pending |
 
-PR descriptions link the merge order and document remaining security work and hosted rollout requirements. Both feature branches merge without conflicts, including all five test commands. PRs are attached to the coordinator task. GitHub CI status is reported on each PR; local evidence does not establish hosted deployment.
-
+F02 and F08 are **implemented and merged**. Before merge, the combined history passed 44 DB tests (17 RPC, 15 billing, 12 calendar), 38 Edge tests (15 billing, 23 calendar), and seven entry-point checks. [Evidence](architecture-remediation-evidence-2026-10-22/README.md). All five test scripts are present in `package.json` on `main`. **Merging did not deploy anything.** Hosted state is tracked separately below.
 
 ## Active work
 
-Both workers started from `29bbf439161a5f507d255e6e8288cad40b4a0f22`, which contains the merged calendar remediation and the architecture work plan. For PR preparation, the coordinator rebased each feature onto main `457eeebf64b15a492d7874c80b124911f7831806` to remove shared planning commits from the feature diffs. Branches and worktree paths were verified with Git.
+Second wave, started October 22 from `main` at `6f2c547`. Each finding has its own branch and worktree. Workers commit locally and report to the coordinator. The coordinator reviews the work, replays the combined migrations, and then publishes draft PRs.
 
-| Finding | Worker task | Branch | Worktree | Latest progress |
+| Finding | Stream | Branch | Base | Status |
 | --- | --- | --- | --- | --- |
-| F02: RPC authorization | [F02: Authorize database RPCs](codex://threads/01a164d4-109e-7a50-ad0e-ea921f381feb) | `codex/f02-rpc-authorization` | `/Users/jake/.codex/worktrees/a8fa/meeting-scheduler` | Published in [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59) at `3ef2d0a` (unchanged feature files from `f86d55c`); clean worktree verified. Combined validation passes 44 DB/38 Edge tests and seven entry-point checks with F08; 44 DB tests passed again after branch cleanup. Integration and hosted rollout remain pending. No shared runtime used. |
-| F08: Billing webhook reliability | [F08: Make billing webhooks reliable](codex://threads/01a164d4-4f33-76d0-960c-27dcad12e371) | `codex/f08-billing-webhooks` | `/Users/jake/.codex/worktrees/c5a4/meeting-scheduler` | Published in [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60) at `c6b9f43` (unchanged feature files from `ec12382`, plus mergeable script ordering); clean worktree verified. Combined checks pass, including a fresh 44-test DB replay. Integration, scheduling/backfill, and hosted validation remain pending. No shared runtime used. |
+| F03: Participant access | A (backend owner) | `claude/f03-participant-access` | `main` `6f2c547` | In progress |
+| F04: Membership integrity | A (same backend owner) | `claude/f04-membership-integrity` | F03 branch (depends on F03's guest ownership contract) | Queued after F03 |
+| F25: Reproducible iOS checkout | C | `claude/f25-ios-checkout` | `main` `6f2c547` | In progress |
+| F26: Android release signing | D | `claude/f26-android-signing` | `main` `6f2c547` (independent of F25) | Queued after F25 |
 
-Coordinator: [architecture review thread](codex://threads/01a164c2-5bc9-7272-b4be-5fe2147930c9), branch `codex/architecture-review`, checkout `/Users/jake/Developer/meeting-scheduler`.
-
-Workers report setup, design, implementation, validation, blockers, migration filenames, and final local commits directly to the coordinator. During sustained work they report approximately every five minutes. Each worker implemented and validated its assigned finding through local commits. The user authorized pushing and creating three separate PRs on October 22. Integration merges and hosted deployment still await a separate instruction.
+Coordinator: branch `claude/remediation-status-2026-10-22` (this status update).
 
 ## Ownership and integration
 
-- **F02** owns existing poll/access RPCs, authorization helpers, their execute grants, necessary compatible callers, and focused authorization tests. F03/F04 remain separate follow-up work.
-- **F08** owns the RevenueCat webhook, new private billing inbox/processing objects, subscription/event-pass processing, recovery instructions, and focused billing tests. F05 quota enforcement remains separate follow-up work.
-- **Coordinated exception:** F08 owns the later compatibility update to `count_unredeemed_passes` after its revocation/verification metadata exists. It must preserve F02's hardened identity checks, signature, search path, and grants. F02's earlier migration remains independently replayable without the new billing columns. Revoked or quarantined passes must not be counted as available through legacy callers.
-- **Calendar test compatibility:** F08 owns the narrow update to `tests/calendar-database.test.mjs` that scopes its three-table assertion to the named calendar tables. Additional private billing tables must retain separate RLS/privilege coverage; calendar security assertions must remain intact. F02 leaves this shared test file to F08.
-- Workers report overlapping schema/function contracts before broadening scope. New migrations are additive and CLI-created. The coordinator checks distinct migration versions and combined replay before integration.
-- Workers write finding-specific documentation in their own worktrees. The coordinator maintains this tracker and the shared architecture review. No worker edits the coordinator's or another worker's checkout.
+- **F03/F04** share one backend owner, so that no table policy or join path bypasses F02's RPC checks. They own participant RLS, guest capability storage and commands, membership uniqueness, the join command, and focused PGlite suites. They must preserve F02's `poll_private` helper contracts and F08's billing objects. They do not edit calendar or billing code beyond what fixtures require.
+- **F03** must keep shared-link participation working for legitimate guests and invitees. Where it cannot keep a client path working, it must document a client adapter contract and its rollout order.
+- **F04** is based on F03. It reconciles existing duplicate memberships before adding the unique index.
+- **F25** owns the `apps/mobile/MeetingScheduler` gitlink-to-tracked-files transition. The local wrapper in the user's main checkout is a read-only source. Merge F25 before any other change inside that directory.
+- **F26** owns Android release signing and native billing log levels, the native part of F27. Its iOS `PurchaseService.swift` change lives under `apps/mobile/Sources`, outside the F25 wrapper.
+- New migrations are additive, created by the CLI, and ordered after `20261022181918`. Before delivery, the coordinator checks distinct versions and replays the combined history with every suite.
+- Workers write their finding-specific docs in their own worktrees. Only the coordinator edits this tracker and the architecture review.
 
 ## Shared runtime reservations
 
@@ -47,29 +47,36 @@ No simulator, emulator, or local-server reservation has been granted. Availabili
 | Android emulators | None granted | — | — |
 | Local servers, including Supabase/Docker databases and dev/preview/test servers | None granted | — | — |
 
-Before querying or using a simulator/emulator, starting a local server, or connecting to an existing local service, the worker must request a reservation from the coordinator and wait for explicit approval. The request includes device ID or bind address/port, purpose, expected duration, and any install/reset/stop actions. Approval applies only to the named resource and actions. Workers report release when finished; elapsed time does not grant access. Occupied or user-owned resources must not be stopped or reset without permission.
+A worker must request a reservation from the coordinator, and wait for explicit approval, before it queries or uses a simulator or emulator, starts a local server, or connects to an existing local service. The request names the device ID or bind address/port, the purpose, the expected duration, and any install, reset, or stop actions. Approval covers only the named resource and actions. Workers report when they release it; elapsed time does not grant access. Occupied or user-owned resources must not be stopped or reset without permission.
 
-Static checks, pure compilation, and isolated in-process PGlite/offline Deno tests that open no listening port can proceed without a reservation. While waiting for runtime access, workers continue independent offline work. Dependency setup must not silently start shared services or run an advisory inventory upload.
+These need no reservation: static checks, pure compilation (including `xcodebuild` against a generic destination, with no simulator device), local Gradle builds with `--no-daemon` and no emulator or adb, and isolated in-process PGlite or offline Deno tests that open no listening port.
+
+## Hosted rollout and owner actions
+
+Merging code does not change hosted state. None of the items below has been established. Each needs project-owner access and is tracked separately from code delivery.
+
+| Area | Outstanding owner action | Guide |
+| --- | --- | --- |
+| F01/F07 calendar | Revoke old grants; configure Google and secrets; deploy the migrations and functions; run maintenance; check real connect and disconnect on every client | [Calendar credentials](calendar-credentials.md) |
+| F02 RPC authorization | Apply `20261022181851`; keep `poll_private` unexposed; check live effective grants, including custom role inheritance; run PostgREST checks and Supabase advisors; check installed-client list, eligibility, and invitation reads | [RPC authorization](rpc-authorization.md#verification-and-rollout) |
+| F08 billing migration | Inventory legacy receipts; take a recovery snapshot; open a maintenance window; disable the old direct-write handler **before** applying `20261022181918` | [Billing webhooks](billing-webhooks.md#required-hosted-setup-and-rollout) |
+| F08 billing secrets | Set `REVENUECAT_PROJECT_ID`, `REVENUECAT_BILLING_ENVIRONMENT`, `REVENUECAT_APP_IDS`, `REVENUECAT_EVENT_PASS_PRODUCT_IDS`, `REVENUECAT_SECRET_API_KEY` (v2, read-only), `REVENUECAT_WEBHOOK_AUTH`, `REVENUECAT_BILLING_WORKER_AUTH`, and optionally `REVENUECAT_WEBHOOK_SIGNING_SECRET` | Same |
+| F08 scheduling | Deploy `billing-worker` and `revenuecat-webhook`; install and verify the worker schedule **before** routing paid notifications to the new handler | Same |
+| F08 backfill | Drain the queue seeded by the migration; resolve quarantined identities and legacy passes with provider evidence; verify fresh `reconciled_at` values and pass counts | Same |
+| F08 live validation | Run real sandbox purchase, renewal, cancellation, grace, refund, transfer, and duplicate-delivery tests through the hosted gateway; then check production key scopes and schedule health | Same |
+| F03/F04 (when merged) | Apply the new migrations after F02 and F08; rotate or invalidate previously exposed guest capabilities; roll out client adapters in the documented order | Worker docs (pending) |
+| F25/F26 (when merged) | Hook iOS and Android builds into CI (F24); provide release signing secrets; verify the release certificate | Worker docs (pending) |
 
 ## Coordinator follow-ups
 
-- [x] Commit the common work plan at `29bbf43`.
-- [x] Verify both new branches and separate managed worktrees.
-- [x] Receive both workers' progress-report and resource-rule acknowledgements.
-- [x] Review F02's initial RPC inventory, access model, and compatibility direction; implementation review remains pending.
-- [x] Review F08's initial inbox/reconciliation design and output contract direction for F05; implementation, freshness semantics, and recovery validation remain pending.
-- [x] Record migration filenames and verify allocated files have distinct version prefixes/ordering; combined replay remains pending.
-- [x] Receive F08's verified-pass fixture and relay required provider identity/freshness fields to F02.
-- [x] Confirm the initial combined snapshot preserves F02's meaningful positive pass count and passes all 17 RPC tests; final committed-snapshot replay remains pending.
-- [x] Resolve the share-code review point against the baseline: the invoker/RLS collision behavior predates F02, so it is tracked under F09 and is not an F02 regression or blocker.
-- [x] Review F02's draft migration/docs and final handoff; verify local commit `f86d55c` and clean worktree. Final test counts are worker-reported.
-- [x] Review F08's implementation, final local commit `ec12382`, provider-review fixes, and independent combined validation evidence; clean worktree verified.
-- [x] Verify F08 handles provider-valid promotional subscription nulls and exact custom-ID identity matching, with regression tests.
-- [x] Replay the final committed combined history independently and verify calendar/security compatibility: 44 DB tests, 38 Edge tests, seven entry-point checks passed. [Evidence](architecture-remediation-evidence-2026-10-22/README.md).
-- [x] Remove shared planning commits from feature diffs, verify unchanged source, and confirm a conflict-free combined tree with all five test scripts and 44 passing DB tests. [Publication evidence](architecture-remediation-evidence-2026-10-22/README.md#pr-branch-verification).
-- [x] Publish and attach documentation [#58](https://github.com/jakedgrant/meeting-scheduler/pull/58), F02 [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59), and F08 [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60), with linked review order and rollout requirements.
-- [ ] Integrate only when requested; retain all RPC/billing scripts in `package.json` and run required CI checks.
-- [ ] Complete hosted F02 grant/PostgREST/advisor checks and F08 secrets/scheduling/maintenance/backfill/real-store validation before rollout.
+- [x] Merge #58, #59, and #60 (done by the owner). Fetch `main` at `6f2c547` and correct the stale "integration pending" statuses.
+- [x] Start the F03→F04 backend worker and the F25→F26 delivery worker in separate worktrees.
+- [ ] Review the F03 design and implementation against the F02 access contract.
+- [ ] Review F04's duplicate reconciliation and join command.
+- [ ] Verify F25 with a clean disposable checkout build, then review F26's signing failure behavior.
+- [ ] Replay the combined migrations (`main` + F03 + F04) with all suites, from the 44 DB / 38 Edge / seven entry-point baseline, before delivery.
+- [ ] Publish draft PRs for each finding.
+- [ ] Continue the dependency sequence: F06/F10, then F05/F09 for Stream A; F12/F13 and F24 for the client streams.
 
 ## Progress log
 
@@ -94,3 +101,5 @@ Static checks, pure compilation, and isolated in-process PGlite/offline Deno tes
 - **October 22, PR preparation:** the user authorized three PRs. F02 was rebased to `3ef2d0a`; F08 was rebased and received only a package-script ordering cleanup at `c6b9f43` so both feature branches merge cleanly. All feature files match the validated predecessors, and all five test scripts survive the merge. The coordinator replayed the actual merged Git tree in a temporary archive: all 44 DB tests passed. Shared runtime and hosted resources were not used.
 
 - **October 22, PR delivery:** pushed all three branches and opened/attached documentation [#58](https://github.com/jakedgrant/meeting-scheduler/pull/58), F02 [#59](https://github.com/jakedgrant/meeting-scheduler/pull/59), and F08 [#60](https://github.com/jakedgrant/meeting-scheduler/pull/60). All target main, preserve separate review scope, and link the planned merge order. No integration merge or hosted deployment was performed.
+
+- **October 22, merged baseline:** the owner merged #58, #59, and #60 (`main` is at `6f2c547`). The coordinator updated the F02/F08 statuses from "integration pending" to merged, with hosted rollout pending. Hosted owner actions now live in their own section. The second wave started: F03→F04 with one backend owner, and F25 followed by F26 (independent) with the delivery worker. No shared runtime reservation has been requested or granted.
