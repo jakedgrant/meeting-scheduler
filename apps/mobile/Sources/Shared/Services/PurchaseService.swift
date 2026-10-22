@@ -28,7 +28,12 @@ public final class PurchaseService: PurchaseServiceProtocol {
     }
 
     private func configure() {
+        // Verbose billing diagnostics only in debug builds (F26/F27).
+        #if DEBUG
         Purchases.logLevel = .debug
+        #else
+        Purchases.logLevel = .warn
+        #endif
         Purchases.configure(withAPIKey: Config.revenueCatAPIKey)
 
         // Get initial customer info

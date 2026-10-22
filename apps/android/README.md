@@ -135,7 +135,7 @@ const val REVENUE_CAT_API_KEY = "your-api-key"
 # Debug build
 ./gradlew assembleDebug
 
-# Release build
+# Release build (needs signing inputs; see docs/android-release-signing.md)
 ./gradlew assembleRelease
 
 # Install on device

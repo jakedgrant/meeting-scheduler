@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.meetingscheduler.android.BuildConfig
 import com.meetingscheduler.android.Config
 import com.revenuecat.purchases.CustomerInfo
 import com.revenuecat.purchases.LogLevel
@@ -48,7 +49,8 @@ class PurchaseService(
     }
 
     private fun configure() {
-        Purchases.logLevel = LogLevel.DEBUG
+        // Verbose billing diagnostics only in debug builds (F26/F27).
+        Purchases.logLevel = if (BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN
 
         val configuration = PurchasesConfiguration.Builder(
             context = application,
