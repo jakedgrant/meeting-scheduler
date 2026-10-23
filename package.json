@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:database": "node scripts/test-database.mjs",
     "test:rpc:db": "node --test tests/rpc-authorization.test.mjs",
     "test:participants:db": "node --test tests/participant-access.test.mjs",
     "test:membership:db": "node --test tests/membership-integrity.test.mjs",
