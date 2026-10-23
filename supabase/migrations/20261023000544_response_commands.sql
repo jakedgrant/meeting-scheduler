@@ -185,22 +185,37 @@ CREATE TRIGGER responses_10_check_write
     BEFORE INSERT OR UPDATE OR DELETE ON public.availability_responses
     FOR EACH ROW EXECUTE FUNCTION poll_private.check_response_write();
 
--- Options cannot move between polls (that would break the invariant).
+-- Options cannot move between polls or change a selected interval. Taking the
+-- poll lock serializes these changes with finalization. Finalization reads the
+-- option only after locking the poll, and does not wait for an option row lock.
 CREATE FUNCTION poll_private.protect_time_option_poll()
 RETURNS TRIGGER
-LANGUAGE plpgsql SECURITY INVOKER
+LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = ''
 AS $$
+DECLARE
+    target public.polls;
 BEGIN
-    IF NEW.poll_id IS DISTINCT FROM OLD.poll_id THEN
+    IF TG_OP = 'UPDATE' AND NEW.poll_id IS DISTINCT FROM OLD.poll_id THEN
         RAISE EXCEPTION 'Time options cannot move to another poll' USING ERRCODE = '42501';
     END IF;
+    SELECT * INTO target FROM public.polls p WHERE p.id = OLD.poll_id FOR UPDATE;
+    -- The parent is absent during ON DELETE CASCADE: removing a whole poll is
+    -- allowed, including its selected option.
+    IF FOUND AND target.selected_start_time = OLD.start_time
+        AND target.selected_end_time = OLD.end_time
+        AND (TG_OP = 'DELETE' OR NEW.start_time IS DISTINCT FROM OLD.start_time
+             OR NEW.end_time IS DISTINCT FROM OLD.end_time) THEN
+        RAISE EXCEPTION 'Selected time option cannot be changed or deleted'
+            USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
     RETURN NEW;
 END;
 $$;
 REVOKE ALL ON FUNCTION poll_private.protect_time_option_poll() FROM PUBLIC, anon, authenticated;
 CREATE TRIGGER time_options_10_protect_poll
-    BEFORE UPDATE OF poll_id ON public.poll_time_options
+    BEFORE UPDATE OF poll_id, start_time, end_time OR DELETE ON public.poll_time_options
     FOR EACH ROW EXECUTE FUNCTION poll_private.protect_time_option_poll();
 
 -- ---------------------------------------------------------------------------
@@ -400,8 +415,16 @@ BEGIN
         RAISE EXCEPTION 'request_id is required' USING ERRCODE = '22023';
     END IF;
     v_participant := poll_private.resolve_availability_participant(p_poll, p_participant, p_guest_token);
-    -- One save at a time per participant; a concurrent retry then sees the log.
-    PERFORM 1 FROM public.poll_participants pp WHERE pp.id = v_participant FOR NO KEY UPDATE;
+    -- Lock order matches claim/rotation: poll, participant, then credential.
+    -- The poll need not be open yet: a committed save can replay after close.
+    PERFORM 1 FROM public.polls p WHERE p.id = p_poll FOR SHARE;
+    PERFORM 1 FROM public.poll_participants pp WHERE pp.id = v_participant FOR UPDATE;
+    IF p_guest_token IS NOT NULL THEN
+        PERFORM poll_private.lock_guest_participant(v_participant, p_guest_token);
+    END IF;
+    -- Revalidate ownership after every wait, before inspecting idempotency logs.
+    -- Claimed/revoked credentials cannot replay a previous guest result either.
+    v_participant := poll_private.resolve_availability_participant(p_poll, p_participant, p_guest_token);
 
     IF jsonb_typeof(p_responses) IS DISTINCT FROM 'array' THEN
         RAISE EXCEPTION 'responses must be a JSON array' USING ERRCODE = '22023';

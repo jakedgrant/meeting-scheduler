@@ -411,6 +411,35 @@ test('F06/F10 response invariants, transactional saves and finalization on Postg
     });
   });
 
+  await t.test('selected options reject interval changes and deletion until selection is cleared', async () => {
+    const [selected, other] = options.open;
+    await asRole('authenticated', owner, async () => {
+      await finalize(polls.open.id, selected);
+      for (const sql of [
+        "UPDATE public.poll_time_options SET start_time=start_time+interval '1 hour' WHERE id=$1",
+        "UPDATE public.poll_time_options SET end_time=end_time+interval '1 hour' WHERE id=$1",
+        'DELETE FROM public.poll_time_options WHERE id=$1',
+      ]) await assert.rejects(db.query(sql, [selected]), error => error.code === '23514');
+      await db.query('UPDATE public.poll_time_options SET start_time=start_time WHERE id=$1', [selected]);
+      await db.query("UPDATE public.poll_time_options SET end_time=end_time+interval '1 minute' WHERE id=$1", [other]);
+      await db.query('UPDATE public.polls SET selected_start_time=NULL,selected_end_time=NULL WHERE id=$1', [polls.open.id]);
+      await db.query("UPDATE public.poll_time_options SET end_time=end_time+interval '1 minute' WHERE id=$1", [selected]);
+      await db.query("UPDATE public.polls SET status='active' WHERE id=$1", [polls.open.id]);
+    });
+  });
+
+  await t.test('a claimed capability cannot save or replay its previously committed guest result', async () => {
+    const joined = await asRole('anon', null, () => scalar('SELECT public.join_poll_as_guest($1,$2) AS result',
+      [polls.open.id, 'Will claim']));
+    const requestId = randomUUID();
+    const identity = { participant: joined.participant.id, token: joined.guest_token, requestId };
+    await asRole('anon', null, () => save(polls.open.id, [], 'Before claim', identity));
+    await asRole('authenticated', unrelated, () => scalar('SELECT public.claim_guest_participant($1,$2) AS result',
+      [identity.participant, identity.token]));
+    await asRole('anon', null, () => assert.rejects(save(polls.open.id, [], 'Before claim', identity),
+      denied('Guest access denied')));
+  });
+
   await t.test('owners can still delete closed polls; account deletion erases save results and notes', async () => {
     await asRole('authenticated', member, () => save(polls.open.id, [r(options.open[0], 'available', 'Leaver should not see this')], 'x'));
     await asRole('authenticated', leaver, () => save(polls.open.id, [r(options.open[1], 'maybe', 'Private note')], 'Private comment'));
@@ -421,6 +450,7 @@ test('F06/F10 response invariants, transactional saves and finalization on Postg
     assert.ok(await scalar('SELECT count(*)::int AS result FROM private.response_save_requests WHERE participant_id=$1',
       [members.open.id]) > 0);
     await asRole('authenticated', owner, async () => {
+      await finalize(polls.closed.id, options.closed[0]);
       assert.equal((await db.query('DELETE FROM public.polls WHERE id=$1 RETURNING id', [polls.closed.id])).rows.length, 1);
     });
     assert.equal(await scalar('SELECT count(*)::int AS result FROM public.availability_responses WHERE participant_id=$1',
