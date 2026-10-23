@@ -68,9 +68,9 @@ All are `public` invoker wrappers over `poll_private` definers with an empty `se
 
 `join_poll_as_guest` keeps F03's named arguments. The F03 three-argument function is dropped and replaced by a four-argument function whose new parameters have defaults, so existing named and positional calls still resolve. When the client supplies `guest_token`, generated with a cryptographically secure source, a retry with the same capability returns the same guest row, including after the poll closes. A concurrent request with the same capability is resolved through the token-hash uniqueness constraint. Without `guest_token`, the server generates one as in F03 and each call creates a new guest.
 
-`claim_guest_participant` converts a guest row into the caller's membership, keeping its name, comment, and responses. It locks the row and re-checks that it is still unclaimed. Afterwards, every guest command rejects that capability: get, update, rotate, and a join retry with it. Its verifier is kept so it cannot mint a new guest row. If the caller already belongs to the poll, the claim fails and the guest capability stays valid; merging a guest into an existing membership is not supported.
+`claim_guest_participant` converts a guest row into the caller's membership, keeping its name, comment, and responses. It locks the poll, participant, then credential with F03's mutation helper, and verifies the capability after any wait. Guest edits and rotations use the same locks: a claim that commits first rejects their old capability, while an edit that gets the locks first finishes before the claim. Afterwards, every guest command rejects that capability: get, update, rotate, and a join retry with it. Its verifier is kept so it cannot mint a new guest row. If the caller already belongs to the poll, the claim fails and the guest capability stays valid; merging a guest into an existing membership is not supported.
 
-`poll_private.verified_guest_participant` (F03) remains the verifier for later commands such as the F06/F10 availability save.
+`poll_private.verified_guest_participant` (F03) remains the read verifier; mutations such as the F06/F10 availability save use `poll_private.lock_guest_participant`.
 
 ## Client migration and rollout
 
