@@ -23,6 +23,17 @@ public final class PurchaseService: PurchaseServiceProtocol {
         offerings?.current
     }
 
+    private var accountGeneration: UInt64 = 0
+    private var accountUserId: String?
+
+    /// Remove entitlements immediately; failed provider logout/login cannot expose another account.
+    public func resetAccountState(userId: String?) {
+        accountUserId = userId
+        accountGeneration &+= 1
+        customerInfo = nil
+        isLoading = false
+    }
+
     private init() {
         configure()
     }
@@ -46,8 +57,11 @@ public final class PurchaseService: PurchaseServiceProtocol {
     // MARK: - User Management
 
     public func login(userId: String) async {
+        let generation = accountGeneration
+        guard accountUserId == userId else { return }
         do {
             let (customerInfo, _) = try await Purchases.shared.logIn(userId)
+            guard generation == accountGeneration, Purchases.shared.appUserID == userId else { return }
             self.customerInfo = customerInfo
             print("RevenueCat logged in: \(customerInfo.originalAppUserId)")
         } catch {
@@ -56,9 +70,12 @@ public final class PurchaseService: PurchaseServiceProtocol {
     }
 
     public func logout() async {
+        let generation = accountGeneration
         do {
-            let customerInfo = try await Purchases.shared.logOut()
-            self.customerInfo = customerInfo
+            guard accountUserId == nil else { return }
+            _ = try await Purchases.shared.logOut()
+            guard generation == accountGeneration else { return }
+            self.customerInfo = nil
         } catch {
             print("RevenueCat logout failed: \(error)")
         }
@@ -67,8 +84,13 @@ public final class PurchaseService: PurchaseServiceProtocol {
     // MARK: - Customer Info
 
     public func refreshCustomerInfo() async {
+        let generation = accountGeneration
+        guard let userId = accountUserId, Purchases.shared.appUserID == userId else { return }
         do {
-            customerInfo = try await Purchases.shared.customerInfo()
+            let info = try await Purchases.shared.customerInfo()
+            guard generation == accountGeneration,
+                  accountUserId == userId, Purchases.shared.appUserID == userId else { return }
+            customerInfo = info
         } catch {
             print("Failed to get customer info: \(error)")
         }
@@ -90,13 +112,19 @@ public final class PurchaseService: PurchaseServiceProtocol {
     // MARK: - Purchases
 
     public func purchase(package: Package) async throws -> CustomerInfo {
+        let generation = accountGeneration
+        guard let userId = accountUserId, Purchases.shared.appUserID == userId else { throw AuthError.notAuthenticated }
         let result = try await Purchases.shared.purchase(package: package)
+        guard generation == accountGeneration, accountUserId == userId, Purchases.shared.appUserID == userId else { throw CancellationError() }
         customerInfo = result.customerInfo
         return result.customerInfo
     }
 
     public func restorePurchases() async throws -> CustomerInfo {
+        let generation = accountGeneration
+        guard let userId = accountUserId, Purchases.shared.appUserID == userId else { throw AuthError.notAuthenticated }
         let customerInfo = try await Purchases.shared.restorePurchases()
+        guard generation == accountGeneration, accountUserId == userId, Purchases.shared.appUserID == userId else { throw CancellationError() }
         self.customerInfo = customerInfo
         return customerInfo
     }

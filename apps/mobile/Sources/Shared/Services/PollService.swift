@@ -2,7 +2,7 @@ import Foundation
 import Supabase
 
 // Response structure for get_user_participated_polls RPC
-private struct ParticipatedPollsResponse: Decodable {
+struct ParticipatedPollsResponse: Decodable {
     let created_polls: [Poll]
     let joined_polls: [Poll]
 }
@@ -126,14 +126,76 @@ public final class PollService: PollServiceProtocol {
     /// Time ranges keyed by poll ID — populated during loadMyPolls() via a single batch query.
     public private(set) var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
-    private let supabase = SupabaseService.shared.client
+    private var supabase: SupabaseClient { SupabaseService.shared.client }
+    private let currentUserId: @MainActor () -> UUID?
+    private let listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))?
+    private let detailLoader: (@MainActor (UUID) async throws -> PollDetail)?
+    private let statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)?
+    private var accountId: UUID?
+    private var accountGeneration: UInt64 = 0
+    private var listGeneration: UInt64 = 0
+    private var detailGenerations: [UUID: UInt64] = [:]
+    private let persistence: any PersistenceProviderProtocol
     private let timeRangeFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, h:mm a"
         return formatter
     }()
 
-    private init() {}
+    private init() {
+        self.persistence = AccountPersistence.shared
+        self.currentUserId = { AuthService.shared.currentUserId }
+        self.listLoader = nil
+        self.detailLoader = nil
+        self.statusUpdater = nil
+    }
+
+    public init(
+        persistence: any PersistenceProviderProtocol,
+        currentUserId: @escaping @MainActor () -> UUID? = { AuthService.shared.currentUserId },
+        listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))? = nil,
+        detailLoader: (@MainActor (UUID) async throws -> PollDetail)? = nil,
+        statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)? = nil
+    ) {
+        self.persistence = persistence
+        self.currentUserId = currentUserId
+        self.listLoader = listLoader
+        self.detailLoader = detailLoader
+        self.statusUpdater = statusUpdater
+    }
+
+    /// Called synchronously at every auth identity boundary, before any new account work.
+    public func accountDidChange(to userId: UUID?) {
+        guard accountId != userId else { return }
+        accountGeneration &+= 1
+        accountId = userId
+        myPolls = []
+        createdPolls = []
+        joinedPolls = []
+        pollParticipantCounts = [:]
+        pollTimeRanges = [:]
+        detailGenerations = [:]
+        isLoading = false
+        try? persistence.selectAccount(userId)
+    }
+
+    private func beginRequest() -> UInt64 {
+        accountDidChange(to: currentUserId())
+        return accountGeneration
+    }
+
+    private func isCurrent(_ generation: UInt64) -> Bool {
+        generation == accountGeneration && currentUserId() == accountId
+    }
+
+    private func invalidateDetail(_ pollId: UUID) {
+        detailGenerations[pollId, default: 0] &+= 1
+        try? persistence.invalidatePollDetail(pollId)
+    }
+
+    private func invalidateAllDetails() {
+        for poll in (try? persistence.fetchAllPolls()) ?? [] { invalidateDetail(poll.id) }
+    }
 
     // MARK: - Formatting
 
@@ -145,23 +207,52 @@ public final class PollService: PollServiceProtocol {
 
     /// Loads all of the user's polls and — in two parallel batch queries — populates
     /// `pollParticipantCounts` and `pollTimeRanges` so the list view needs no per-poll requests.
+    ///
+    /// Uses a cache-then-network strategy: cached data is returned immediately so the UI renders
+    /// without waiting for the network. A background fetch then refreshes from the server.
     public func loadMyPolls() async {
-        guard AuthService.shared.currentUser != nil else { return }
+        let generation = beginRequest()
+        listGeneration &+= 1
+        let listRequest = listGeneration
+        guard let userId = accountId else { return }
 
-        isLoading = true
-        defer { isLoading = false }
+        // 1. Return cached data immediately
+        if let cached = try? persistence.fetchListedPolls(), !cached.isEmpty {
+            createdPolls = cached.filter { $0.creatorId == userId }
+            joinedPolls = cached.filter { $0.creatorId != userId }
+            myPolls = createdPolls + joinedPolls
+            pollParticipantCounts = (try? persistence.fetchPollParticipantCounts()) ?? [:]
+            pollTimeRanges = (try? persistence.fetchPollTimeRanges()) ?? [:]
+        }
+
+        // 2. Fetch from server (only show spinner if cache was empty)
+        isLoading = myPolls.isEmpty
+        defer { if isCurrent(generation) && listRequest == listGeneration { isLoading = false } }
 
         do {
-            let response: ParticipatedPollsResponse = try await supabase
-                .rpc("get_user_participated_polls")
-                .execute()
-                .value
-
-            createdPolls = response.created_polls
-            joinedPolls = response.joined_polls
+            let result: (created: [Poll], joined: [Poll])
+            if let listLoader {
+                result = try await listLoader()
+            } else {
+                let response: ParticipatedPollsResponse = try await supabase
+                    .rpc("get_user_participated_polls")
+                    .execute()
+                    .value
+                result = (response.created_polls, response.joined_polls)
+            }
+            guard isCurrent(generation) && listRequest == listGeneration else { return }
+            createdPolls = result.created
+            joinedPolls = result.joined
             myPolls = createdPolls + joinedPolls
 
-            guard !myPolls.isEmpty else { return }
+            // A complete list also invalidates any in-flight detail for an evicted poll.
+            let accessible = Set(myPolls.map(\.id))
+            for id in detailGenerations.keys.filter({ !accessible.contains($0) }) { invalidateDetail(id) }
+            try? persistence.replacePollsSnapshot(myPolls)
+            pollParticipantCounts = [:]
+            pollTimeRanges = [:]
+
+            guard !myPolls.isEmpty, listLoader == nil else { return }
 
             let pollIds = myPolls.map { $0.id.uuidString }
 
@@ -170,6 +261,7 @@ public final class PollService: PollServiceProtocol {
             async let participantsFetch = batchLoadParticipantPollIds(pollIds: pollIds)
             let (timeOptionSummaries, participantPollIds) = await (timeOptionsFetch, participantsFetch)
 
+            guard isCurrent(generation) && listRequest == listGeneration else { return }
             // Derive time ranges (options are ordered by start_time ascending)
             var timeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
             for summary in timeOptionSummaries {
@@ -191,10 +283,22 @@ public final class PollService: PollServiceProtocol {
             }
             pollParticipantCounts = counts
 
+            // 4. Persist metadata
+            for (pollId, range) in pollTimeRanges {
+                try? persistence.savePollTimeRange(earliest: range.earliest, latest: range.latest, for: pollId)
+            }
+            for (pollId, count) in pollParticipantCounts {
+                try? persistence.savePollParticipantCount(count, for: pollId)
+            }
+
         } catch {
+            guard isCurrent(generation) && listRequest == listGeneration else { return }
             print("Failed to load polls: \(error)")
-            createdPolls = []
-            joinedPolls = []
+            // On network failure, keep cached data visible rather than clearing
+            if myPolls.isEmpty {
+                createdPolls = []
+                joinedPolls = []
+            }
         }
     }
 
@@ -228,6 +332,7 @@ public final class PollService: PollServiceProtocol {
     }
 
     public func loadPoll(id: UUID) async -> Poll? {
+        let generation = beginRequest()
         do {
             let response: Poll = try await supabase
                 .from("polls")
@@ -237,22 +342,28 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return nil }
+            try? persistence.savePolls([response])
             return response
         } catch {
+            guard isCurrent(generation) else { return nil }
             print("Failed to load poll: \(error)")
-            return nil
+            return try? persistence.fetchPoll(id: id)
         }
     }
 
     public func loadPollByCode(_ code: String) async -> PollLookupResponse? {
+        let generation = beginRequest()
         do {
             let response: [PollLookupResponse] = try await supabase
                 .rpc("get_poll_by_code", params: ["code": AnyJSON.string(code.uppercased())])
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return nil }
             return response.first
         } catch {
+            guard isCurrent(generation) else { return nil }
             print("Failed to load poll by code: \(error)")
             return nil
         }
@@ -260,28 +371,45 @@ public final class PollService: PollServiceProtocol {
 
     /// Fetches a poll with all its time options, participants (with profile names), and
     /// availability responses in a single nested Supabase query.
+    ///
+    /// Returns cached detail immediately if fresh, otherwise fetches from the server.
+    /// On network failure, falls back to stale cached data.
     public func loadPollDetail(id: UUID) async -> PollDetail? {
+        let generation = beginRequest()
+        detailGenerations[id, default: 0] &+= 1
+        let detailGeneration = detailGenerations[id, default: 0]
+        if persistence.isDetailFresh(id, maxAge: 300),
+           let cached = try? persistence.fetchPollDetail(id: id) { return cached }
         do {
-            let response: PollDetailResponse = try await supabase
-                .from("polls")
-                .select("*, poll_time_options(*), poll_participants(*, profiles(display_name), availability_responses(*))")
-                .eq("id", value: id.uuidString)
-                .single()
-                .execute()
-                .value
-
-            let participants = response.pollParticipants.map { $0.participant }
-            let responses = response.pollParticipants.flatMap { $0.availabilityResponses }
-
-            return PollDetail(
-                poll: response.poll,
-                timeOptions: response.pollTimeOptions,
-                participants: participants,
-                responses: responses
-            )
+            let detail: PollDetail
+            if let detailLoader {
+                detail = try await detailLoader(id)
+            } else {
+                let response: PollDetailResponse = try await supabase
+                    .from("polls")
+                    .select("*, poll_time_options(*), poll_participants(*, profiles(display_name), availability_responses(*))")
+                    .eq("id", value: id.uuidString)
+                    .single()
+                    .execute()
+                    .value
+                detail = PollDetail(
+                    poll: response.poll, timeOptions: response.pollTimeOptions,
+                    participants: response.pollParticipants.map { $0.participant },
+                    responses: response.pollParticipants.flatMap { $0.availabilityResponses }
+                )
+            }
+            guard isCurrent(generation), detailGeneration == detailGenerations[id, default: 0] else { return nil }
+            try? persistence.savePollDetail(detail)
+            return detail
         } catch {
-            print("Failed to load poll detail: \(error)")
-            return nil
+            guard isCurrent(generation), detailGeneration == detailGenerations[id, default: 0] else { return nil }
+            // A successful complete list has already evicted inaccessible/deleted polls.
+            // Only transport failures use stale data; an authoritative not-found does not.
+            if let error = error as? PostgrestError, ["PGRST116", "42501"].contains(error.code ?? "") {
+                try? persistence.deletePoll(id: id)
+                return nil
+            }
+            return try? persistence.fetchPollDetail(id: id)
         }
     }
 
@@ -294,7 +422,8 @@ public final class PollService: PollServiceProtocol {
         timezone: String = TimeZone.current.identifier,
         closesAt: Date? = nil
     ) async throws -> Poll {
-        guard let userId = AuthService.shared.currentUser?.id else {
+        let generation = beginRequest()
+        guard let userId = accountId else {
             throw PollError.notAuthenticated
         }
 
@@ -319,6 +448,8 @@ public final class PollService: PollServiceProtocol {
             .execute()
             .value
 
+        guard isCurrent(generation) else { throw CancellationError() }
+        try? persistence.saveListedPolls([response])
         myPolls.insert(response, at: 0)
         return response
     }
@@ -326,6 +457,7 @@ public final class PollService: PollServiceProtocol {
     // MARK: - Time Options
 
     public func loadTimeOptions(pollId: UUID) async -> [PollTimeOption] {
+        let generation = beginRequest()
         do {
             let response: [PollTimeOption] = try await supabase
                 .from("poll_time_options")
@@ -335,14 +467,18 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return [] }
+            try? persistence.saveTimeOptions(response, for: pollId)
             return response
         } catch {
+            guard isCurrent(generation) else { return [] }
             print("Failed to load time options: \(error)")
-            return []
+            return (try? persistence.fetchTimeOptions(for: pollId)) ?? []
         }
     }
 
     public func addTimeOptions(pollId: UUID, options: [(start: Date, end: Date, isAllDay: Bool)]) async throws -> [PollTimeOption] {
+        let generation = beginRequest()
         let formatter = ISO8601DateFormatter()
 
         let insertData: [[String: AnyJSON]] = options.map { option in
@@ -361,18 +497,27 @@ public final class PollService: PollServiceProtocol {
             .execute()
             .value
 
+        guard isCurrent(generation) else { throw CancellationError() }
+        invalidateDetail(pollId)
         return response
     }
 
     // MARK: - Poll Status
 
     public func updatePollStatus(pollId: UUID, status: PollStatus) async throws {
-        try await supabase
-            .from("polls")
-            .update(["status": AnyJSON.string(status.rawValue)])
-            .eq("id", value: pollId.uuidString)
-            .execute()
+        let generation = beginRequest()
+        if let statusUpdater {
+            try await statusUpdater(pollId, status)
+        } else {
+            try await supabase
+                .from("polls")
+                .update(["status": AnyJSON.string(status.rawValue)])
+                .eq("id", value: pollId.uuidString)
+                .execute()
+        }
 
+        guard isCurrent(generation) else { throw CancellationError() }
+        invalidateDetail(pollId)
         // Update local state
         if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
             myPolls[index].status = status
@@ -380,6 +525,7 @@ public final class PollService: PollServiceProtocol {
     }
 
     public func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws {
+        let generation = beginRequest()
         let formatter = ISO8601DateFormatter()
 
         try await supabase
@@ -391,6 +537,8 @@ public final class PollService: PollServiceProtocol {
             .eq("id", value: pollId.uuidString)
             .execute()
 
+        guard isCurrent(generation) else { throw CancellationError() }
+        invalidateDetail(pollId)
         // Update local state
         if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
             myPolls[index].selectedStartTime = startTime
@@ -401,6 +549,7 @@ public final class PollService: PollServiceProtocol {
     // MARK: - Participants
 
     public func loadParticipants(pollId: UUID) async -> [PollParticipant] {
+        let generation = beginRequest()
         do {
             let response: [PollParticipant] = try await supabase
                 .from("poll_participants")
@@ -409,19 +558,23 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return [] }
+            try? persistence.saveParticipants(response, for: pollId)
             return response
         } catch {
+            guard isCurrent(generation) else { return [] }
             print("Failed to load participants: \(error)")
-            return []
+            return (try? persistence.fetchParticipants(for: pollId)) ?? []
         }
     }
 
     public func joinPoll(pollId: UUID, anonymousName: String? = nil) async throws -> PollParticipant {
+        let generation = beginRequest()
         var data: [String: AnyJSON] = [
             "poll_id": .string(pollId.uuidString)
         ]
 
-        if let userId = AuthService.shared.currentUser?.id {
+        if let userId = accountId {
             data["user_id"] = .string(userId.uuidString)
         } else if let name = anonymousName {
             data["anonymous_name"] = .string(name)
@@ -435,12 +588,15 @@ public final class PollService: PollServiceProtocol {
             .execute()
             .value
 
+        guard isCurrent(generation) else { throw CancellationError() }
+        invalidateDetail(pollId)
         return response
     }
 
     // MARK: - Availability Responses
 
     public func loadResponses(participantIds: [UUID]) async -> [AvailabilityResponse] {
+        let generation = beginRequest()
         guard !participantIds.isEmpty else { return [] }
 
         do {
@@ -452,10 +608,13 @@ public final class PollService: PollServiceProtocol {
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return [] }
+            try? persistence.replaceResponsesSnapshot(response, for: participantIds)
             return response
         } catch {
+            guard isCurrent(generation) else { return [] }
             print("Failed to load responses: \(error)")
-            return []
+            return (try? persistence.fetchResponses(for: participantIds)) ?? []
         }
     }
 
@@ -465,6 +624,7 @@ public final class PollService: PollServiceProtocol {
         status: AvailabilityStatus,
         note: String? = nil
     ) async throws {
+        let generation = beginRequest()
         let data: [String: AnyJSON] = [
             "participant_id": .string(participantId.uuidString),
             "time_option_id": .string(timeOptionId.uuidString),
@@ -476,9 +636,12 @@ public final class PollService: PollServiceProtocol {
             .from("availability_responses")
             .upsert(data, onConflict: "participant_id,time_option_id")
             .execute()
+        guard isCurrent(generation) else { throw CancellationError() }
+        invalidateAllDetails()
     }
 
     public func updateParticipantComment(participantId: UUID, comment: String?) async throws {
+        let generation = beginRequest()
         let data: [String: AnyJSON] = [
             "comment": comment.map { .string($0) } ?? .null
         ]
@@ -488,17 +651,21 @@ public final class PollService: PollServiceProtocol {
             .update(data)
             .eq("id", value: participantId.uuidString)
             .execute()
+        guard isCurrent(generation) else { throw CancellationError() }
+        invalidateAllDetails()
     }
 
     // MARK: - Subscription Checks
 
     public func canCreatePoll() async -> Bool {
+        let generation = beginRequest()
         do {
             let result: Bool = try await supabase
                 .rpc("can_create_poll")
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return false }
             return result
         } catch {
             print("Failed to check can_create_poll: \(error)")
@@ -507,12 +674,14 @@ public final class PollService: PollServiceProtocol {
     }
 
     public func countActivePolls() async -> Int {
+        let generation = beginRequest()
         do {
             let result: Int = try await supabase
                 .rpc("count_active_polls")
                 .execute()
                 .value
 
+            guard isCurrent(generation) else { return 0 }
             return result
         } catch {
             print("Failed to count active polls: \(error)")
