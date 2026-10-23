@@ -391,8 +391,9 @@ test('F06/F10 response invariants, transactional saves and finalization on Postg
   });
 
   await t.test('direct finalization accepts only a matching option pair and normalizes precision', async () => {
-    const [o1] = options.open;
-    const option = (await db.query('SELECT start_time,end_time FROM public.poll_time_options WHERE id=$1', [o1])).rows[0];
+    // The fractional-second option; options.open is sorted by random UUID, so pick it by time.
+    const option = (await db.query(`SELECT start_time,end_time FROM public.poll_time_options
+      WHERE poll_id=$1 ORDER BY start_time LIMIT 1`, [polls.open.id])).rows[0];
     const isoSeconds = date => `${date.toISOString().slice(0, 19)}Z`;
     await asRole('authenticated', owner, async () => {
       // Installed iOS clients send ISO 8601 without fractional seconds.
