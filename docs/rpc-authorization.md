@@ -90,7 +90,7 @@ The historical-schema fixture includes one unredeemed pass and one redeemed pass
 
 Local validation on October 22, 2026: 17 RPC tests, 12 calendar database tests, and 23 calendar Edge Function tests passed. Web type checking passed with zero errors and seven existing warnings; the production build passed with the existing accessibility, chunk-size, and deployment-adapter notices. `git diff --check` passed. No simulator, emulator, local server, or hosted resource was accessed.
 
-Before a hosted rollout, the integration owner must replay the combined F02/F08 migration order and run both branches' tests. Apply this additive migration through the deployment process, keep `poll_private` out of exposed schemas, and verify live effective grants including any custom role inheritance. Check installed-client list, eligibility, invitation, and owner/member closed-poll reads. No hosted migration, live role/grant inspection, PostgREST request, or Supabase advisor run is established by the offline suite.
+F02 and F08 were merged into `main` on October 22, 2026 (#59, #60); the combined migration order was replayed with 44 database and 38 Edge tests passing before merge. Merging did not deploy anything. Before a hosted rollout, apply this additive migration through the deployment process, keep `poll_private` out of exposed schemas, and verify live effective grants including any custom role inheritance. Check installed-client list, eligibility, invitation, and owner/member closed-poll reads. No hosted migration, live role/grant inspection, PostgREST request, or Supabase advisor run is established by the offline suite.
 
 The remaining access work must retain these checks while replacing permissive policies:
 
