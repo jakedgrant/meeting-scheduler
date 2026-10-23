@@ -45,7 +45,7 @@ supabase/.temp/
 xcuserdata/
 DerivedData/
 .build/
-Packages/
+/apps/mobile/Packages/
 *.pbxuser
 *.mode1v3
 *.mode2v3
@@ -64,6 +64,7 @@ Pods/
 *.ap_
 *.aab
 .gradle/
+.kotlin/
 local.properties
 *.iml
 .cxx/

@@ -56,6 +56,9 @@ fun PollDetailView(
     onNavigateToResponses: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
+    val accountKey = pollService.creationAccountKey
+    var joinError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
+    var isJoining by remember(pollId, accountKey) { mutableStateOf(false) }
     val userId = authService.currentUser?.id
     var poll by remember(pollId, userId) { mutableStateOf<Poll?>(null) }
     var timeOptions by remember(pollId, userId) { mutableStateOf<List<PollTimeOption>>(emptyList()) }
@@ -410,20 +413,31 @@ fun PollDetailView(
                         Button(
                             onClick = {
                                 scope.launch {
+                                    isJoining = true
+                                    joinError = null
                                     try {
                                         val participant = pollService.joinPoll(pollId)
+                                        if (pollService.creationAccountKey != accountKey) return@launch
                                         myParticipant = participant
-                                        participants = participants + participant
+                                        participants = participants.filterNot { it.id == participant.id } + participant
                                         loadSavedAvailability()
-                                    } catch (e: Exception) {
-                                        println("Failed to join poll: ${e.message}")
+                                    } catch (error: Exception) {
+                                        if (error is CancellationException) throw error
+                                        if (pollService.creationAccountKey == accountKey) {
+                                            joinError = if (error is PollCapacityReached) error.message
+                                                else "Joining could not be confirmed. Tap Join This Poll to retry safely."
+                                        }
+                                    } finally {
+                                        if (pollService.creationAccountKey == accountKey) isJoining = false
                                     }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isJoining
                         ) {
-                            Text("Join This Poll")
+                            Text(if (isJoining) "Joining…" else "Join This Poll")
                         }
+                        joinError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     }
                 }
 

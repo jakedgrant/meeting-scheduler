@@ -63,14 +63,7 @@ fun PollListView(
     }
 
     fun handleCreatePoll() {
-        scope.launch {
-            val canCreate = pollService.canCreatePoll()
-            if (canCreate) {
-                onNavigateToCreatePoll()
-            } else {
-                onNavigateToPaywall()
-            }
-        }
+        onNavigateToCreatePoll()
     }
 
     fun handleJoinByCode() {

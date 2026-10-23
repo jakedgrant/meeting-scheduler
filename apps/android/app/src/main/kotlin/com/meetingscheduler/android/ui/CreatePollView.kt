@@ -15,6 +15,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
+import com.meetingscheduler.android.models.*
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
@@ -23,6 +28,7 @@ import java.util.*
 private val currentSystemTime: Instant
     get() = Instant.fromEpochMilliseconds(System.currentTimeMillis())
 
+@Serializable
 data class TimeOption(
     val id: String = UUID.randomUUID().toString(),
     var date: LocalDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date,
@@ -30,28 +36,76 @@ data class TimeOption(
     var endTime: LocalTime = LocalTime(10, 0)
 )
 
+@Serializable
+private data class CreationFormDraft(
+    val title: String = "", val description: String = "", val location: String = "",
+    val hasDueDate: Boolean = false, val dueDate: LocalDate? = null,
+    val isAllDay: Boolean = false, val useDateRange: Boolean = false,
+    val timeOptions: List<TimeOption> = listOf(TimeOption()),
+    val rangeStartDate: LocalDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date,
+    val rangeEndDate: LocalDate = rangeStartDate,
+    val rangeStartTime: LocalTime = LocalTime(9, 0), val rangeEndTime: LocalTime = LocalTime(10, 0),
+    val useEventPass: Boolean = false,
+)
+
+@Composable
+fun CreatePollView(pollService: PollService, onDismiss: () -> Unit) {
+    key(pollService.creationAccountKey) { CreationForm(pollService, onDismiss) }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CreatePollView(
+private fun CreationForm(
     pollService: PollService,
     onDismiss: () -> Unit
 ) {
-    var title by remember { mutableStateOf("") }
-    var description by remember { mutableStateOf("") }
-    var location by remember { mutableStateOf("") }
-    var hasDueDate by remember { mutableStateOf(false) }
-    var dueDate by remember { mutableStateOf<LocalDate?>(null) }
-    var isAllDay by remember { mutableStateOf(false) }
-    var useDateRange by remember { mutableStateOf(false) }
-    var timeOptions by remember { mutableStateOf(listOf(TimeOption())) }
+    val accountId = pollService.creationAccountId
+    val accountKey = pollService.creationAccountKey
+    val preferences = LocalContext.current.applicationContext.getSharedPreferences("poll_creation_v1", 0)
+    val json = remember { Json { ignoreUnknownKeys = true; encodeDefaults = true } }
+    val draftKey = "draft:$accountId"
+    val pendingKey = "pending:$accountId"
+    val restored = remember { runCatching {
+        Pair(preferences.getString(draftKey, null)?.let { json.decodeFromString<CreationFormDraft>(it) } ?: CreationFormDraft(),
+            preferences.getString(pendingKey, null)?.let { json.decodeFromString<PollCreationRequest>(it) })
+    } }
+    if (restored.isFailure) {
+        Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Your saved creation could not be read. Check your poll list before starting another poll.")
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+        return
+    }
+    val storedDraft = restored.getOrThrow().first
+    val editor = remember {
+        PollCreationSession(
+            initial = restored.getOrThrow().second,
+            persist = { request ->
+                val edit = preferences.edit()
+                if (request == null) edit.remove(pendingKey) else edit.putString(pendingKey, json.encodeToString(request))
+                if (!edit.commit()) throw CreationStorageFailure()
+            },
+        )
+    }
+    var completed by remember { mutableStateOf(false) }
+    var pending by remember { mutableStateOf(editor.pending) }
+    var useEventPass by remember { mutableStateOf(storedDraft.useEventPass) }
+    var title by remember { mutableStateOf(storedDraft.title) }
+    var description by remember { mutableStateOf(storedDraft.description) }
+    var location by remember { mutableStateOf(storedDraft.location) }
+    var hasDueDate by remember { mutableStateOf(storedDraft.hasDueDate) }
+    var dueDate by remember { mutableStateOf<LocalDate?>(storedDraft.dueDate) }
+    var isAllDay by remember { mutableStateOf(storedDraft.isAllDay) }
+    var useDateRange by remember { mutableStateOf(storedDraft.useDateRange) }
+    var timeOptions by remember { mutableStateOf(storedDraft.timeOptions) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     // Date range fields
-    var rangeStartDate by remember { mutableStateOf(currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date) }
-    var rangeEndDate by remember { mutableStateOf(currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date) }
-    var rangeStartTime by remember { mutableStateOf(LocalTime(9, 0)) }
-    var rangeEndTime by remember { mutableStateOf(LocalTime(10, 0)) }
+    var rangeStartDate by remember { mutableStateOf(storedDraft.rangeStartDate) }
+    var rangeEndDate by remember { mutableStateOf(storedDraft.rangeEndDate) }
+    var rangeStartTime by remember { mutableStateOf(storedDraft.rangeStartTime) }
+    var rangeEndTime by remember { mutableStateOf(storedDraft.rangeEndTime) }
 
     // Picker dialog state for time options
     var showDatePicker by remember { mutableStateOf(false) }
@@ -69,6 +123,64 @@ fun CreatePollView(
     var showDueDatePicker by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
+
+    val formDraft = CreationFormDraft(title, description, location, hasDueDate, dueDate, isAllDay, useDateRange,
+        timeOptions, rangeStartDate, rangeEndDate, rangeStartTime, rangeEndTime, useEventPass)
+    SideEffect {
+        if (accountId != null && !isLoading && !completed) preferences.edit().putString(draftKey, json.encodeToString(formDraft)).apply()
+    }
+
+    fun submitCreation() {
+        scope.launch {
+            isLoading = true
+            errorMessage = null
+            try {
+                val payload = editor.pending?.payload ?: PollCreationPayload(
+                    title = title,
+                    description = description.ifBlank { null },
+                    location = location.ifBlank { null },
+                    timezone = TimeZone.currentSystemDefault().id,
+                    closesAt = if (hasDueDate) dueDate?.atStartOfDayIn(TimeZone.currentSystemDefault()) else null,
+                    timeOptions = timeOptions.map { option ->
+                        val start = option.date.atTime(if (isAllDay) LocalTime(0, 0) else option.startTime).toInstant(TimeZone.currentSystemDefault())
+                        val end = option.date.atTime(if (isAllDay) LocalTime(23, 59) else option.endTime).toInstant(TimeZone.currentSystemDefault())
+                        require(end > start) { "End time must be after start time for every option." }
+                        CreationTimeOption(start, end, isAllDay)
+                    },
+                    useEventPass = useEventPass,
+                )
+                require(payload.title.isNotBlank() && payload.timeOptions.isNotEmpty()) { "Enter a title and at least one time option." }
+                val result = editor.submit(payload, send = pollService::createPoll,
+                    isCurrent = { pollService.creationAccountKey == accountKey })
+                if (result != null) {
+                    completed = true
+                    preferences.edit().remove(draftKey).commit()
+                    onDismiss()
+                }
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (pollService.creationAccountKey == accountKey) {
+                    errorMessage = if (error is CreationRejected || error is IllegalArgumentException || error is CreationStorageFailure) error.message
+                        else "Creation could not be confirmed. Your draft is saved. Retry to recover the original poll."
+                }
+            } finally {
+                pending = editor.pending
+                isLoading = false
+            }
+        }
+    }
+
+    if (pending != null) {
+        Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Confirm your saved creation", style = MaterialTheme.typography.headlineSmall)
+            Text(pending!!.payload.title)
+            Text("The previous request may have succeeded. Retry this saved operation before editing or creating another poll.")
+            errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { submitCreation() }, enabled = !isLoading) { Text(if (isLoading) "Checking…" else "Retry saved creation") }
+            TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Close") }
+        }
+        return
+    }
 
     // Date picker dialog
     if (showDatePicker && editingOptionIndex >= 0 && editingOptionIndex < timeOptions.size) {
@@ -671,54 +783,21 @@ fun CreatePollView(
                 }
             }
 
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = useEventPass, onCheckedChange = { useEventPass = it }, enabled = !isLoading)
+                    Text("Use an event pass for this poll")
+                }
+                Text("Uses your oldest eligible pass for a premium poll and keeps your free slot. An active subscription takes priority and keeps your pass.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+
             // Create Poll Button
             item {
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = {
-                        scope.launch {
-                            isLoading = true
-                            errorMessage = null
-                            try {
-                                val closesAt = if (hasDueDate && dueDate != null) {
-                                    dueDate!!.atStartOfDayIn(TimeZone.currentSystemDefault())
-                                } else null
-
-                                val poll = pollService.createPoll(
-                                    title = title,
-                                    description = description.ifBlank { null },
-                                    location = location.ifBlank { null },
-                                    closesAt = closesAt
-                                )
-
-                                val options = timeOptions.map { option ->
-                                    val start: Instant
-                                    val end: Instant
-
-                                    if (isAllDay) {
-                                        start = option.date.atTime(0, 0).toInstant(TimeZone.currentSystemDefault())
-                                        end = option.date.atTime(23, 59).toInstant(TimeZone.currentSystemDefault())
-                                    } else {
-                                        start = option.date.atTime(option.startTime).toInstant(TimeZone.currentSystemDefault())
-                                        end = option.date.atTime(option.endTime).toInstant(TimeZone.currentSystemDefault())
-
-                                        if (end <= start) {
-                                            errorMessage = "End time must be after start time for all time options"
-                                            isLoading = false
-                                            return@launch
-                                        }
-                                    }
-
-                                    PollService.TimeOptionInput(start, end, isAllDay)
-                                }
-
-                                pollService.addTimeOptions(poll.id, options)
-                                onDismiss()
-                            } catch (e: Exception) {
-                                errorMessage = e.message
-                                isLoading = false
-                            }
-                        }
+                        submitCreation()
                     },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = title.isNotBlank() && !isLoading

@@ -36,6 +36,17 @@ class AuthService(
 ) {
     private val supabase = SupabaseService.client
 
+    var identityGeneration by mutableStateOf(0L)
+        private set
+    private var observedIdentity: String? = null
+
+    private fun observeIdentity(user: UserInfo?) {
+        if (observedIdentity != user?.id) {
+            observedIdentity = user?.id
+            identityGeneration += 1
+        }
+    }
+
     var currentUser by mutableStateOf<UserInfo?>(null)
         private set
     var currentSession by mutableStateOf<UserSession?>(null)
@@ -58,6 +69,7 @@ class AuthService(
             try {
                 val session = supabase.auth.currentSessionOrNull()
                 currentSession = session
+                observeIdentity(session?.user)
                 currentUser = session?.user
                 currentUser?.id?.let { userId ->
                     loadProfile(userId)
@@ -80,6 +92,7 @@ class AuthService(
         when (status) {
             is io.github.jan.supabase.auth.status.SessionStatus.Authenticated -> {
                 currentSession = supabase.auth.currentSessionOrNull()
+                observeIdentity(supabase.auth.currentUserOrNull())
                 currentUser = supabase.auth.currentUserOrNull()
                 currentUser?.id?.let { userId ->
                     loadProfile(userId)
@@ -88,6 +101,7 @@ class AuthService(
             }
             is io.github.jan.supabase.auth.status.SessionStatus.NotAuthenticated -> {
                 currentSession = null
+                observeIdentity(null)
                 currentUser = null
                 profile = null
                 billingIdentity?.logout()
