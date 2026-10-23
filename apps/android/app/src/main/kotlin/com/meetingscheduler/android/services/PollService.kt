@@ -203,28 +203,13 @@ class PollService(
         }
     }
 
-    suspend fun setSelectedFinalDate(pollId: String, startTime: Instant, endTime: Instant) {
-        val update = buildJsonObject {
-            put("selected_start_time", startTime.toString())
-            put("selected_end_time", endTime.toString())
-        }
-
-        supabase
-            .from("polls")
-            .update(update) {
-                filter {
-                    eq("id", pollId)
-                }
-            }
-
-        // Update local state
-        myPolls = myPolls.map { poll ->
-            if (poll.id == pollId) {
-                poll.copy(selectedStartTime = startTime, selectedEndTime = endTime)
-            } else {
-                poll
-            }
-        }
+    suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll {
+        val saved = supabase.postgrest.rpc("finalize_poll", buildJsonObject {
+            put("poll_uuid", pollId)
+            put("time_option_uuid", timeOptionId)
+        }).decodeAs<Poll>()
+        myPolls = myPolls.map { if (it.id == pollId) saved else it }
+        return saved
     }
 
     // MARK: - Participants
@@ -281,49 +266,34 @@ class PollService(
         }
     }
 
-    suspend fun saveResponses(
-        participantId: String,
-        responses: List<ResponseInput>
-    ) {
-        val insertData = responses.map { response ->
-            buildJsonObject {
-                put("participant_id", participantId)
-                put("time_option_id", response.timeOptionId)
-                put("status", response.status.name.lowercase())
-                response.note?.let { put("note", it) }
-            }
-        }
+    suspend fun getAvailability(pollId: String): AvailabilitySnapshot =
+        supabase.postgrest.rpc("get_availability", buildJsonObject {
+            put("poll_uuid", pollId)
+        }).decodeAs<AvailabilitySnapshot>()
 
-        supabase
-            .from("availability_responses")
-            .upsert(insertData) {
-                onConflict = "participant_id,time_option_id"
-            }
-    }
-
-    suspend fun updateParticipantComment(participantId: String, comment: String?) {
-        val update = buildJsonObject {
-            if (comment != null) {
-                put("comment", comment)
-            } else {
-                put("comment", null as String?)
-            }
-        }
-
-        supabase
-            .from("poll_participants")
-            .update(update) {
-                filter {
-                    eq("id", participantId)
+    suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot {
+        val params = buildJsonObject {
+            put("poll_uuid", pollId)
+            put("request_id", request.requestId)
+            put("expected_version", request.expectedVersion)
+            put("comment", request.draft.comment)
+            putJsonArray("responses") {
+                request.draft.responses.toSortedMap().forEach { (optionId, status) ->
+                    add(buildJsonObject {
+                        put("time_option_id", optionId)
+                        put("status", status.name.lowercase())
+                        put("note", null as String?)
+                    })
                 }
             }
+        }
+        return try {
+            supabase.postgrest.rpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
+        } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
+            if (error.code == "PT409") throw AvailabilityVersionConflict()
+            throw error
+        }
     }
-
-    data class ResponseInput(
-        val timeOptionId: String,
-        val status: AvailabilityStatus,
-        val note: String?
-    )
 
     // MARK: - Poll Limits
 
