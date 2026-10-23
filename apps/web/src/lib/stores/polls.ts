@@ -17,6 +17,7 @@ import {
   type GuestCapability
 } from '$lib/guest-capability'
 import type { AvailabilitySave, AvailabilitySnapshot } from '$lib/availability-editor'
+import type { CreationOperation, CreationResult } from '$lib/poll-creation'
 
 // Poll stores
 export const polls = writable<Poll[]>([])
@@ -321,61 +322,28 @@ async function loadPollResponses(pollId: string) {
   }
 }
 
-// Create a new poll
-export async function createPoll(poll: {
-  title: string
-  description?: string
-  location?: string
-  timezone?: string
-  closesAt?: string
-}): Promise<Poll | null> {
+// The server validates and commits options, quota and any pass in one transaction.
+export async function createPoll(operation: CreationOperation): Promise<CreationResult> {
   const currentUser = get(user)
-  if (!currentUser) return null
-
-  const { data, error } = await supabase
-    .from('polls')
-    .insert({
-      creator_id: currentUser.id,
-      title: poll.title,
-      description: poll.description,
-      location: poll.location,
-      timezone: poll.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
-      closes_at: poll.closesAt,
-      status: 'active'
-    })
-    .select()
-    .single()
-
-  if (error) {
-    console.error('Failed to create poll:', error)
-    throw error
+  if (!currentUser) throw { code: '42501' }
+  const identity = identityGeneration
+  const { data, error } = await supabase.rpc('create_poll', operation)
+  if (identity !== identityGeneration || get(user)?.id !== currentUser.id) throw { code: 'ACCOUNT_CHANGED' }
+  if (error) throw error
+  const result = data as CreationResult
+  if (!result?.poll?.id || result.poll.creator_id !== currentUser.id
+      || typeof result.poll.is_premium !== 'boolean' || !Number.isSafeInteger(result.poll.max_participants)
+      || result.poll.max_participants < 1 || !Array.isArray(result.time_options)
+      || result.time_options.length !== operation.payload.time_options.length
+      || result.time_options.some(option => !option.id || option.poll_id !== result.poll.id)) {
+    throw new Error('Creation result could not be confirmed')
   }
-
-  return data as Poll
-}
-
-// Add time options to a poll
-export async function addTimeOptions(pollId: string, options: Array<{
-  start_time: string
-  end_time: string
-  is_all_day?: boolean
-}>): Promise<PollTimeOption[]> {
-  const { data, error } = await supabase
-    .from('poll_time_options')
-    .insert(options.map(opt => ({
-      poll_id: pollId,
-      start_time: opt.start_time,
-      end_time: opt.end_time,
-      is_all_day: opt.is_all_day ?? false
-    })))
-    .select()
-
-  if (error) {
-    console.error('Failed to add time options:', error)
-    throw error
-  }
-
-  return data as PollTimeOption[]
+  // Apply returned caps and premium state, never a local entitlement estimate.
+  createdPolls.update(rows => [result.poll, ...rows.filter(row => row.id !== result.poll.id)])
+  polls.update(rows => [result.poll, ...rows.filter(row => row.id !== result.poll.id)])
+  currentPoll.set(result.poll)
+  currentPollTimeOptions.set(result.time_options)
+  return result
 }
 
 // Update poll status

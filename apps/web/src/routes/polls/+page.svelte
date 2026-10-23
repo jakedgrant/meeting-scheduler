@@ -3,7 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { user, profile, signOut } from '$lib/stores/auth';
 	import { polls, createdPolls, joinedPolls, pollsLoading, loadMyPolls, loadPollByCode } from '$lib/stores/polls';
-	import { subscription, loadSubscription, getMaxActivePolls } from '$lib/stores/subscription';
+	import { loadSubscription } from '$lib/stores/subscription';
 	import { supabase, type PollTimeOption } from '$lib/supabase';
 
 	let joinCode = $state('');
@@ -123,11 +123,6 @@
 		}
 	}
 
-	function canCreatePoll(): boolean {
-		const maxPolls = getMaxActivePolls($subscription);
-		const activePolls = $polls.filter((p) => p.status === 'draft' || p.status === 'active').length;
-		return activePolls < maxPolls;
-	}
 
 	function formatDate(dateString: string): string {
 		return new Date(dateString).toLocaleDateString();
@@ -177,13 +172,7 @@
 	<main>
 		<div class="page-header">
 			<h1>My Polls</h1>
-			{#if canCreatePoll()}
-				<a href="/polls/new" class="btn primary">Create Poll</a>
-			{:else}
-				<button class="btn secondary" disabled title="Upgrade to create more polls">
-					Upgrade to Pro
-				</button>
-			{/if}
+			<a href="/polls/new" class="btn primary">Create Poll</a>
 		</div>
 
 		<div class="join-by-code">
