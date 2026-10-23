@@ -36,7 +36,7 @@ private struct PurchaseServiceKey: EnvironmentKey {
 
 private struct PersistenceProviderKey: EnvironmentKey {
     static var defaultValue: any PersistenceProviderProtocol {
-        MainActor.assumeIsolated { SwiftDataPersistenceProvider() }
+        MainActor.assumeIsolated { AccountPersistence.shared }
     }
 }
 

@@ -3,28 +3,76 @@ import SwiftData
 
 @MainActor
 public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
-    private let modelContainer: ModelContainer
-    private let modelContext: ModelContext
+    private var modelContainer: ModelContainer
+    private var modelContext: ModelContext
+    private let now: @MainActor () -> Date
+    private let inMemory: Bool
+    private var accountId: UUID?
+    private var reconcilingSnapshot = false
 
     // In-memory metadata not worth persisting as @Model objects
     private var participantCounts: [UUID: Int] = [:]
     private var timeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
-    public init(inMemory: Bool = false) {
-        let schema = Schema([
-            PersistedPoll.self,
-            PersistedTimeOption.self,
-            PersistedParticipant.self,
-            PersistedAvailabilityResponse.self,
-            PersistedProfile.self,
-        ])
-        let config = ModelConfiguration(isStoredInMemoryOnly: inMemory)
+    public init(inMemory: Bool = false, now: @escaping @MainActor () -> Date = { Date() }) {
+        self.now = now
+        self.inMemory = inMemory
         do {
-            self.modelContainer = try ModelContainer(for: schema, configurations: [config])
+            let container = try Self.makeContainer(accountId: nil, inMemory: true)
+            self.modelContainer = container
+            self.modelContext = container.mainContext
         } catch {
-            fatalError("Failed to create ModelContainer: \(error)")
+            fatalError("Failed to create private cache: \(error)")
         }
-        self.modelContext = modelContainer.mainContext
+    }
+
+    private static func makeContainer(accountId: UUID?, inMemory: Bool) throws -> ModelContainer {
+        let schema = Schema([
+            PersistedPoll.self, PersistedTimeOption.self, PersistedParticipant.self,
+            PersistedAvailabilityResponse.self, PersistedProfile.self,
+        ])
+        // The old unscoped default.store is intentionally never opened.
+        let name = accountId.map { "account-\($0.uuidString)" } ?? "signed-out"
+        let config = ModelConfiguration(name, schema: schema, isStoredInMemoryOnly: inMemory || accountId == nil)
+        return try ModelContainer(for: schema, configurations: [config])
+    }
+
+    public func selectAccount(_ accountId: UUID?) throws {
+        guard self.accountId != accountId else { return }
+        // Clear before switching; failure cannot expose the old context to the new identity.
+        defer { participantCounts.removeAll(); timeRanges.removeAll() }
+        do {
+            try clearAll()
+            let container = try Self.makeContainer(accountId: accountId, inMemory: inMemory)
+            modelContainer = container
+            modelContext = container.mainContext
+            self.accountId = accountId
+        } catch {
+            let empty = try Self.makeContainer(accountId: nil, inMemory: true)
+            modelContainer = empty
+            modelContext = empty.mainContext
+            self.accountId = nil
+            throw error
+        }
+    }
+
+    private func saveChanges() throws {
+        if !reconcilingSnapshot { try modelContext.save() }
+    }
+
+    public func replacePollsSnapshot(_ polls: [Poll]) throws {
+        let ids = Set(polls.map(\.id))
+        try modelContext.transaction {
+            reconcilingSnapshot = true
+            defer { reconcilingSnapshot = false }
+            for existing in try modelContext.fetch(FetchDescriptor<PersistedPoll>()) where !ids.contains(existing.id) {
+                modelContext.delete(existing)
+                participantCounts.removeValue(forKey: existing.id)
+                timeRanges.removeValue(forKey: existing.id)
+            }
+            try savePolls(polls)
+            try modelContext.save()
+        }
     }
 
     // MARK: - Polls
@@ -42,7 +90,7 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
                 modelContext.insert(PersistedPoll.from(poll))
             }
         }
-        try modelContext.save()
+        try saveChanges()
     }
 
     public func fetchAllPolls() throws -> [Poll] {
@@ -65,21 +113,39 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         )
         if let existing = try modelContext.fetch(descriptor).first {
             modelContext.delete(existing)
-            try modelContext.save()
+            try saveChanges()
         }
     }
 
     // MARK: - Poll Detail
 
     public func savePollDetail(_ detail: PollDetail) throws {
-        try savePolls([detail.poll])
-        try saveTimeOptions(detail.timeOptions, for: detail.poll.id)
-        try saveParticipants(detail.participants, for: detail.poll.id)
-        try saveResponses(detail.responses)
+        do {
+            try modelContext.transaction {
+                reconcilingSnapshot = true
+                defer { reconcilingSnapshot = false }
+                // These collections are complete. Replace them, including missing rows,
+                // in one transaction; partial child reads continue to use upserts below.
+                try invalidatePollDetail(detail.poll.id)
+                try savePolls([detail.poll])
+                try saveTimeOptions(detail.timeOptions, for: detail.poll.id)
+                try saveParticipants(detail.participants, for: detail.poll.id)
+                try saveResponses(detail.responses)
+                let id = detail.poll.id
+                let poll = try modelContext.fetch(FetchDescriptor<PersistedPoll>(predicate: #Predicate { $0.id == id })).first
+                poll?.detailSyncedAt = now()
+                try modelContext.save()
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     public func fetchPollDetail(id: UUID) throws -> PollDetail? {
-        guard let poll = try fetchPoll(id: id) else { return nil }
+        let persisted = try modelContext.fetch(FetchDescriptor<PersistedPoll>(predicate: #Predicate { $0.id == id })).first
+        guard let persisted, persisted.detailSyncedAt != nil else { return nil }
+        let poll = persisted.toModel()
         let timeOptions = try fetchTimeOptions(for: id)
         let participants = try fetchParticipants(for: id)
         let participantIds = participants.map { $0.id }
@@ -118,6 +184,13 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         )
         let persistedPoll = try modelContext.fetch(pollDescriptor).first
 
+        let retained = Set(options.map(\.id))
+        let previous = try modelContext.fetch(FetchDescriptor<PersistedTimeOption>(predicate: #Predicate { $0.pollId == pollId }))
+        let removed = Set(previous.filter { !retained.contains($0.id) }.map(\.id))
+        for response in try modelContext.fetch(FetchDescriptor<PersistedAvailabilityResponse>()) where removed.contains(response.timeOptionId) {
+            modelContext.delete(response)
+        }
+        for option in previous where removed.contains(option.id) { modelContext.delete(option) }
         for option in options {
             let descriptor = FetchDescriptor<PersistedTimeOption>(
                 predicate: #Predicate { $0.id == option.id }
@@ -130,7 +203,7 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
                 modelContext.insert(persisted)
             }
         }
-        try modelContext.save()
+        try saveChanges()
     }
 
     public func fetchTimeOptions(for pollId: UUID) throws -> [PollTimeOption] {
@@ -149,6 +222,10 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         )
         let persistedPoll = try modelContext.fetch(pollDescriptor).first
 
+        let retained = Set(participants.map(\.id))
+        for previous in try modelContext.fetch(FetchDescriptor<PersistedParticipant>(predicate: #Predicate { $0.pollId == pollId })) where !retained.contains(previous.id) {
+            modelContext.delete(previous)
+        }
         for participant in participants {
             let descriptor = FetchDescriptor<PersistedParticipant>(
                 predicate: #Predicate { $0.id == participant.id }
@@ -163,7 +240,7 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
                 modelContext.insert(persisted)
             }
         }
-        try modelContext.save()
+        try saveChanges()
     }
 
     public func fetchParticipants(for pollId: UUID) throws -> [PollParticipant] {
@@ -194,7 +271,17 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
                 modelContext.insert(persisted)
             }
         }
-        try modelContext.save()
+        try saveChanges()
+    }
+
+    public func replaceResponsesSnapshot(_ responses: [AvailabilityResponse], for participantIds: [UUID]) throws {
+        let participantIds = Set(participantIds)
+        let retained = Set(responses.map(\.id))
+        for previous in try modelContext.fetch(FetchDescriptor<PersistedAvailabilityResponse>())
+            where participantIds.contains(previous.participantId) && !retained.contains(previous.id) {
+            modelContext.delete(previous)
+        }
+        try saveResponses(responses)
     }
 
     public func fetchResponses(for participantIds: [UUID]) throws -> [AvailabilityResponse] {
@@ -219,7 +306,7 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         } else {
             modelContext.insert(PersistedProfile.from(profile))
         }
-        try modelContext.save()
+        try saveChanges()
     }
 
     public func fetchProfile(id: UUID) throws -> Profile? {
@@ -230,6 +317,24 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
     }
 
     // MARK: - Cache Management
+
+    public func isDetailFresh(_ pollId: UUID, maxAge: TimeInterval) -> Bool {
+        let poll = try? modelContext.fetch(FetchDescriptor<PersistedPoll>(predicate: #Predicate { $0.id == pollId })).first
+        guard let date = poll?.detailSyncedAt else { return false }
+        return now().timeIntervalSince(date) < maxAge
+    }
+
+    public func invalidatePollDetail(_ pollId: UUID) throws {
+        for option in try modelContext.fetch(FetchDescriptor<PersistedTimeOption>(predicate: #Predicate { $0.pollId == pollId })) {
+            modelContext.delete(option)
+        }
+        for participant in try modelContext.fetch(FetchDescriptor<PersistedParticipant>(predicate: #Predicate { $0.pollId == pollId })) {
+            modelContext.delete(participant)
+        }
+        let poll = try modelContext.fetch(FetchDescriptor<PersistedPoll>(predicate: #Predicate { $0.id == pollId })).first
+        poll?.detailSyncedAt = nil
+        try saveChanges()
+    }
 
     public func isFresh(_ entityId: UUID, maxAge: TimeInterval) -> Bool {
         let cutoff = Date().addingTimeInterval(-maxAge)
@@ -259,6 +364,6 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         try modelContext.delete(model: PersistedProfile.self)
         participantCounts.removeAll()
         timeRanges.removeAll()
-        try modelContext.save()
+        try saveChanges()
     }
 }

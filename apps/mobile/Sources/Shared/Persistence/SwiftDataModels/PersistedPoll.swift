@@ -19,6 +19,8 @@ public final class PersistedPoll {
     public var selectedEndTime: Date?
     public var shareCode: String
     public var lastSyncedAt: Date
+    /// Updated only after a complete detail snapshot, never by a list upsert.
+    public var detailSyncedAt: Date?
 
     @Relationship(deleteRule: .cascade, inverse: \PersistedTimeOption.poll)
     public var timeOptions: [PersistedTimeOption]
@@ -60,6 +62,7 @@ public final class PersistedPoll {
         self.selectedEndTime = selectedEndTime
         self.shareCode = shareCode
         self.lastSyncedAt = lastSyncedAt
+        self.detailSyncedAt = nil
         self.timeOptions = []
         self.participants = []
     }

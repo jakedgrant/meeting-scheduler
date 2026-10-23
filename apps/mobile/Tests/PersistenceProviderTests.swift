@@ -264,4 +264,86 @@ final class PersistenceProviderTests: XCTestCase {
             XCTAssertTrue(try provider.fetchPollParticipantCounts().isEmpty)
         }
     }
+    func testAccountTransitionRemovesCachedPollsAndMetadata() throws {
+        for provider in makeProviders() {
+            try provider.selectAccount(UUID())
+            let poll = makeSamplePoll()
+            try provider.savePollDetail(PollDetail(poll: poll, timeOptions: [], participants: [], responses: []))
+            try provider.savePollParticipantCount(9, for: poll.id)
+            try provider.selectAccount(nil)
+            try provider.selectAccount(UUID())
+            XCTAssertTrue(try provider.fetchAllPolls().isEmpty)
+            XCTAssertNil(try provider.fetchPollDetail(id: poll.id))
+            XCTAssertTrue(try provider.fetchPollParticipantCounts().isEmpty)
+        }
+    }
+
+    func testListUpsertCannotRenewDetailFreshness() throws {
+        var now = Date(timeIntervalSince1970: 1_000)
+        let providers: [any PersistenceProviderProtocol] = [
+            InMemoryPersistenceProvider(now: { now }),
+            SwiftDataPersistenceProvider(inMemory: true, now: { now }),
+        ]
+        for provider in providers {
+            now = Date(timeIntervalSince1970: 1_000)
+            let poll = makeSamplePoll()
+            try provider.savePolls([poll])
+            XCTAssertFalse(provider.isDetailFresh(poll.id, maxAge: 300))
+            try provider.savePollDetail(PollDetail(poll: poll, timeOptions: [], participants: [], responses: []))
+            XCTAssertTrue(provider.isDetailFresh(poll.id, maxAge: 300))
+            now = now.addingTimeInterval(301)
+            try provider.savePolls([poll])
+            XCTAssertFalse(provider.isDetailFresh(poll.id, maxAge: 300))
+            try provider.invalidatePollDetail(poll.id)
+            try provider.savePolls([poll])
+            XCTAssertFalse(provider.isDetailFresh(poll.id, maxAge: 300))
+            XCTAssertNil(try provider.fetchPollDetail(id: poll.id))
+        }
+    }
+
+    func testCompleteSnapshotReconcilesDeletedChildrenAndResponses() throws {
+        for provider in makeProviders() {
+            let poll = makeSamplePoll()
+            let option = PollTimeOption(pollId: poll.id, startTime: Date(), endTime: Date().addingTimeInterval(60))
+            let participant = PollParticipant(pollId: poll.id, userId: UUID())
+            let response = AvailabilityResponse(participantId: participant.id, timeOptionId: option.id, status: .available)
+            try provider.savePollDetail(PollDetail(poll: poll, timeOptions: [option], participants: [participant], responses: [response]))
+            // Participant and option survive, but the response is absent in the authoritative read.
+            try provider.savePollDetail(PollDetail(poll: poll, timeOptions: [option], participants: [participant], responses: []))
+            XCTAssertTrue(try provider.fetchPollDetail(id: poll.id)?.responses.isEmpty == true)
+            try provider.savePollDetail(PollDetail(poll: poll, timeOptions: [], participants: [], responses: []))
+            let offline = try provider.fetchPollDetail(id: poll.id)
+            XCTAssertTrue(offline?.participants.isEmpty == true)
+            XCTAssertTrue(offline?.timeOptions.isEmpty == true)
+            XCTAssertTrue(try provider.fetchResponses(for: [participant.id]).isEmpty)
+        }
+    }
+
+    func testCompletePollListEvictsDeletedPollButPartialReadDoesNot() throws {
+        for provider in makeProviders() {
+            let first = makeSamplePoll()
+            let second = makeSamplePoll()
+            try provider.savePollDetail(PollDetail(poll: first, timeOptions: [], participants: [], responses: []))
+            try provider.savePolls([second])
+            XCTAssertEqual(try provider.fetchAllPolls().count, 2)
+            try provider.replacePollsSnapshot([second])
+            XCTAssertNil(try provider.fetchPoll(id: first.id))
+            XCTAssertNil(try provider.fetchPollDetail(id: first.id))
+            XCTAssertEqual(try provider.fetchAllPolls().map(\.id), [second.id])
+        }
+    }
+
+    func testScopedResponseSnapshotDeletesMissingRowsIncludingEmptyResults() throws {
+        for provider in makeProviders() {
+            let first = UUID()
+            let second = UUID()
+            let responseA = AvailabilityResponse(participantId: first, timeOptionId: UUID(), status: .available)
+            let responseB = AvailabilityResponse(participantId: second, timeOptionId: UUID(), status: .maybe)
+            try provider.saveResponses([responseA, responseB])
+            try provider.replaceResponsesSnapshot([], for: [first])
+            XCTAssertTrue(try provider.fetchResponses(for: [first]).isEmpty)
+            XCTAssertEqual(try provider.fetchResponses(for: [second]).map(\.id), [responseB.id])
+        }
+    }
+
 }

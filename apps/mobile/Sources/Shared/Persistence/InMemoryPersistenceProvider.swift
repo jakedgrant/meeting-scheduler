@@ -11,7 +11,23 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     private var timeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
     private var syncTimestamps: [UUID: Date] = [:]
 
-    public init() {}
+    private var accountId: UUID?
+    private var detailTimestamps: [UUID: Date] = [:]
+
+    private let now: @MainActor () -> Date
+    public init(now: @escaping @MainActor () -> Date = { Date() }) { self.now = now }
+
+    public func selectAccount(_ accountId: UUID?) throws {
+        guard self.accountId != accountId else { return }
+        try clearAll()
+        self.accountId = accountId
+    }
+
+    public func replacePollsSnapshot(_ polls: [Poll]) throws {
+        let ids = Set(polls.map(\.id))
+        for id in self.polls.keys.filter({ !ids.contains($0) }) { try deletePoll(id: id) }
+        try savePolls(polls)
+    }
 
     // MARK: - Polls
 
@@ -40,7 +56,9 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     public func deletePoll(id: UUID) throws {
         polls.removeValue(forKey: id)
         timeOptions.removeValue(forKey: id)
+        for participant in participants[id] ?? [] { responses.removeValue(forKey: participant.id) }
         participants.removeValue(forKey: id)
+        detailTimestamps.removeValue(forKey: id)
         participantCounts.removeValue(forKey: id)
         timeRanges.removeValue(forKey: id)
         syncTimestamps.removeValue(forKey: id)
@@ -49,14 +67,16 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     // MARK: - Poll Detail
 
     public func savePollDetail(_ detail: PollDetail) throws {
+        try invalidatePollDetail(detail.poll.id)
         try savePolls([detail.poll])
         try saveTimeOptions(detail.timeOptions, for: detail.poll.id)
         try saveParticipants(detail.participants, for: detail.poll.id)
         try saveResponses(detail.responses)
+        detailTimestamps[detail.poll.id] = now()
     }
 
     public func fetchPollDetail(id: UUID) throws -> PollDetail? {
-        guard let poll = polls[id] else { return nil }
+        guard let poll = polls[id], detailTimestamps[id] != nil else { return nil }
         let opts = timeOptions[id] ?? []
         let parts = participants[id] ?? []
         let partIds = parts.map { $0.id }
@@ -90,6 +110,10 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     // MARK: - Time Options
 
     public func saveTimeOptions(_ options: [PollTimeOption], for pollId: UUID) throws {
+        let retained = Set(options.map(\.id))
+        for participant in participants[pollId] ?? [] {
+            responses[participant.id]?.removeAll { !retained.contains($0.timeOptionId) }
+        }
         timeOptions[pollId] = options
         syncTimestamps[pollId] = Date()
     }
@@ -101,6 +125,10 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     // MARK: - Participants
 
     public func saveParticipants(_ participants: [PollParticipant], for pollId: UUID) throws {
+        let retained = Set(participants.map(\.id))
+        for previous in self.participants[pollId] ?? [] where !retained.contains(previous.id) {
+            responses.removeValue(forKey: previous.id)
+        }
         self.participants[pollId] = participants
     }
 
@@ -122,6 +150,11 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
             }
             self.responses[response.participantId] = existing
         }
+    }
+
+    public func replaceResponsesSnapshot(_ responses: [AvailabilityResponse], for participantIds: [UUID]) throws {
+        for id in participantIds { self.responses[id] = [] }
+        try saveResponses(responses)
     }
 
     public func fetchResponses(for participantIds: [UUID]) throws -> [AvailabilityResponse] {
@@ -148,6 +181,18 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
 
     // MARK: - Cache Management
 
+    public func isDetailFresh(_ pollId: UUID, maxAge: TimeInterval) -> Bool {
+        guard let date = detailTimestamps[pollId] else { return false }
+        return now().timeIntervalSince(date) < maxAge
+    }
+
+    public func invalidatePollDetail(_ pollId: UUID) throws {
+        timeOptions.removeValue(forKey: pollId)
+        for participant in participants[pollId] ?? [] { responses.removeValue(forKey: participant.id) }
+        participants.removeValue(forKey: pollId)
+        detailTimestamps.removeValue(forKey: pollId)
+    }
+
     public func isFresh(_ entityId: UUID, maxAge: TimeInterval) -> Bool {
         guard let timestamp = syncTimestamps[entityId] else { return false }
         return Date().timeIntervalSince(timestamp) < maxAge
@@ -162,5 +207,6 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
         participantCounts.removeAll()
         timeRanges.removeAll()
         syncTimestamps.removeAll()
+        detailTimestamps.removeAll()
     }
 }

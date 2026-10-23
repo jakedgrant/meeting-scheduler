@@ -2,8 +2,14 @@ import Foundation
 
 @MainActor
 public protocol PersistenceProviderProtocol: Sendable {
+    /// Changes the cache namespace. Identity transitions discard the previous namespace.
+    func selectAccount(_ accountId: UUID?) throws
+
     // MARK: - Polls
+    /// Upsert only: safe for incomplete or paginated reads.
     func savePolls(_ polls: [Poll]) throws
+    /// Reconcile a complete, authoritative list, including polls no longer accessible.
+    func replacePollsSnapshot(_ polls: [Poll]) throws
     func fetchAllPolls() throws -> [Poll]
     func fetchPoll(id: UUID) throws -> Poll?
     func deletePoll(id: UUID) throws
@@ -28,6 +34,7 @@ public protocol PersistenceProviderProtocol: Sendable {
 
     // MARK: - Availability Responses
     func saveResponses(_ responses: [AvailabilityResponse]) throws
+    func replaceResponsesSnapshot(_ responses: [AvailabilityResponse], for participantIds: [UUID]) throws
     func fetchResponses(for participantIds: [UUID]) throws -> [AvailabilityResponse]
 
     // MARK: - Profile
@@ -35,6 +42,9 @@ public protocol PersistenceProviderProtocol: Sendable {
     func fetchProfile(id: UUID) throws -> Profile?
 
     // MARK: - Cache Management
+    func isDetailFresh(_ pollId: UUID, maxAge: TimeInterval) -> Bool
+    /// Deletes detail after a mutation so offline fallback cannot resurrect pre-write state.
+    func invalidatePollDetail(_ pollId: UUID) throws
     func isFresh(_ entityId: UUID, maxAge: TimeInterval) -> Bool
     func clearAll() throws
 }
