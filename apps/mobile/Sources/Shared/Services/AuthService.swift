@@ -42,30 +42,24 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     public func initialize() async {
-        // Get initial session
-        do {
-            let session = try await supabase.auth.session
-            applySession(session)
-            if let userId = currentUser?.id {
-                await loadProfile(userId: userId)
-                if currentUserId == userId {
-                    await PurchaseService.shared.login(userId: userId.uuidString)
-                    Task { await CalendarService.shared.refreshGoogleCalendarConnection() }
-                }
-            }
-        } catch {
-            applySession(nil)
-            print("No existing session: \(error)")
-        }
-
-        isLoading = false
-
-        // Listen for auth changes
+        // Register first: session restoration, profile loading and provider I/O must
+        // never delay consuming sign-out/expiry events during application startup.
+        let generation = identityGeneration
         Task {
             for await (event, session) in supabase.auth.authStateChanges {
                 handleAuthChange(event: event, session: session)
+                isLoading = false
             }
         }
+        do {
+            let session = try await supabase.auth.session
+            if generation == identityGeneration {
+                handleAuthChange(event: .initialSession, session: session)
+            }
+        } catch {
+            if generation == identityGeneration { applySession(nil) }
+        }
+        isLoading = false
     }
 
     private func handleAuthChange(event: AuthChangeEvent, session: Session?) {
@@ -74,7 +68,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         // clear state immediately even while an old account request is suspended.
         let generation = identityGeneration
         switch event {
-        case .signedIn:
+        case .initialSession, .signedIn:
             guard let userId = session?.user.id else { return }
             Task {
                 await loadProfile(userId: userId)
