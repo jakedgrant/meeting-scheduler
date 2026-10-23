@@ -67,7 +67,7 @@ async function fixture(t) {
   return { actual, state };
 }
 
-function editorFor(actual, storage = null) {
+function editorFor(actual, storage = disk()) {
   const editor = actual.createPollCreation({ create: actual.createPoll }, storage);
   editor.setOwner(member);
   editor.edit({ title: 'My draft', description: 'Description', location: 'Room', timezone: 'UTC', timeOptions: [{ id: 'draft-option', date: '2026-11-01', startTime: '12:00', endTime: '13:00' }] });
@@ -92,7 +92,7 @@ test('one creation RPC applies authoritative complete state and never writes tab
   assert.equal(storage.values.size, 0);
 });
 
-for (const storage of [disk(), failingDisk]) {
+for (const storage of [disk()]) {
   test(`lost reply retains draft and immutable operation, then recovers authoritative replay (${storage === failingDisk ? 'failed' : 'working'} storage)`, async t => {
     const { actual, state } = await fixture(t);
     const editor = editorFor(actual, storage);
@@ -137,18 +137,48 @@ test('lost reply and pending operation survive navigation/reload in the same acc
   assert.deepEqual(next.state.calls[0].args, original);
 });
 
-test('unavailable storage still retains draft and retry ID across same-tab navigation', async t => {
+test('unavailable storage blocks dispatch and retains editable draft across same-tab navigation', async t => {
   const { actual, state } = await fixture(t);
   const editor = editorFor(actual, failingDisk);
-  state.handler = () => { throw Error('Lost reply'); };
   await editor.submit();
+  assert.match(actual.get(editor).error, /Enable browser storage/);
+  assert.equal(actual.get(editor).saving, false);
+  assert.equal(actual.get(editor).uncertain, false);
+  assert.equal(state.calls.length, 0);
   const restored = actual.createPollCreation({ create: actual.createPoll }, failingDisk);
   restored.setOwner(member);
   assert.equal(actual.get(restored).draft.title, 'My draft');
-  state.handler = () => ({ data: result, error: null });
+  restored.edit({ title: 'Still editable' });
   await restored.submit();
-  assert.deepEqual(state.calls[0].args, state.calls[1].args);
+  assert.equal(actual.get(restored).draft.title, 'Still editable');
+  assert.equal(state.calls.length, 0);
 });
+
+for (const storage of [null, { getItem: () => null, setItem() {}, removeItem() {} }]) {
+  test(`missing or silently failing storage blocks every creation dispatch (${storage ? 'silent' : 'null'})`, async t => {
+    const { actual, state } = await fixture(t);
+    const editor = editorFor(actual, storage);
+    await editor.submit();
+    assert.match(actual.get(editor).error, /no creation request was sent/);
+    assert.equal(state.calls.length, 0);
+  });
+}
+
+for (const raw of ['bad-json', JSON.stringify({ draft: {}, operation: { operation_id: 'corrupt' }, uncertain: true }), JSON.stringify({ draft: { title: 'Draft', description: '', location: '', dueDate: '', timezone: 'UTC', isAllDay: false, useEventPass: true, timeOptions: [] }, operation: { operation_id: 'bad-id', payload: {} }, uncertain: true })]) {
+  test(`corrupt saved operation blocks replacement rather than minting another ID (${raw.slice(0, 12)})`, async t => {
+    const { actual, state } = await fixture(t);
+    const storage = disk();
+    storage.setItem(`meeting-scheduler:create-poll:${member}`, raw);
+    const editor = actual.createPollCreation({ create: actual.createPoll }, storage);
+    editor.setOwner(member);
+    assert.equal(actual.get(editor).recoveryRequired, true);
+    assert.match(actual.get(editor).error, /Check My Polls/);
+    editor.edit({ title: 'Replacement' });
+    await editor.submit();
+    assert.equal(state.calls.length, 0);
+    assert.equal(storage.getItem(`meeting-scheduler:create-poll:${member}`), raw);
+  });
+}
 
 test('a successful screen cannot submit another poll before navigation completes', async t => {
   const { actual, state } = await fixture(t);
@@ -231,6 +261,48 @@ test('explicit event-pass choice reaches server and returned cap/pass state is a
   assert.equal(actual.get(editor).result.redeemed_pass_id, other);
   assert.equal(actual.get(actual.currentPoll).max_participants, 50);
 });
+
+test('subscription-covered authoritative success keeps the pass despite explicit request', async t => {
+  const { actual, state } = await fixture(t);
+  const editor = editorFor(actual);
+  editor.edit({ useEventPass: true });
+  await editor.submit();
+  assert.equal(state.calls[0].args.payload.use_event_pass, true);
+  assert.equal(actual.get(editor).result.entitlement, 'pro_access');
+  assert.equal(actual.get(editor).result.redeemed_pass_id, null);
+});
+
+test('new payload timezone matches picker conversion zone; pending payload keeps its original zone', async t => {
+  const { actual, state } = await fixture(t);
+  const storage = disk();
+  const editor = editorFor(actual, storage);
+  editor.edit({ timezone: 'Pacific/Auckland' });
+  state.handler = () => ({ data: null, error: { code: 'NETWORK' } });
+  await editor.submit();
+  assert.equal(state.calls[0].args.payload.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const previousZone = process.env.TZ;
+  try {
+    process.env.TZ = state.calls[0].args.payload.timezone === 'Pacific/Auckland' ? 'America/New_York' : 'Pacific/Auckland';
+    const next = await fixture(t);
+    const restored = next.actual.createPollCreation({ create: next.actual.createPoll }, storage);
+    restored.setOwner(member);
+    await restored.submit();
+    assert.deepEqual(state.calls[0].args, next.state.calls[0].args);
+  } finally {
+    if (previousZone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousZone;
+  }
+});
+
+for (const guest of [false, true]) {
+  test(`${guest ? 'guest' : 'member'} capacity rejection is actionable and never applies a participant`, async t => {
+    const { actual, state } = await fixture(t);
+    if (guest) actual.user.set(null);
+    state.handler = () => ({ data: null, error: { code: 'P0003', message: 'Poll participant limit reached' } });
+    await assert.rejects(actual.joinPoll(poll.id, 'Guest'), /participant limit.*organizer.*retry joining/);
+    assert.equal(actual.get(actual.currentPollParticipants).length, 0);
+  });
+}
 
 test('confirmed rejection stays editable after reload and retains unchanged retry ID', async t => {
   const first = await fixture(t);

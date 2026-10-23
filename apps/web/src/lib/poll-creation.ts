@@ -73,7 +73,9 @@ export function creationPayload(draft: CreationDraft): CreationPayload {
 	})
 	return {
 		title: draft.title.trim(), description: draft.description.trim() || null, location: draft.location.trim() || null,
-		timezone: draft.timezone, closes_at: draft.dueDate ? new Date(draft.dueDate).toISOString() : null,
+		// New payloads interpret picker values in this browser's current zone.
+		// Pending payloads are reused verbatim, including across a zone change.
+		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, closes_at: draft.dueDate ? new Date(draft.dueDate).toISOString() : null,
 		time_options, use_event_pass: draft.useEventPass
 	}
 }
@@ -101,6 +103,7 @@ interface CreationState {
 	draft: CreationDraft
 	saving: boolean
 	uncertain: boolean
+	recoveryRequired: boolean
 	error: string | null
 	result: CreationResult | null
 }
@@ -109,16 +112,19 @@ interface CreationState {
 export function createPollCreation(commands: {
 	create(operation: CreationOperation): Promise<CreationResult>
 }, storage: DraftStorage | null = creationStorage()) {
-	const state = writable<CreationState>({ ownerId: null, draft: emptyCreationDraft(), saving: false, uncertain: false, error: null, result: null })
+	const state = writable<CreationState>({ ownerId: null, draft: emptyCreationDraft(), saving: false, uncertain: false, recoveryRequired: false, error: null, result: null })
 	let operation: CreationOperation | null = null
 	let generation = 0
 
 	function persist() {
 		const current = get(state)
-		if (!current.ownerId) return
+		if (!current.ownerId) return false
 		const saved = JSON.stringify({ draft: current.draft, operation, uncertain: current.saving || current.uncertain })
 		memoryDrafts.set(current.ownerId, saved)
-		try { storage?.setItem(storageKey(current.ownerId), saved) } catch { /* In-memory retry remains available. */ }
+		try {
+			storage?.setItem(storageKey(current.ownerId), saved)
+			return storage?.getItem(storageKey(current.ownerId)) === saved
+		} catch { return false }
 	}
 
 	function setOwner(ownerId: string | null) {
@@ -127,6 +133,7 @@ export function createPollCreation(commands: {
 		operation = null
 		let draft = emptyCreationDraft()
 		let uncertain = false
+		let recoveryRequired = false
 		try {
 			let raw = ownerId && memoryDrafts.get(ownerId)
 			if (!raw && ownerId) {
@@ -134,28 +141,36 @@ export function createPollCreation(commands: {
 			}
 			if (raw) {
 				const saved = JSON.parse(raw)
+				let validDraft = false
 				if (typeof saved.draft?.title === 'string' && Array.isArray(saved.draft?.timeOptions)) {
 					// Validate the whole shape before putting a saved draft on screen.
 				const candidate = { ...draft, ...saved.draft }
 				if (['description', 'location', 'dueDate', 'timezone'].every(key => typeof candidate[key] === 'string')
 					&& ['isAllDay', 'useEventPass'].every(key => typeof candidate[key] === 'boolean')
-					&& candidate.timeOptions.every((item: Record<string, unknown>) => ['id', 'date', 'startTime', 'endTime'].every(key => typeof item?.[key] === 'string'))) draft = candidate
+					&& candidate.timeOptions.every((item: Record<string, unknown>) => ['id', 'date', 'startTime', 'endTime'].every(key => typeof item?.[key] === 'string'))) { draft = candidate; validDraft = true }
 				}
+				recoveryRequired = !validDraft
 				if (saved.operation?.operation_id && /^[0-9a-f-]{36}$/i.test(saved.operation.operation_id)
-					&& typeof saved.operation.payload?.title === 'string' && Array.isArray(saved.operation.payload?.time_options)) {
+					&& typeof saved.operation.payload?.title === 'string' && typeof saved.operation.payload?.timezone === 'string'
+					&& typeof saved.operation.payload?.use_event_pass === 'boolean'
+					&& ['description', 'location', 'closes_at'].every(key => saved.operation.payload[key] === null || typeof saved.operation.payload[key] === 'string')
+					&& Array.isArray(saved.operation.payload?.time_options) && saved.operation.payload.time_options.length > 0
+					&& saved.operation.payload.time_options.every((option: Record<string, unknown>) => typeof option?.start_time === 'string' && typeof option?.end_time === 'string' && typeof option?.is_all_day === 'boolean')) {
 					operation = saved.operation
 					// Persisting happens before sending; a reload must conservatively
 					// treat every pending operation as possibly committed.
 					uncertain = saved.uncertain !== false
-				}
+				} else if (saved.operation !== null) recoveryRequired = true
 			}
-		} catch { /* An incomplete draft can still be restored without a submission. */ }
-		state.set({ ownerId, draft, saving: false, uncertain, error: uncertain ? 'A previous creation is awaiting confirmation. Retry to recover it safely.' : null, result: null })
+		} catch { recoveryRequired = true }
+		state.set({ ownerId, draft, saving: false, uncertain, recoveryRequired,
+			error: recoveryRequired ? 'The saved creation cannot be read safely. Check My Polls for its result and contact support to recover this draft before creating again.'
+				: uncertain ? 'A previous creation is awaiting confirmation. Retry to recover it safely.' : null, result: null })
 	}
 
 	function edit(update: Partial<CreationDraft>) {
 		const current = get(state)
-		if (!current.ownerId || current.saving || current.uncertain) return
+		if (!current.ownerId || current.saving || current.uncertain || current.recoveryRequired) return
 		const draft = { ...current.draft, ...update }
 		if (operation) {
 			try { if (JSON.stringify(creationPayload(draft)) !== JSON.stringify(operation.payload)) operation = null } catch { operation = null }
@@ -166,7 +181,7 @@ export function createPollCreation(commands: {
 
 	async function submit(): Promise<CreationResult | null> {
 		const current = get(state)
-		if (!current.ownerId || current.saving) return null
+		if (!current.ownerId || current.saving || current.recoveryRequired) return null
 		if (current.result) return current.result
 		try { operation ??= { operation_id: crypto.randomUUID(), payload: creationPayload(current.draft) } }
 		catch (error) {
@@ -175,7 +190,11 @@ export function createPollCreation(commands: {
 		}
 		const started = generation
 		state.update(value => ({ ...value, saving: true, error: null }))
-		persist()
+		if (!persist()) {
+			state.update(value => ({ ...value, saving: false, error: 'Enable browser storage before creating this poll. Your draft is kept, and no creation request was sent. Then retry.' }))
+			persist()
+			return null
+		}
 		try {
 			const result = await commands.create(operation)
 			if (started !== generation) return null

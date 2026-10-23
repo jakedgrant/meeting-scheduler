@@ -410,10 +410,17 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
 }
 
 export async function joinPoll(pollId: string, name?: string, email?: string): Promise<PollParticipant> {
-  if (!get(user)) return joinPollAsGuest(pollId, name, email)
-  const { data, error } = await supabase.rpc('join_poll', { poll_uuid: pollId })
-  if (error) throw error
-  return (data as { participant: PollParticipant }).participant
+  try {
+    if (!get(user)) return await joinPollAsGuest(pollId, name, email)
+    const { data, error } = await supabase.rpc('join_poll', { poll_uuid: pollId })
+    if (error) throw error
+    return (data as { participant: PollParticipant }).participant
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P0003') {
+      throw new Error('This poll has reached its participant limit. Ask the organizer to free a place, then retry joining.')
+    }
+    throw error
+  }
 }
 
 function availabilityIdentity(pollId: string, participantId: string) {

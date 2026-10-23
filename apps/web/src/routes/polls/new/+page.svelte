@@ -23,7 +23,7 @@
 	let timeOptions = $derived($creation.draft.timeOptions);
 	let useDateRange = $state(false);
 	let loading = $derived($creation.saving);
-	let locked = $derived(loading || $creation.uncertain);
+	let locked = $derived(loading || $creation.uncertain || $creation.recoveryRequired);
 	let error = $state('');
 	type TimeOption = typeof timeOptions[number];
 
@@ -265,6 +265,7 @@
 					/>
 					Use an event pass for this poll
 				</label>
+				<p class="help-text">Use your oldest available pass for this poll. If your subscription covers the poll, your pass is kept.</p>
 			</div>
 
 			<div class="form-group checkbox-group">
@@ -508,7 +509,7 @@
 
 		<div class="form-actions">
 			<a href="/polls" class="btn secondary">Cancel</a>
-			<button type="submit" class="btn primary" disabled={loading || !$creation.ownerId}>
+			<button type="submit" class="btn primary" disabled={loading || !$creation.ownerId || $creation.recoveryRequired}>
 				{loading ? 'Creating...' : $creation.error ? 'Retry Create Poll' : 'Create Poll'}
 			</button>
 		</div>
