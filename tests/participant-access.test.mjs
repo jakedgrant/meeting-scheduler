@@ -167,17 +167,17 @@ test('F03 participant access, guest capabilities and identity protection on Post
         WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') AS public_execute
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE (n.nspname='poll_private' AND p.proname IN ('protect_participant_identity','store_participant_contact',
-        'can_view_participants','new_guest_token','guest_token_hash','verified_guest_participant',
+        'can_view_participants','new_guest_token','guest_token_hash','verified_guest_participant','lock_guest_participant',
         'join_poll_as_guest','get_guest_participant','get_guest_poll_detail','update_guest_participant','rotate_guest_token'))
         OR (n.nspname='public' AND p.proname IN ('join_poll_as_guest','get_guest_participant','get_guest_poll_detail',
         'update_guest_participant','rotate_guest_token'))
       ORDER BY 1,2`)).rows;
-    assert.equal(helpers.length, 16);
+    assert.equal(helpers.length, 17);
     const guestCommands = ['join_poll_as_guest', 'get_guest_participant', 'get_guest_poll_detail',
       'update_guest_participant', 'rotate_guest_token'];
     const anonCallable = new Set(guestCommands);
     const authCallable = new Set([...guestCommands, 'can_view_participants']);
-    const elevated = new Set(['store_participant_contact', 'can_view_participants', 'verified_guest_participant',
+    const elevated = new Set(['store_participant_contact', 'can_view_participants', 'verified_guest_participant', 'lock_guest_participant',
       ...guestCommands]);
     for (const fn of helpers) {
       const label = `${fn.nspname}.${fn.proname}`;
