@@ -8,6 +8,8 @@
 		currentPollTimeOptions,
 		currentPollParticipants,
 		currentPollResponses,
+		currentGuest,
+		guestNotice,
 		pollsLoading,
 		loadPoll,
 		cleanupPollRealtime,
@@ -24,8 +26,12 @@
 	const pollId = $derived($page.params.id as string);
 
 	let isCreator = $derived($currentPoll?.creator_id === $user?.id);
+	// Signed-out guests are identified by the participant id stored with their capability.
+	let isGuest = $derived(!$user && !!$currentGuest);
 	let myParticipant = $derived(
-		$currentPollParticipants.find((p) => p.user_id === $user?.id)
+		$user
+			? $currentPollParticipants.find((p) => p.user_id === $user?.id)
+			: $currentPollParticipants.find((p) => p.id === $currentGuest?.participantId)
 	);
 
 	// For anonymous users joining
@@ -196,8 +202,11 @@
 		savingResponses = true;
 
 		try {
-			for (const [timeOptionId, status] of Object.entries(localResponses)) {
-				await submitAvailability(myParticipant.id, timeOptionId, status);
+			// Guests can save their comment; availability needs the guest save command (F06/F10).
+			if (!isGuest) {
+				for (const [timeOptionId, status] of Object.entries(localResponses)) {
+					await submitAvailability(myParticipant.id, timeOptionId, status);
+				}
 			}
 			// Save comment (trimmed, null if empty)
 			const trimmedComment = localComment.trim();
@@ -310,6 +319,9 @@
 <div class="poll-detail">
 	{#if $calendarStatusError}
 		<p role="status">{$calendarStatusError}</p>
+	{/if}
+	{#if $guestNotice}
+		<p class="guest-notice" role="status">{$guestNotice}</p>
 	{/if}
 	{#if $pollsLoading && !$currentPoll}
 		<div class="loading">Loading poll...</div>
@@ -511,7 +523,7 @@
 								</div>
 							</button>
 
-							{#if myParticipant && $currentPoll.status === 'active'}
+							{#if myParticipant && !isGuest && $currentPoll.status === 'active'}
 								<div class="response-buttons">
 									<button
 										class="response-btn available"
@@ -544,6 +556,11 @@
 				</div>
 
 				{#if myParticipant && $currentPoll.status === 'active'}
+					{#if isGuest}
+						<p class="guest-availability-note">
+							Availability can't be saved as a guest yet. You can still leave a comment.
+						</p>
+					{/if}
 					<div class="comment-section">
 						<div class="comment-header">
 							<label for="participant-comment" class="comment-label">Add a comment (optional)</label>
@@ -565,7 +582,7 @@
 					</div>
 					<div class="save-section">
 						<button class="btn primary" onclick={saveResponses} disabled={savingResponses}>
-							{savingResponses ? 'Saving...' : 'Save Responses'}
+							{savingResponses ? 'Saving...' : isGuest ? 'Save Comment' : 'Save Responses'}
 						</button>
 					</div>
 				{/if}
@@ -584,7 +601,7 @@
 										<span class="participant-name">
 											{participant.profiles?.display_name || participant.anonymous_name || 'Anonymous'}
 										</span>
-										{#if participant.user_id === $user?.id}
+										{#if $user ? participant.user_id === $user.id : participant.id === $currentGuest?.participantId}
 											<span class="you-badge">You</span>
 										{/if}
 									</div>
@@ -612,6 +629,15 @@
 		max-width: 900px;
 		margin: 0 auto;
 		padding: 2rem;
+	}
+
+	.guest-notice,
+	.guest-availability-note {
+		padding: 0.75rem 1rem;
+		border-radius: 8px;
+		background: #fff8e1;
+		color: #5d4400;
+		font-size: 0.875rem;
 	}
 
 	.loading,

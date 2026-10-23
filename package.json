@@ -5,7 +5,8 @@
     "test:calendar:db": "node --test tests/calendar-database.test.mjs",
     "test:calendar:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/calendar/",
     "test:billing:db": "node --test tests/billing-database.test.mjs",
-    "test:billing:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/billing/"
+    "test:billing:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/billing/",
+    "test:web:guest": "node --test tests/web-guest-capability.test.mjs"
   },
   "dependencies": {
     "jsonwebtoken": "^9.0.3"
