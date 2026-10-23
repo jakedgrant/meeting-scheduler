@@ -11,6 +11,7 @@ Before this change, a response's participant and time option could belong to dif
 | Participant and time option belong to the same poll | `responses_10_check_write` trigger, `23514` | Every role, every insert/update |
 | A response cannot be moved to another participant or option | Same trigger, `42501` | Every role |
 | A time option cannot move to another poll | `time_options_10_protect_poll`, `42501` | Every role |
+| The interval of a selected option cannot change or be deleted | Same trigger, which locks the poll `FOR UPDATE`; `23514` `Selected time option cannot be changed or deleted` | Every option update/delete; deleting the whole poll still cascades |
 | Response writes require an open poll (`active`, `closes_at` unset or in the future) | Same trigger, which locks the poll `FOR SHARE`; `42501` `Poll is not accepting responses` | Direct Data API writes (insert, update, delete). Commands check this themselves. Cascades and account deletion are exempt. |
 | A member writes only their own responses | RLS insert/update/delete policies (`authenticated` only); `anon` has no write grants | Direct Data API writes |
 | Response rows are readable only by the poll owner and current members | RLS select policy (`authenticated` only); verified guests use `get_guest_poll_detail` or `get_availability` | All reads, including the F02 summary, embeds, and Realtime |
@@ -20,7 +21,9 @@ Existing cross-poll responses are moved to `private.response_invariant_quarantin
 
 ## Serialization rule
 
-Every response mutation, whether a command or a direct write, locks the poll row `FOR SHARE` and re-checks that the poll is open. Closing a poll (a direct status update) or finalizing it updates that row. That update waits for in-flight saves, and any save that starts later sees the closed state. **A save either commits entirely before the close/finalize, or is rejected after it.** Saves for the same participant are serialized by a `FOR NO KEY UPDATE` lock on the participant row.
+Every response mutation, whether a command or a direct write, locks the poll row `FOR SHARE` and re-checks that the poll is open. Closing a poll (a direct status update) or finalizing it updates that row. That update waits for in-flight saves, and any save that starts later sees the closed state. **A save either commits entirely before the close/finalize, or is rejected after it.** Saves lock the poll before the participant (`FOR UPDATE`) and, for guests, the credential. Ownership and capability are checked again after the locks, before a saved request can be replayed. Claims and rotations use the same lock order: a claim or rotation that commits first rejects the waiting save's old capability.
+
+Option interval edits/deletes and finalization serialize on the poll's `FOR UPDATE` lock. Once selected, an option's interval must remain unchanged. Clear the selection or select another option before editing/deleting it. Unselected options remain editable. If an option mutation commits before finalization, finalization uses the new interval or rejects a deleted option. If finalization commits first, a waiting mutation of its selected option is rejected. Deleting the parent poll remains allowed.
 
 ## Commands
 
@@ -129,7 +132,16 @@ npm run test:responses:db
 - close serialization outcomes, organizer-only finalization, and selected-time normalization and rejection
 - owner poll deletion cascades, and account deletion erasing save results and notes
 
-PGlite has one connection, so row-lock waiting is described rather than raced; the tests assert the outcomes on both sides of a close.
+The PGlite scenarios also cover selected-option edits/deletion, clearing the selection, parent deletion with a selected option, and rejecting an old capability's saved-request replay after claim.
+
+`tests/concurrent-commands.test.mjs` uses independent PostgreSQL connections. It observes `pg_stat_activity.wait_event_type = 'Lock'` before committing the winning operation; elapsed time is not used as evidence that the loser waited. Its 17 races cover claim/rotation before guest update/save/rotation/claim, an edit before claim, member and guest save/close in both orders, and selected-option edit/delete against finalization in both orders. The fixture replays every migration, uses actual API roles, and requires an empty database named `scheduler_test_*`.
+
+```bash
+# Create a fresh disposable database first. Never point this at development or hosted data.
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/scheduler_test_commands npm run test:commands:concurrent
+```
+
+The October 23 remediation run passed all 17 races on PostgreSQL 18.4 using an isolated Unix socket with TCP disabled. The test-only client is pinned to `pg` 8.23.1. A standard PostgreSQL service in CI can run the same command; no embedded runtime dependency or hosted Supabase access is required.
 
 One existing test fixture changed: `tests/rpc-authorization.test.mjs` seeds its two legacy cross-poll responses with the new check trigger disabled when it exists. The test of F02's summary filter still covers rows written before F06.
 

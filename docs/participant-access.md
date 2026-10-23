@@ -60,7 +60,7 @@ All five are exposed as `public` invoker wrappers over `poll_private` definers, 
 
 `update_guest_participant` replaces both editable fields, so clients send the current display name with the new comment. It cannot change any other column. The returned `participant.anonymous_email` is always `NULL`; a supplied contact email is stored privately and has no client read path yet. Join and edit take a `FOR SHARE` lock on the poll row, so they cannot interleave with a concurrent close.
 
-`poll_private.verified_guest_participant(participant_uuid, guest_token)` returns the verified guest row ID or `NULL`. It is not executable by API roles and is the verifier later elevated commands should reuse: F04 for claiming a guest record and F06/F10 for guest availability saves. A row with a non-null `user_id` never verifies as a guest. [F04](membership-integrity.md) adds `claim_guest_participant`, which uses this verifier, and extends `join_poll_as_guest` with an optional client-generated capability for idempotent retries.
+`poll_private.verified_guest_participant(participant_uuid, guest_token)` returns the verified guest row ID or `NULL` for reads. Mutations use `poll_private.lock_guest_participant` first: it locks the poll, participant, then credential, and verifies in a fresh statement after every lock wait has finished. Neither helper is executable by API roles. F04 claims and F06/F10 guest saves use the same mutation helper. A claim or rotation that commits first therefore rejects an older capability operation that was waiting; an edit that gets the locks first completes before the claim or rotation. A row with a non-null `user_id` never verifies as a guest. [F04](membership-integrity.md) adds `claim_guest_participant` and extends `join_poll_as_guest` with an optional client-generated capability for idempotent retries.
 
 ## Previously exposed tokens and emails
 
@@ -84,13 +84,15 @@ Signed-in flows keep working without client changes. **The web signed-out guest 
 
 iOS and Android do not support signed-out participation (`PollDetailView` passes no guest name; Android omits a name and would violate the identity check), so their only change is the empty pre-join list.
 
-**Required web guest adapter.** Ship it right after the migration is deployed. To avoid a window between the two, the adapter may fall back to the old insert when the RPC is missing (PostgREST `PGRST202`).
+**Web guest adapter (ships with F03, F04, and F06/F10).** Implemented in [`guest-capability.ts`](../apps/web/src/lib/guest-capability.ts), [`stores/polls.ts`](../apps/web/src/lib/stores/polls.ts), [`availability-editor.ts`](../apps/web/src/lib/availability-editor.ts), and the [poll page](../apps/web/src/routes/polls/[id]/+page.svelte).
 
-1. Join: `supabase.rpc('join_poll_as_guest', { poll_uuid, display_name })`. Store `{ participant_id: data.participant.id, guest_token: data.guest_token }` per poll in browser storage. Never log it or send it anywhere else.
-2. Load: when a stored capability exists for the poll, call `rpc('get_guest_poll_detail', { participant_uuid, guest_token })` and fill `currentPoll`, `currentPollTimeOptions`, `currentPollParticipants`, and `currentPollResponses` from its fields. Identify the guest's own row by `participant_id`; today the page matches only `user_id`.
-3. Edit: save name/comment with `update_guest_participant`. Save availability with the F06/F10 command when it lands; today guests still have no response write path.
-4. Errors: on `Guest access denied`, clear the stored capability and show the join prompt again. On `Poll is not accepting participants/changes`, show the poll as closed.
-5. Realtime: guests receive no participant/response events. Refetch `get_guest_poll_detail` after the guest's own saves, or poll on an interval.
+Guests join with a client-generated capability kept per poll in memory and browser storage. The pending token survives uncertain join responses, so retries use F04's idempotent join rather than creating another participant. Failed storage does not discard the capability during the immediate detail reload or same-session navigation. Invalid capabilities are cleared and the page offers to join again.
+
+The page loads guests through `get_guest_poll_detail`, then obtains the versioned own-response snapshot through `get_availability`. Members and guests both save availability and comment with `save_availability`, keep drafts and request IDs on failure, and explicitly resolve version conflicts. Guest availability controls are enabled. Signed-in joins use `join_poll`, and organizers finalize through `finalize_poll`.
+
+The unreleased application ships this adapter with its backend prerequisites; missing RPCs produce retryable errors and never fall back to direct guest inserts or per-row response writes. Tokens are not rendered or included in logs. Guests refresh on load and do not subscribe to participant/response Realtime events.
+
+See [Web guest access and availability saves](web-availability.md) for the complete retry contract, integration evidence, CI commands, and validation limits.
 
 ## Verification
 
@@ -119,8 +121,8 @@ Two assertions in `tests/rpc-authorization.test.mjs` were scoped, without changi
 
 1. **Integration owner:** replay the combined history (F02, F08, F03 in version order) and run every database and Edge suite.
 2. **Project owner, before applying:** list live policies with `SELECT policyname, cmd, roles, qual, with_check FROM pg_policies WHERE tablename = 'poll_participants'`. The migration drops only the policies named in checked-in migrations. Remove any dashboard-created permissive policy as part of the same change; otherwise it still combines with OR.
-3. Have the web guest adapter ready (with the `PGRST202` fallback) before applying.
-4. Apply the migration through the normal deployment process. It rewrites every participant row once and adds two check constraints, so it briefly holds an exclusive lock on `poll_participants`. Deploy the web adapter immediately afterwards.
+3. Deploy the web release containing the guest adapter **first**. Until the migration lands, its `PGRST202` fallback keeps the legacy signed-out join working, so there is no broken window.
+4. Apply the migration through the normal deployment process. It rewrites every participant row once and adds two check constraints, so it briefly holds an exclusive lock on `poll_participants`. Guests who joined through the fallback before this point have no capability, the same as other legacy guests.
 5. Confirm `private` and `poll_private` remain absent from the exposed API schemas. Check live grants, including custom roles that inherit from `anon` or `authenticated`: `has_table_privilege(role, 'public.poll_participants', 'UPDATE')` should be false and `has_column_privilege(role, 'public.poll_participants', 'comment', 'UPDATE')` true only for `authenticated`.
 6. PostgREST smoke checks with a signed-out key, a member account, and a non-member account. Signed-out and non-member reads of any poll's participants return `[]`. A member's read returns rows with `access_token = id` and no email. A member `PATCH` of `comment` succeeds and of `user_id` or `poll_id` fails. `rpc/join_poll_as_guest` returns a capability that works with `rpc/get_guest_poll_detail`.
 7. Check that web Realtime participant updates still arrive for members of an active poll.

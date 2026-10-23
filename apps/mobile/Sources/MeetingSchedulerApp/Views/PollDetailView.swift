@@ -576,7 +576,7 @@ struct PollDetailView: View {
                 actionError = nil
             } catch {
                 guard generation == viewGeneration, account == authService.currentUserId else { return }
-                actionError = "The final time could not be selected. Reload the poll and try again."
+                actionError = "The final time could not be confirmed. Reload the poll and try again."
             }
         }
     }

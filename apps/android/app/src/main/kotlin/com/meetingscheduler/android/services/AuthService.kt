@@ -1,6 +1,5 @@
 package com.meetingscheduler.android.services
 
-import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -20,7 +19,21 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-class AuthService(private val context: Context, private val scope: CoroutineScope) {
+/** Billing identity follows the auth session. Implemented by [PurchaseService]. */
+interface BillingIdentity {
+    suspend fun login(userId: String)
+    suspend fun logout()
+}
+
+/**
+ * Process-lifetime auth state (F13). [scope] must be the application scope from
+ * [com.meetingscheduler.android.AppContainer]: the session listener launched here has to
+ * keep running across Activity recreation.
+ */
+class AuthService(
+    private val scope: CoroutineScope,
+    private val billingIdentity: BillingIdentity?,
+) {
     private val supabase = SupabaseService.client
 
     var currentUser by mutableStateOf<UserInfo?>(null)
@@ -48,7 +61,7 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
                 currentUser = session?.user
                 currentUser?.id?.let { userId ->
                     loadProfile(userId)
-                    PurchaseService.instance?.login(userId)
+                    billingIdentity?.login(userId)
                 }
             } catch (e: Exception) {
                 println("No existing session: ${e.message}")
@@ -70,14 +83,14 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
                 currentUser = supabase.auth.currentUserOrNull()
                 currentUser?.id?.let { userId ->
                     loadProfile(userId)
-                    PurchaseService.instance?.login(userId)
+                    billingIdentity?.login(userId)
                 }
             }
             is io.github.jan.supabase.auth.status.SessionStatus.NotAuthenticated -> {
                 currentSession = null
                 currentUser = null
                 profile = null
-                PurchaseService.instance?.logout()
+                billingIdentity?.logout()
             }
             else -> {}
         }
@@ -158,15 +171,5 @@ class AuthService(private val context: Context, private val scope: CoroutineScop
     sealed class AuthError : Exception() {
         object NotAuthenticated : AuthError()
         data class AppleSignInFailed(override val message: String) : AuthError()
-    }
-
-    companion object {
-        private var instance: AuthService? = null
-
-        fun getInstance(context: Context, scope: CoroutineScope): AuthService {
-            return instance ?: synchronized(this) {
-                instance ?: AuthService(context, scope).also { instance = it }
-            }
-        }
     }
 }

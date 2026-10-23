@@ -335,13 +335,8 @@ BEGIN
     IF caller_id IS NULL THEN
         RAISE EXCEPTION 'Authentication required' USING ERRCODE = '42501';
     END IF;
-    SELECT * INTO participant FROM public.poll_participants pp
-    WHERE pp.id = poll_private.verified_guest_participant(participant_uuid, guest_token)
-    FOR UPDATE;
-    -- Re-check after the lock: a concurrent claim may have bound the row.
-    IF NOT FOUND OR participant.user_id IS NOT NULL THEN
-        RAISE EXCEPTION 'Guest access denied' USING ERRCODE = '42501';
-    END IF;
+    PERFORM poll_private.lock_guest_participant(participant_uuid, guest_token);
+    SELECT * INTO participant FROM public.poll_participants pp WHERE pp.id = participant_uuid;
     IF EXISTS (SELECT 1 FROM public.poll_participants pp
                WHERE pp.poll_id = participant.poll_id AND pp.user_id = caller_id) THEN
         RAISE EXCEPTION 'Already a member of this poll' USING ERRCODE = '23505';

@@ -32,9 +32,22 @@ private struct PurchaseServiceKey: EnvironmentKey {
     }
 }
 
+// MARK: - PersistenceProvider
+
+private struct PersistenceProviderKey: EnvironmentKey {
+    static var defaultValue: any PersistenceProviderProtocol {
+        MainActor.assumeIsolated { AccountPersistence.shared }
+    }
+}
+
 // MARK: - EnvironmentValues
 
 extension EnvironmentValues {
+    public var persistenceProvider: any PersistenceProviderProtocol {
+        get { self[PersistenceProviderKey.self] }
+        set { self[PersistenceProviderKey.self] = newValue }
+    }
+
     public var authService: any AuthServiceProtocol {
         get { self[AuthServiceKey.self] }
         set { self[AuthServiceKey.self] = newValue }

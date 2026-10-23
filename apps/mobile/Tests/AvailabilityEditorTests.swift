@@ -211,4 +211,21 @@ final class AvailabilityEditorTests: XCTestCase {
         XCTAssertEqual(editor.saved?.version, 9)
         XCTAssertTrue(editor.isSaved)
     }
+    func testIdentityResetRejectsLateConflictAndErrorState() async {
+        let service = MockPollService()
+        let editor = await loadedEditor(service)
+        editor.comment = "A draft"
+        var continuation: CheckedContinuation<AvailabilitySnapshot, Error>?
+        service.availabilitySaver = { _ in try await withCheckedThrowingContinuation { continuation = $0 } }
+        let save = Task { await editor.save(pollId: pollId, participantId: participantId, using: service) }
+        while continuation == nil { await Task.yield() }
+        editor.reset()
+        continuation?.resume(throwing: AvailabilityCommandError.conflict)
+        await save.value
+        XCTAssertNil(editor.saved)
+        XCTAssertNil(editor.errorMessage)
+        XCTAssertFalse(editor.needsConflictReview)
+        XCTAssertFalse(editor.isSaving)
+    }
+
 }

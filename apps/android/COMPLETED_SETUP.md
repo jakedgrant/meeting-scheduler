@@ -27,19 +27,9 @@ buildTypes {
 #### ✅ Signing Configuration
 **Location:** `app/build.gradle.kts`
 
-```kotlin
-signingConfigs {
-    create("release") {
-        // Environment variables supported ✅
-        // gradle.properties supported ✅
-        // Fallback to debug keystore ✅
-    }
-}
-```
+Release signing reads `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` from Gradle properties or environment variables. Release packaging fails if any input is missing. It never falls back to the debug keystore (F26).
 
-**How to use:**
-1. Set environment variables OR
-2. Create `gradle.properties` from template
+**How to use:** see [docs/android-release-signing.md](../../docs/android-release-signing.md). Keep credentials in environment variables or `~/.gradle/gradle.properties`, never in the tracked `apps/android/gradle.properties`.
 
 #### ✅ Build Variants
 - **Debug:** Development builds with logging
@@ -296,7 +286,7 @@ These tasks require external services or GUI interaction and **cannot be automat
 # Debug build
 ./gradlew assembleDebug
 
-# Release build (requires signing)
+# Release build (fails without signing inputs; see docs/android-release-signing.md)
 ./gradlew assembleRelease
 
 # Run tests
@@ -308,7 +298,7 @@ These tasks require external services or GUI interaction and **cannot be automat
 
 ### Configuration Files
 - `google-services.json` - Firebase config (download from console)
-- `gradle.properties` - Signing credentials (create from template)
+- `~/.gradle/gradle.properties` or environment variables - Signing credentials (never the tracked `apps/android/gradle.properties`)
 - `proguard-rules.pro` - Already configured ✅
 - `build.gradle.kts` - Already configured ✅
 
