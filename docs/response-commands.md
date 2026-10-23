@@ -83,30 +83,20 @@ Errors:
 
 Errors: `42501` `Authentication required`; `42501` `Poll access denied` (not the creator, or missing); `42501` `Poll cannot be finalized` (draft or archived); `22023` `Time option does not belong to this poll`.
 
-## Client adapter contract and rollout
+## Implemented clients and prelaunch deployment
 
-Installed clients keep working; no client change is required for this migration:
+Web, iOS and Android now load `get_availability`, save the complete response set and comment through `save_availability`, and finalize by option identity through `finalize_poll`. Each editor retains a failed draft, reuses its request UUID for an unchanged retry, applies the persisted response, and requires explicit review after a version conflict. Editing stays disabled until the initial saved baseline loads. Native services reject results from an earlier account; iOS also invalidates detail caches around uncertain writes and adopts the returned final poll.
 
-- Web `submitAvailability`, iOS `submitAvailability`, and Android `saveResponses` upsert their own rows on open polls. On closed or expired polls they now get `42501`. The web hides editing on closed polls but not on active polls past `closes_at`, and it only logs save failures; the F10 adapter below fixes both.
-- Member comment updates are unchanged.
-- Web/iOS/Android finalize by updating `selected_*_time` with an option's times; the trigger normalizes iOS's second-precision values. Writes that match no option fail with `23514`.
-- Signed-out and pre-join screens no longer receive response rows. Web already fetched responses by participant ID, so pre-join counts were empty after F03.
+Web guests retain a capability in memory when browser storage is unavailable. A lost join response can be retried with the same generated token, and stale page operations cannot overwrite a newer capability or account's state. Native navigation still requires sign-in; capability argument support does not establish a signed-out native journey.
 
-Target adapter, per client (F10):
+This project has not been publicly released. Deploy the ordered migrations and these clients together in the development/staging environment before launch; no installed public-client retirement period is required. Direct response writes remain constrained by the database invariants above. Removing that compatibility surface can be a separate simplification.
 
-1. Keep the user's edits as a **draft** separate from the server snapshot. Generate a `request_id` when the user taps Save and reuse it for every retry of that draft.
-2. Call `save_availability` with the complete response set and the comment. Pass the `version` from the last load as `expected_version` to detect edits from another device, or omit it for last-write-wins.
-3. Replace the displayed state and cache only with the returned object. On any error, keep the draft and show a retry action; never mark it saved. Handle `PT409` by reloading through `get_availability` and asking the user, or merging.
-4. Organizers finalize with `finalize_poll` instead of updating `polls`.
-5. **Web guests** (F03 adapter, `apps/web/src/lib/guest-capability.ts`): pass the stored `participant_uuid` and `guest_token`, re-enable the availability buttons for guests, and route `Guest access denied` to the existing lost-capability notice.
+1. Replay every migration in version order, then run `npm run test:database` and the real PostgreSQL concurrency suite below. CI replays the same history on PostgreSQL 17 and 18.
+2. Before applying to an existing development database, inspect the cross-poll quarantine count and selected-time pair violations described above. Resolve invalid rows and validate any remaining `NOT VALID` constraint.
+3. Apply the migrations and verify effective grants, policies and RPC exposure in the target Supabase project. Dashboard-created policies must not broaden the intended four response policies.
+4. Deploy all three clients. Complete signed-in and guest journeys against the target PostgREST endpoint before launch, including permission loss, retry and conflict handling. Local role fixtures and SDK transport tests do not establish hosted configuration or a mounted UI journey.
 
-Rollout:
-
-1. **Integration owner:** replay F02, F08, F03, F04, account deletion, and this migration in version order, then run every suite.
-2. **Project owner:** before applying, count the cross-poll rows that will be quarantined: `SELECT count(*) FROM availability_responses ar JOIN poll_participants pp ON pp.id = ar.participant_id JOIN poll_time_options pto ON pto.id = ar.time_option_id WHERE pp.poll_id <> pto.poll_id`. Run the selected-time query above as well.
-3. Apply the migration. It locks `availability_responses` while quarantining. Check for the `NOT VALID` notice, and confirm the live response policies are exactly the four above (remove dashboard-created ones).
-4. Ship the client adapters: web first (it can feature-detect `PGRST202`), then native.
-5. After installed versions age out, a follow-up migration can drop the direct response write policies so that `save_availability` is the only write path. Until then, direct writes are held to the same invariants.
+See the [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md), [web evidence](web-availability.md), [iOS cache evidence](ios-persistence-evidence.md), and [iOS command evidence](ios-response-client-evidence.md).
 
 Retention: `private.response_save_requests` grows by one row per save. Prune old entries, for example `DELETE FROM private.response_save_requests WHERE created_at < now() - interval '30 days'`, from a scheduled job. Retries older than the retention window will then be re-applied as new saves.
 
