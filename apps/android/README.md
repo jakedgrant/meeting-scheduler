@@ -6,10 +6,10 @@ This is the Android port of the Meeting Scheduler iOS app, translated from Swift
 
 The app follows the same architecture as the iOS version:
 
-- **MVVM Pattern**: ViewModels manage state and business logic
+- **Screen state**: Composables call services directly; moving screen state into ViewModels is a planned follow-up (see docs/android-lifetimes.md)
 - **Jetpack Compose**: Modern declarative UI framework (equivalent to SwiftUI)
 - **Kotlin Coroutines**: Asynchronous programming (equivalent to Swift async/await)
-- **Services**: Singleton services for auth, polls, calendar, and purchases
+- **Services**: One instance per process for auth, polls, calendar, and purchases, created by `AppContainer` in `MeetingSchedulerApplication` with the Application context and an application coroutine scope (see docs/android-lifetimes.md)
 
 ## Project Structure
 
