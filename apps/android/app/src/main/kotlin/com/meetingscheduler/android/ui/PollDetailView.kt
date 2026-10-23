@@ -56,15 +56,16 @@ fun PollDetailView(
     onNavigateToResponses: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    var poll by remember { mutableStateOf<Poll?>(null) }
-    var timeOptions by remember { mutableStateOf<List<PollTimeOption>>(emptyList()) }
-    var participants by remember { mutableStateOf<List<PollParticipant>>(emptyList()) }
-    var responses by remember { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
-    var myParticipant by remember { mutableStateOf<PollParticipant?>(null) }
-    var localResponses by remember { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
-    var localComment by remember { mutableStateOf("") }
-    var commentError by remember { mutableStateOf("") }
-    var calendarConflicts by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val userId = authService.currentUser?.id
+    var poll by remember(pollId, userId) { mutableStateOf<Poll?>(null) }
+    var timeOptions by remember(pollId, userId) { mutableStateOf<List<PollTimeOption>>(emptyList()) }
+    var participants by remember(pollId, userId) { mutableStateOf<List<PollParticipant>>(emptyList()) }
+    var responses by remember(pollId, userId) { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
+    var myParticipant by remember(pollId, userId) { mutableStateOf<PollParticipant?>(null) }
+    var localResponses by remember(pollId, userId) { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
+    var localComment by remember(pollId, userId) { mutableStateOf("") }
+    var commentError by remember(pollId, userId) { mutableStateOf("") }
+    var calendarConflicts by remember(pollId, userId) { mutableStateOf<Set<String>>(emptySet()) }
 
     val saveSession = remember(pollId, authService.currentUser?.id) { AvailabilitySaveSession() }
     var availabilityLoaded by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
@@ -72,12 +73,12 @@ fun PollDetailView(
     var hasVersionConflict by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
     var conflictSnapshot by remember(pollId, authService.currentUser?.id) { mutableStateOf<AvailabilitySnapshot?>(null) }
     val MAX_COMMENT_LENGTH = 500
-    var isLoading by remember { mutableStateOf(true) }
-    var isSaving by remember { mutableStateOf(false) }
-    var showClosePollDialog by remember { mutableStateOf(false) }
-    var showSelectFinalDateDialog by remember { mutableStateOf(false) }
-    var finalTimeOption by remember { mutableStateOf<PollTimeOption?>(null) }
-    var isSelectingFinalDate by remember { mutableStateOf(false) }
+    var isLoading by remember(pollId, userId) { mutableStateOf(true) }
+    var isSaving by remember(pollId, userId) { mutableStateOf(false) }
+    var showClosePollDialog by remember(pollId, userId) { mutableStateOf(false) }
+    var showSelectFinalDateDialog by remember(pollId, userId) { mutableStateOf(false) }
+    var finalTimeOption by remember(pollId, userId) { mutableStateOf<PollTimeOption?>(null) }
+    var isSelectingFinalDate by remember(pollId, userId) { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -112,16 +113,21 @@ fun PollDetailView(
     }
 
     suspend fun loadSavedAvailability() {
+        val loadingUserId = authService.currentUser?.id
         try {
-            val saved = pollService.getAvailability(pollId)
-            saveSession.acceptLoaded(saved)
+            val saved = saveSession.loadIfCurrent(
+                load = { pollService.getAvailability(pollId) },
+                isCurrent = { authService.currentUser?.id == loadingUserId },
+            ) ?: return
             applySavedAvailability(saved)
             availabilityLoaded = true
             saveError = null
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            saveError = "Could not load your saved availability. Retry before editing."
+            if (authService.currentUser?.id == loadingUserId) {
+                saveError = "Could not load your saved availability. Retry before editing."
+            }
         }
     }
 
@@ -542,22 +548,26 @@ fun PollDetailView(
                     }
                 }
 
-                if (myParticipant != null && saveError != null) {
+                if (saveError != null) {
                     item {
                         Text(saveError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        if (!availabilityLoaded) {
+                        if (myParticipant != null && !availabilityLoaded) {
                             TextButton(onClick = { scope.launch { loadSavedAvailability() } }) {
                                 Text("Retry loading saved responses")
                             }
                         } else if (hasVersionConflict) {
                             TextButton(onClick = {
                                 scope.launch {
+                                    val loadingUserId = authService.currentUser?.id
                                     try {
-                                        conflictSnapshot = pollService.getAvailability(pollId)
+                                        val latest = pollService.getAvailability(pollId)
+                                        if (authService.currentUser?.id == loadingUserId) conflictSnapshot = latest
                                     } catch (error: CancellationException) {
                                         throw error
                                     } catch (error: Exception) {
-                                        saveError = "Could not load the latest version. Your draft is unchanged. Try again."
+                                        if (authService.currentUser?.id == loadingUserId) {
+                                            saveError = "Could not load the latest version. Your draft is unchanged. Try again."
+                                        }
                                     }
                                 }
                             }) { Text("Review latest saved version") }
@@ -739,7 +749,9 @@ fun PollDetailView(
                         finalTimeOption?.let { option ->
                             try {
                                 poll = pollService.finalizePoll(pollId, option.id)
-                            } catch (e: Exception) {
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (error: Exception) {
                                 saveError = "The final date could not be saved. Try again."
                             }
                         }

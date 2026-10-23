@@ -2,6 +2,8 @@ package com.meetingscheduler.android
 
 import com.meetingscheduler.android.models.*
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
@@ -79,5 +81,23 @@ class AvailabilitySaveSessionTest {
         assertEquals("response", result.responseRows().single().id)
         assertEquals(AvailabilityStatus.AVAILABLE, result.responseRows().single().status)
         assertEquals(6L, result.version)
+    }
+    @Test fun lateAccountALoadCannotReplaceAccountBSnapshot() = runBlocking<Unit> {
+        var identity = "A"
+        val oldSession = AvailabilitySaveSession()
+        val delayed = CompletableDeferred<AvailabilitySnapshot>()
+        val started = CompletableDeferred<Unit>()
+        val pending = async {
+            oldSession.loadIfCurrent(load = { started.complete(Unit); delayed.await() }, isCurrent = { identity == "A" })
+        }
+        started.await()
+        identity = "B"
+        val newSession = AvailabilitySaveSession()
+        val accountB = old.copy(participantId = "B-member")
+        newSession.acceptLoaded(accountB)
+        delayed.complete(old)
+        assertNull(pending.await())
+        assertNull(oldSession.snapshot)
+        assertEquals(accountB, newSession.snapshot)
     }
 }

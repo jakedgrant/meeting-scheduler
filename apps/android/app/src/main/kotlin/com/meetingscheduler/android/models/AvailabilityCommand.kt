@@ -49,6 +49,16 @@ class AvailabilitySaveSession(private val newRequestId: () -> String = { UUID.ra
         pending = null
     }
 
+    suspend fun loadIfCurrent(
+        load: suspend () -> AvailabilitySnapshot,
+        isCurrent: () -> Boolean,
+    ): AvailabilitySnapshot? {
+        val value = load()
+        if (!isCurrent()) return null
+        acceptLoaded(value)
+        return value
+    }
+
     suspend fun save(
         draft: AvailabilityDraft,
         send: suspend (AvailabilitySaveRequest) -> AvailabilitySnapshot,
