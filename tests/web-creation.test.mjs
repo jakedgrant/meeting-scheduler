@@ -92,6 +92,28 @@ test('one creation RPC applies authoritative complete state and never writes tab
   assert.equal(storage.values.size, 0);
 });
 
+test('a delayed list snapshot from before creation cannot erase authoritative success', async t => {
+  const { actual, state } = await fixture(t);
+  let finishList;
+  state.handler = name => name === 'get_user_participated_polls'
+    ? new Promise(resolve => { finishList = resolve; })
+    : { data: result, error: null };
+  const loadingList = actual.loadParticipatedPolls();
+  assert.equal(actual.get(actual.pollsLoading), true);
+  const editor = editorFor(actual);
+  await editor.submit();
+  assert.equal(actual.get(actual.pollsLoading), false);
+  finishList({ data: { created_polls: [], joined_polls: [] }, error: null });
+  await loadingList;
+  assert.deepEqual(actual.get(actual.createdPolls), [poll]);
+  assert.deepEqual(actual.get(actual.polls), [poll]);
+  assert.deepEqual(actual.get(actual.currentPoll), poll);
+  // A later, fresh server load may still reconcile normal list state.
+  state.handler = () => ({ data: { created_polls: [poll], joined_polls: [] }, error: null });
+  await actual.loadParticipatedPolls();
+  assert.deepEqual(actual.get(actual.createdPolls), [poll]);
+});
+
 for (const storage of [disk()]) {
   test(`lost reply retains draft and immutable operation, then recovers authoritative replay (${storage === failingDisk ? 'failed' : 'working'} storage)`, async t => {
     const { actual, state } = await fixture(t);

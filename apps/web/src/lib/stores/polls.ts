@@ -42,6 +42,7 @@ let realtimeChannel: RealtimeChannel | null = null
 let loadGeneration = 0
 let requestedPollId: string | null = null
 let identityGeneration = 0
+let listGeneration = 0
 let lastUserId: string | null = null
 
 // Invalidate in-flight reads and current detail at every account transition.
@@ -50,6 +51,7 @@ user.subscribe(value => {
   if (userId === lastUserId) return
   lastUserId = userId
   identityGeneration++
+  listGeneration++
   cleanupPollRealtime()
   polls.set([])
   createdPolls.set([])
@@ -64,6 +66,7 @@ function capabilityForPoll(pollId: string) {
 
 // Load user's polls (both created and participated)
 export async function loadParticipatedPolls() {
+  const generation = ++listGeneration
   const currentUser = get(user)
   if (!currentUser) {
     createdPolls.set([])
@@ -78,7 +81,7 @@ export async function loadParticipatedPolls() {
   try {
     const { data, error } = await supabase.rpc('get_user_participated_polls')
 
-    if (identity !== identityGeneration) return
+    if (identity !== identityGeneration || generation !== listGeneration) return
     if (error) throw error
 
     const created = data?.created_polls || []
@@ -90,7 +93,7 @@ export async function loadParticipatedPolls() {
   } catch (err) {
     console.error('Failed to load polls:', err)
   } finally {
-    pollsLoading.set(false)
+    if (identity === identityGeneration && generation === listGeneration) pollsLoading.set(false)
   }
 }
 
@@ -339,6 +342,9 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
     throw new Error('Creation result could not be confirmed')
   }
   // Apply returned caps and premium state, never a local entitlement estimate.
+  // A list requested before creation may contain a pre-commit snapshot.
+  listGeneration++
+  pollsLoading.set(false)
   createdPolls.update(rows => [result.poll, ...rows.filter(row => row.id !== result.poll.id)])
   polls.update(rows => [result.poll, ...rows.filter(row => row.id !== result.poll.id)])
   currentPoll.set(result.poll)
