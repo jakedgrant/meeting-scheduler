@@ -13,6 +13,10 @@ public final class MockPollService: PollServiceProtocol {
     public var sampleTimeOptions: [PollTimeOption]
     public var sampleParticipants: [PollParticipant]
     public var sampleResponses: [AvailabilityResponse]
+    public var availabilityLoader: (@MainActor (UUID, UUID, String?) async throws -> AvailabilitySnapshot)?
+    public var availabilitySaver: (@MainActor (SaveAvailabilityRequest) async throws -> AvailabilitySnapshot)?
+    public var finalizer: (@MainActor (UUID, UUID) async throws -> Poll)?
+    private var responseVersion: Int64 = 0
 
     /// Derived from sampleParticipants — matches what PollService populates during loadMyPolls().
     public var pollParticipantCounts: [UUID: Int] {
@@ -197,7 +201,15 @@ public final class MockPollService: PollServiceProtocol {
 
     public func updatePollStatus(pollId: UUID, status: PollStatus) async throws {}
 
-    public func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws {}
+    public func finalizePoll(pollId: UUID, timeOptionId: UUID) async throws -> Poll {
+        if let finalizer { return try await finalizer(pollId, timeOptionId) }
+        guard var poll = myPolls.first(where: { $0.id == pollId }),
+              let option = sampleTimeOptions.first(where: { $0.id == timeOptionId && $0.pollId == pollId }) else { throw PollError.pollNotFound }
+        poll.status = .closed
+        poll.selectedStartTime = option.startTime
+        poll.selectedEndTime = option.endTime
+        return poll
+    }
 
     public func loadParticipants(pollId: UUID) async -> [PollParticipant] {
         sampleParticipants.filter { $0.pollId == pollId }
@@ -211,9 +223,28 @@ public final class MockPollService: PollServiceProtocol {
         sampleResponses.filter { participantIds.contains($0.participantId) }
     }
 
-    public func submitAvailability(participantId: UUID, timeOptionId: UUID, status: AvailabilityStatus, note: String?) async throws {}
+    public func getAvailability(pollId: UUID, participantId: UUID, guestToken: String? = nil) async throws -> AvailabilitySnapshot {
+        if let availabilityLoader { return try await availabilityLoader(pollId, participantId, guestToken) }
+        return AvailabilitySnapshot(participantId: participantId, pollId: pollId, version: responseVersion,
+            comment: sampleParticipants.first(where: { $0.id == participantId })?.comment,
+            responses: sampleResponses.filter { $0.participantId == participantId }.map {
+                SavedAvailabilityAnswer(id: $0.id, timeOptionId: $0.timeOptionId, status: $0.status, note: $0.note, updatedAt: $0.updatedAt)
+            })
+    }
 
-    public func updateParticipantComment(participantId: UUID, comment: String?) async throws {}
+    public func saveAvailability(_ request: SaveAvailabilityRequest) async throws -> AvailabilitySnapshot {
+        if let availabilitySaver { return try await availabilitySaver(request) }
+        guard request.expectedVersion == responseVersion else { throw AvailabilityCommandError.conflict }
+        responseVersion += 1
+        let snapshot = AvailabilitySnapshot(participantId: request.participantId, pollId: request.pollId,
+            version: responseVersion, comment: request.comment,
+            responses: request.responses.map { SavedAvailabilityAnswer(timeOptionId: $0.timeOptionId, status: $0.status, note: $0.note) },
+            savedAt: Date(), replayed: false)
+        sampleResponses.removeAll { $0.participantId == request.participantId }
+        sampleResponses += snapshot.availabilityResponses
+        if let index = sampleParticipants.firstIndex(where: { $0.id == request.participantId }) { sampleParticipants[index].comment = snapshot.comment }
+        return snapshot
+    }
 
     public func canCreatePoll() async -> Bool { true }
 

@@ -20,6 +20,7 @@ A `BEFORE DELETE` trigger on `public.profiles`, `profiles_anonymize_participatio
 | Response `note` | `[user deleted]` if the user had written one; a `NULL` note stays `NULL` |
 | Private guest credential (verifier and contact email), for example from a claimed guest row | Deleted |
 | F04 merge-audit copies whose archived row names the user | Deleted |
+| `save_availability` results stored for idempotency (F06/F10, which redefines this function) | Deleted |
 
 The row never has a capability afterwards. Every guest command, including get, detail, update, rotate, and claim, returns `42501` / `Guest access denied`. A Data API caller still cannot unlink or rename a participant: F03/F04's identity trigger blocks API roles. The anonymizing update runs as the function owner, which that trigger allows for `user_id → NULL`. The trigger runs before the profile's foreign-key actions, so `ON DELETE SET NULL` finds nothing left to change.
 

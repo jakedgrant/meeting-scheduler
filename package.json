@@ -1,18 +1,23 @@
 {
   "scripts": {
+    "test:database": "node scripts/test-database.mjs",
     "test:rpc:db": "node --test tests/rpc-authorization.test.mjs",
     "test:participants:db": "node --test tests/participant-access.test.mjs",
     "test:membership:db": "node --test tests/membership-integrity.test.mjs",
     "test:account-deletion:db": "node --test tests/account-deletion.test.mjs",
+    "test:responses:db": "node --test tests/response-commands.test.mjs",
+    "test:commands:concurrent": "node --test tests/concurrent-commands.test.mjs",
     "test:calendar:db": "node --test tests/calendar-database.test.mjs",
     "test:calendar:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/calendar/",
     "test:billing:db": "node --test tests/billing-database.test.mjs",
-    "test:billing:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/billing/"
+    "test:billing:edge": "deno test --frozen --config supabase/functions/deno.json --deny-net --deny-env supabase/functions/_shared/billing/",
+    "test:web:guest": "node --test tests/web-guest-capability.test.mjs"
   },
   "dependencies": {
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.11"
+    "@electric-sql/pglite": "0.5.11",
+    "pg": "8.23.1"
   }
 }
