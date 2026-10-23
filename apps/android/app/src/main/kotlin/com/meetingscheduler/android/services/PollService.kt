@@ -7,8 +7,6 @@ import com.meetingscheduler.android.models.*
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -27,9 +25,9 @@ private data class ParticipatedPollsResponse(
     val joinedPolls: List<Poll>
 )
 
+/** Process-lifetime poll state (F13); callers own the coroutine that runs each request. */
 class PollService(
     private val authService: AuthService,
-    private val scope: CoroutineScope
 ) {
     private val supabase = SupabaseService.client
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
@@ -342,15 +340,5 @@ class PollService(
 
     sealed class PollError : Exception() {
         object NotAuthenticated : PollError()
-    }
-
-    companion object {
-        private var instance: PollService? = null
-
-        fun getInstance(authService: AuthService, scope: CoroutineScope): PollService {
-            return instance ?: synchronized(this) {
-                instance ?: PollService(authService, scope).also { instance = it }
-            }
-        }
     }
 }
