@@ -69,7 +69,7 @@ public final class PollCreationEditor {
     }
 
     public func submit(_ payload: PollCreationPayload, using service: any PollServiceProtocol) async {
-        guard !isSubmitting else { return }
+        guard !isSubmitting, result == nil else { return }
         guard canReadDraft else { errorMessage = PollCreationError.draftStorage.localizedDescription; return }
         guard let accountId else { errorMessage = PollCreationError.authentication.localizedDescription; return }
         // Never create a second poll to resolve an uncertain first request.

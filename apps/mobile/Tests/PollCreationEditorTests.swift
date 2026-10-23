@@ -95,6 +95,18 @@ final class PollCreationEditorTests: XCTestCase {
         XCTAssertFalse(reopened.mustResolvePending)
     }
 
+    func testQueuedSubmissionAfterSuccessNeverDispatchesAnotherPoll() async {
+        let editor = PollCreationEditor(store: MemoryCreationDraftStore()); editor.selectAccount(account)
+        let service = MockPollService.empty
+        var sends = 0
+        service.creator = { request in sends += 1; return self.saved(request) }
+        await editor.submit(payload(), using: service)
+        let savedId = editor.result?.poll.id
+        await editor.submit(payload(title: "Queued second tap"), using: service)
+        XCTAssertEqual(sends, 1); XCTAssertEqual(editor.result?.poll.id, savedId)
+        XCTAssertNil(editor.pending)
+    }
+
     func testPayloadMismatchRetainsLockedOperationRatherThanStartingAnotherPoll() async {
         let editor = PollCreationEditor(store: MemoryCreationDraftStore()); editor.selectAccount(account)
         let service = MockPollService.empty

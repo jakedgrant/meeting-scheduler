@@ -1,5 +1,13 @@
 import Foundation
 
+private func creationInstant(_ value: String) throws -> Date {
+    let formatter = ISO8601DateFormatter()
+    if let date = formatter.date(from: value) { return date }
+    formatter.formatOptions.insert(.withFractionalSeconds)
+    if let date = formatter.date(from: value) { return date }
+    throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Creation date must be an ISO 8601 instant"))
+}
+
 public struct PollCreationOption: Codable, Equatable, Sendable {
     public let startTime: Date
     public let endTime: Date
@@ -10,6 +18,20 @@ public struct PollCreationOption: Codable, Equatable, Sendable {
         self.endTime = Date(timeIntervalSince1970: endTime.timeIntervalSince1970.rounded(.down))
         self.isAllDay = isAllDay
     }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        startTime = try creationInstant(values.decode(String.self, forKey: .startTime))
+        endTime = try creationInstant(values.decode(String.self, forKey: .endTime))
+        isAllDay = try values.decode(Bool.self, forKey: .isAllDay)
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        // Explicit UTC suffix; the SDK's default Date encoder omits its zone.
+        try values.encode(startTime.ISO8601Format(), forKey: .startTime)
+        try values.encode(endTime.ISO8601Format(), forKey: .endTime)
+        try values.encode(isAllDay, forKey: .isAllDay)
+    }
+
 }
 
 public struct PollCreationPayload: Codable, Equatable, Sendable {
@@ -29,13 +51,23 @@ public struct PollCreationPayload: Codable, Equatable, Sendable {
         self.closesAt = closesAt.map { Date(timeIntervalSince1970: $0.timeIntervalSince1970.rounded(.down)) }
         self.timeOptions = timeOptions; self.useEventPass = useEventPass
     }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        title = try values.decode(String.self, forKey: .title)
+        description = try values.decodeIfPresent(String.self, forKey: .description)
+        location = try values.decodeIfPresent(String.self, forKey: .location)
+        timezone = try values.decode(String.self, forKey: .timezone)
+        closesAt = try values.decodeIfPresent(String.self, forKey: .closesAt).map(creationInstant)
+        timeOptions = try values.decode([PollCreationOption].self, forKey: .timeOptions)
+        useEventPass = try values.decode(Bool.self, forKey: .useEventPass)
+    }
     public func encode(to encoder: any Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(title, forKey: .title)
         try values.encode(description, forKey: .description)
         try values.encode(location, forKey: .location)
         try values.encode(timezone, forKey: .timezone)
-        try values.encode(closesAt, forKey: .closesAt)
+        try values.encode(closesAt?.ISO8601Format(), forKey: .closesAt)
         try values.encode(timeOptions, forKey: .timeOptions)
         try values.encode(useEventPass, forKey: .useEventPass)
     }
