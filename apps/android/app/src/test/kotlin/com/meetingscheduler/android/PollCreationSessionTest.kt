@@ -1,6 +1,8 @@
 package com.meetingscheduler.android
 
 import com.meetingscheduler.android.models.*
+import com.meetingscheduler.android.services.PollService
+import com.meetingscheduler.android.services.PollSessionIdentity
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
@@ -107,6 +109,54 @@ class PollCreationSessionTest {
         assertNotNull(disk)
         assertNotNull(editor.pending)
         assertNull(editor.saved)
+    }
+
+    private class Identity(override var pollUserId: String? = "account", override var identityGeneration: Long = 1) : PollSessionIdentity
+
+    @Test fun accountBCreateCannotRetainAccountAsLoadedLists() = runBlocking<Unit> {
+        val identity = Identity()
+        val service = PollService(identity, createTransport = { result.copy(poll = result.poll.copy(creatorId = identity.pollUserId!!)) },
+            listTransport = { listOf(result.poll) to listOf(result.poll.copy(id = "joined-A")) })
+        service.loadMyPolls()
+        assertEquals(2, service.myPolls.size)
+        identity.pollUserId = "B"; identity.identityGeneration++
+        service.createPoll(PollCreationRequest("operation-B", payload))
+        assertEquals(listOf("B"), service.myPolls.map { it.creatorId })
+        assertTrue(service.joinedPolls.isEmpty())
+    }
+
+    @Test fun listStartedBeforeCreationCannotEraseAuthoritativeSuccess() = runBlocking<Unit> {
+        val response = CompletableDeferred<Pair<List<Poll>, List<Poll>>>()
+        val started = CompletableDeferred<Unit>()
+        val service = PollService(Identity(), createTransport = { result },
+            listTransport = { started.complete(Unit); response.await() })
+        val load = async { service.loadMyPolls() }
+        started.await()
+        service.createPoll(PollCreationRequest("operation", payload))
+        response.complete(emptyList<Poll>() to emptyList())
+        load.await()
+        assertEquals(listOf(result.poll), service.createdPolls)
+    }
+
+    @Test fun actualServiceRejectsLateAccountAndMalformedOptionResultsBeforePublishing() = runBlocking<Unit> {
+        val identity = Identity()
+        val response = CompletableDeferred<PollCreationResult>()
+        val started = CompletableDeferred<Unit>()
+        val service = PollService(identity, createTransport = { started.complete(Unit); response.await() })
+        val create = async {
+            try { service.createPoll(PollCreationRequest("operation", payload)); fail() }
+            catch (_: IllegalStateException) { }
+        }
+        started.await()
+        identity.pollUserId = "B"; identity.identityGeneration++
+        identity.pollUserId = "account"; identity.identityGeneration++
+        response.complete(result)
+        create.await()
+        assertTrue(service.myPolls.isEmpty())
+        val malformed = PollService(identity, createTransport = { result.copy(timeOptions = result.timeOptions.map { it.copy(pollId = "wrong") }) })
+        try { malformed.createPoll(PollCreationRequest("operation-2", payload)); fail() }
+        catch (_: IllegalStateException) { }
+        assertTrue(malformed.myPolls.isEmpty())
     }
 
     @Test fun canonicalCommandEncodesCompletePayloadAndDecodesAuthoritativeState() {

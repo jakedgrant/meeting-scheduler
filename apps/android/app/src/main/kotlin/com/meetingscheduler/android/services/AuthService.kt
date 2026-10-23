@@ -33,10 +33,10 @@ interface BillingIdentity {
 class AuthService(
     private val scope: CoroutineScope,
     private val billingIdentity: BillingIdentity?,
-) {
+) : PollSessionIdentity {
     private val supabase = SupabaseService.client
 
-    var identityGeneration by mutableStateOf(0L)
+    override var identityGeneration by mutableStateOf(0L)
         private set
     private var observedIdentity: String? = null
 
@@ -55,6 +55,8 @@ class AuthService(
         private set
     var isLoading by mutableStateOf(true)
         private set
+
+    override val pollUserId: String? get() = currentUser?.id
 
     val isAuthenticated: Boolean
         get() = currentUser != null

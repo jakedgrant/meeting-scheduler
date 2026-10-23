@@ -28,11 +28,18 @@ private data class ParticipatedPollsResponse(
 @Serializable
 private data class JoinPollResult(val participant: PollParticipant, val created: Boolean)
 
+interface PollSessionIdentity {
+    val pollUserId: String?
+    val identityGeneration: Long
+}
+
 /** Process-lifetime poll state (F13); callers own the coroutine that runs each request. */
 class PollService(
-    private val authService: AuthService,
+    private val authService: PollSessionIdentity,
+    private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
+    private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
 ) {
-    private val supabase = SupabaseService.client
+    private val supabase by lazy { SupabaseService.client }
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())
@@ -45,6 +52,17 @@ class PollService(
         private set
 
     private var creationRevision = 0L
+    private var pollStateAccountKey: String? = null
+
+    private fun selectPollAccount() {
+        if (pollStateAccountKey == creationAccountKey) return
+        pollStateAccountKey = creationAccountKey
+        creationRevision += 1
+        myPolls = emptyList()
+        createdPolls = emptyList()
+        joinedPolls = emptyList()
+        isLoading = false
+    }
 
     // MARK: - Formatting
 
@@ -57,15 +75,16 @@ class PollService(
     // MARK: - Load Polls
 
     suspend fun loadMyPolls() {
-        if (authService.currentUser == null) return
+        selectPollAccount()
+        if (authService.pollUserId == null) return
 
         val accountKey = creationAccountKey
         val revision = creationRevision
         isLoading = true
         try {
-            val response = supabase.postgrest
-                .rpc("get_user_participated_polls", buildJsonObject { })
-                .decodeAs<ParticipatedPollsResponse>()
+            val response = listTransport?.invoke()?.let { ParticipatedPollsResponse(it.first, it.second) }
+                ?: supabase.postgrest.rpc("get_user_participated_polls", buildJsonObject { })
+                    .decodeAs<ParticipatedPollsResponse>()
 
             if (creationAccountKey != accountKey || creationRevision != revision) return
             createdPolls = response.createdPolls
@@ -115,14 +134,15 @@ class PollService(
 
     // MARK: - Create Poll
 
-    val creationAccountId: String? get() = authService.currentUser?.id
+    val creationAccountId: String? get() = authService.pollUserId
     val creationAccountKey: String get() = "${creationAccountId}:${authService.identityGeneration}"
 
     suspend fun createPoll(request: PollCreationRequest): PollCreationResult {
+        selectPollAccount()
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         val response = try {
-            supabase.postgrest.rpc("create_poll", request).decodeAs<PollCreationResult>()
+            createTransport?.invoke(request) ?: supabase.postgrest.rpc("create_poll", request).decodeAs<PollCreationResult>()
         } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
             if (error.code in setOf("42501", "22023", "P0001", "P0002", "22000", "54000")) {
                 throw CreationRejected(requireNotNull(error.code))
@@ -130,7 +150,8 @@ class PollService(
             throw error
         }
         check(creationAccountKey == accountKey) { "Your account changed. Reopen your saved draft." }
-        check(response.poll.creatorId == userId) { "Creation returned a poll for another account." }
+        check(response.poll.creatorId == userId && response.timeOptions.isNotEmpty()
+            && response.timeOptions.all { it.pollId == response.poll.id }) { "Creation returned an invalid poll or options." }
         // Install only the authoritative result, once even after a lost reply/replay.
         creationRevision += 1
         createdPolls = listOf(response.poll) + createdPolls.filterNot { it.id == response.poll.id }
