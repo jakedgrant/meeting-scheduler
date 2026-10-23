@@ -16,16 +16,27 @@ F02 and F08 are **implemented and merged**. Before merge, the combined history p
 
 ## Active work
 
-Second wave, started October 22 from `main` at `6f2c547`. Each finding has its own branch and worktree. Workers commit locally and report to the coordinator. The coordinator reviews the work, replays the combined migrations, and then publishes draft PRs.
+Second wave, started October 22 from `main` at `6f2c547`. Each finding has its own branch and draft PR. The owner authorized pushing and creating PRs.
 
-| Finding | Stream | Branch | Base | Status |
+| Finding | PR | Branch | Base | Status |
 | --- | --- | --- | --- | --- |
-| F03: Participant access | A (backend owner) | `claude/f03-participant-access` | `main` `6f2c547` | Done locally at `d6b704b`; migration `20261022212301_participant_access.sql`; 14 new DB tests. Coordinator review done. |
-| F04: Membership integrity | A (same backend owner) | `claude/f04-membership-integrity` | F03 `d6b704b` | Done locally at `09c2189`; migration `20261022213242_membership_integrity.sql`; 11 new DB tests. Coordinator review done. |
-| F25: Reproducible iOS checkout | C | `claude/f25-ios-checkout` | `main` `6f2c547` | Done locally at `608750f`. Pushed; draft PR not yet opened. A clean `--no-local` clone builds (Debug sim, build-for-testing, Release device; generic destinations, no simulator). Coordinator review done. |
-| F26: Android release signing | D | `claude/f26-android-signing` | `main` `6f2c547` (independent of F25) | Done locally at `66df259`. Pushed; draft PR not yet opened. **Gradle not run:** only JDK 25/26 are installed and there is no SDK 36. The iOS `#if DEBUG` gate compiles. Coordinator review done. Before merging, run the doc's steps 1–4 on JDK 17/21 with SDK 36. |
+| F03: Participant access | [#63](https://github.com/jakedgrant/meeting-scheduler/pull/63) | `claude/f03-participant-access` | `main` | `4f788e8`. Participant lists are owner/member only in every state (owner decision); `get_guest_poll_detail` serves verified guests |
+| F03 web guest adapter | [#68](https://github.com/jakedgrant/meeting-scheduler/pull/68) | `claude/f03-web-guest-adapter` | F03 | `7892085`. **Required with F03, deploy the web first**: F03 breaks the old signed-out `insert().select()` |
+| F04: Membership integrity | [#64](https://github.com/jakedgrant/meeting-scheduler/pull/64) | `claude/f04-membership-integrity` | F03 | `57aa8ba` (rebased onto the amended F03) |
+| Account deletion (existing defect) | [#66](https://github.com/jakedgrant/meeting-scheduler/pull/66) | `claude/participant-account-deletion` | F04 | `2405ece`. Anonymizes participation; comments and response notes become `[user deleted]` (owner decisions) |
+| F06/F10: Response commands | [#69](https://github.com/jakedgrant/meeting-scheduler/pull/69) | `claude/f06-f10-response-commands` | Account deletion | `bc467c8`. Guests save availability with their capability (owner decision); response reads are restricted to owner, member, or verified guest |
+| F25: iOS checkout | [#61](https://github.com/jakedgrant/meeting-scheduler/pull/61) | `claude/f25-ios-checkout` | `main` | `608750f`. Clean-clone builds pass |
+| F26: Android signing | [#62](https://github.com/jakedgrant/meeting-scheduler/pull/62) | `claude/f26-android-signing` | `main` | `abdcf4c`, with the Android CI job (owner decision). The first CI run exposed an existing R8 failure on release builds, fixed with `-dontwarn` rules; the rerun is pending |
+| F13: Android lifetimes | [#67](https://github.com/jakedgrant/meeting-scheduler/pull/67) | `claude/f13-android-lifetimes` | F26 (CI only) | `295a087`. Retarget to `main` after #62 |
+| Coordinator status | [#65](https://github.com/jakedgrant/meeting-scheduler/pull/65) | `claude/remediation-status-2026-10-22` | `main` | This tracker |
 
-Coordinator: branch `claude/remediation-status-2026-10-22` (this status update).
+**Merge order:**
+1. #63 together with #68.
+2. #64.
+3. #66.
+4. #69.
+
+Independent PRs: #61 (before any other change inside the wrapper), #62 once CI is green, #67 after #62, and #65 at any time. Merge the branches one at a time: an octopus merge refuses the F25 gitlink-to-directory change.
 
 ## Ownership and integration
 
@@ -64,6 +75,7 @@ Merging code does not change hosted state. None of the items below has been esta
 | F08 scheduling | Deploy `billing-worker` and `revenuecat-webhook`; install and verify the worker schedule **before** routing paid notifications to the new handler | Same |
 | F08 backfill | Drain the queue seeded by the migration; resolve quarantined identities and legacy passes with provider evidence; verify fresh `reconciled_at` values and pass counts | Same |
 | F08 live validation | Run real sandbox purchase, renewal, cancellation, grace, refund, transfer, and duplicate-delivery tests through the hosted gateway; then check production key scopes and schedule health | Same |
+| Account deletion and F06/F10 (when merged) | Apply in version order after F04: `20261022235817`, then `20261023000544`. Remove any dashboard-created policies on `availability_responses`. Run the cross-poll response and invalid selected-time inspections; if a selected time is invalid, the constraint stays NOT VALID until it is fixed and validated. Re-run any account deletions that failed before. Schedule pruning of `private.response_save_requests` (about 30 days) | [Account deletion](account-deletion.md), [Response commands](response-commands.md) (on their branches) |
 | F03 (when merged) | Inventory any dashboard-created `poll_participants` policies, which the migration doesn't drop; extra permissive policies still combine with OR. Keep `private` and `poll_private` unexposed and check live grants, including custom roles (the identity trigger recognizes API callers by role name). Run the PostgREST and Realtime smoke checks. Decide on disclosure for guest emails that were readable while 00010 was deployed. Old `access_token` values become inert, so no rotation is needed | [Participant access](participant-access.md) (on the F03 branch) |
 | F04 (when merged) | Run the read-only duplicate inspection and keep its output. Apply F03 then F04 (each takes a brief table lock). Compare the `private.participant_merge_audit` counts with the inspection output and verify the unique index. Confirm the only live INSERT policies are F04's. Then ship client `join_poll` adapters and retire direct inserts in a later migration | [Membership integrity](membership-integrity.md) (on the F04 branch) |
 | F25 (when merged) | Before pulling, move the untracked local `apps/mobile/MeetingScheduler` aside in the main checkout, then diff and delete it. Add an iOS CI build job (F24); a cold runner needs github.com access for SwiftPM | [iOS checkout](ios-checkout.md) (on the F25 branch) |
@@ -78,8 +90,12 @@ Merging code does not change hosted state. None of the items below has been esta
 - [x] Verify F25 with a clean disposable checkout build (worker evidence plus coordinator diff review), and review F26's signing failure behavior (static only; Gradle run outstanding).
 - [x] Replay the combined migrations with all suites. The combined tree was `main` + F03 + F04 + F25 + F26 + this branch, at temporary merge `cb9554f`: 69 DB tests (17 RPC, 14 participants, 11 membership, 12 calendar, 15 billing), 38 Edge tests (23 calendar, 15 billing), and seven entry-point `deno check`s passed, with `git diff --check` clean. Sequential merges had no conflicts. (An octopus merge refuses the F25 gitlink-to-directory change; use ordinary merges.)
 - [ ] Publish draft PRs for each finding. All branches are pushed. Creating PRs from the coordinator session was blocked by the permission check, so it awaits the owner.
-- [ ] Decide on account deletion (an existing defect): `poll_participants.user_id ON DELETE SET NULL` conflicts with the `participant_identity` check, so deleting an account that has joined a poll fails. Choose between cascade deletion and anonymizing the row.
-- [ ] F06/F10: accept guest capabilities for availability saves through `poll_private.verified_guest_participant`. F05: enforce `max_participants` at join.
+- [x] Account deletion: the owner chose anonymization, with comments and response notes replaced by `[user deleted]`. Implemented in #66.
+- [x] F06/F10: guest capability saves implemented in #69.
+- [ ] F05/F09: enforce `max_participants` at join, transactional creation, and pass redemption.
+- [ ] F10 client adapters (draft retention, `request_id`, retry) and wiring web guest availability to `save_availability`.
+- [ ] F12: per-session reset on all clients. F14: Android auth callbacks.
+- [ ] Optional F13 emulator check. The worker asked for one API 36 emulator for about 30 minutes (install the debug build, rotate, background, sign in and out, uninstall). This needs the owner's approval.
 - [ ] Continue the dependency sequence: F06/F10, then F05/F09 for Stream A; F12/F13 and F24 for the client streams.
 
 ## Progress log
@@ -123,3 +139,10 @@ Merging code does not change hosted state. None of the items below has been esta
   - The coordinator's independent combined replay passed (see the follow-ups above).
   - The worker's sandbox only allows git in its own worktree, so it committed both branches there. F04 also has a clean separate worktree.
   - No shared runtime or hosted resource was used.
+- **October 22–23, owner decisions and third wave:**
+  - The owner authorized pushing and creating PRs (#61–#69) and decided four questions: anonymize on account deletion (comments and notes become `[user deleted]`), allow guests to save availability through their capability, restrict participant lists to members, and verify F26 in Android CI.
+  - Implemented: F03 amendment, required web guest adapter, account deletion, F06/F10 response commands, F26 CI job, and F13 Android lifetimes.
+  - Coordinator replay of every open branch combined: 92 DB tests (17 RPC, 15 participants, 11 membership, 7 account deletion, 15 responses, 12 calendar, 15 billing), 4 web tests, 38 Edge tests, and seven entry-point checks passed, with `git diff --check` clean.
+  - The replay first exposed an intermittent failure (about one run in three) in the response suite. A fixture picked an option by random UUID order. Fixed in `bc467c8` and verified over eight consecutive runs.
+  - The first Android CI run failed in R8 on JDK-only classes referenced by Apache HttpClient. Release shrinking had never succeeded before; fixed in `abdcf4c`.
+  - No simulator, emulator, local server, or hosted resource was used.
