@@ -31,6 +31,42 @@ export function guestStorageKey(pollId: string): string {
 	return `meeting-scheduler:guest:${pollId}`
 }
 
+/** Generate before joining so an uncertain response can be retried safely. */
+export function newGuestToken(): string {
+	const bytes = new Uint8Array(32)
+	crypto.getRandomValues(bytes)
+	return Array.from(bytes, value => value.toString(16).padStart(2, '0')).join('')
+}
+
+export function pendingGuestStorageKey(pollId: string): string {
+	return `meeting-scheduler:guest-pending:${pollId}`
+}
+
+export function readPendingGuestToken(storage: CapabilityStorage | null, pollId: string): string | null {
+	try {
+		const token = storage?.getItem(pendingGuestStorageKey(pollId))
+		return token && TOKEN.test(token) ? token : null
+	} catch {
+		return null
+	}
+}
+
+export function savePendingGuestToken(storage: CapabilityStorage | null, pollId: string, token: string): void {
+	try {
+		storage?.setItem(pendingGuestStorageKey(pollId), token)
+	} catch {
+		// The in-memory pending token still makes retries safe for this session.
+	}
+}
+
+export function clearPendingGuestToken(storage: CapabilityStorage | null, pollId: string): void {
+	try {
+		storage?.removeItem(pendingGuestStorageKey(pollId))
+	} catch {
+		// The in-memory capability remains usable when storage is unavailable.
+	}
+}
+
 export function isValidCapability(value: unknown): value is GuestCapability {
 	if (!value || typeof value !== 'object') return false
 	const candidate = value as Record<string, unknown>

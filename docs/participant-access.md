@@ -84,16 +84,15 @@ Signed-in flows keep working without client changes. **The web signed-out guest 
 
 iOS and Android do not support signed-out participation (`PollDetailView` passes no guest name; Android omits a name and would violate the identity check), so their only change is the empty pre-join list.
 
-**Web guest adapter (required; ships with F03).** Implemented in [`guest-capability.ts`](../apps/web/src/lib/guest-capability.ts), [`stores/polls.ts`](../apps/web/src/lib/stores/polls.ts), and the [poll page](../apps/web/src/routes/polls/[id]/+page.svelte):
+**Web guest adapter (ships with F03, F04, and F06/F10).** Implemented in [`guest-capability.ts`](../apps/web/src/lib/guest-capability.ts), [`stores/polls.ts`](../apps/web/src/lib/stores/polls.ts), [`availability-editor.ts`](../apps/web/src/lib/availability-editor.ts), and the [poll page](../apps/web/src/routes/polls/[id]/+page.svelte).
 
-1. **Join.** A signed-out `joinPoll` calls `rpc('join_poll_as_guest', { poll_uuid, display_name, contact_email })`. It stores `{ participantId, token }` in `localStorage` under `meeting-scheduler:guest:<poll id>`, one entry per poll. Only on `PGRST202` (the web deployed before the migration) does it fall back to the legacy direct insert. Signed-in joins are unchanged.
-2. **Load.** When signed out with a stored capability, `loadPoll` reads `rpc('get_guest_poll_detail', …)` and fills the poll, time option, participant, and response stores. The page identifies the guest's own row by the stored participant ID, including the "You" badge. Without a capability, or on `PGRST202`, the normal table reads run.
-3. **Edit.** The guest's comment is saved with `update_guest_participant`, sending the current display name. Availability buttons are hidden for guests, with a note, until the F06/F10 guest save command exists. The store refuses guest availability writes rather than letting them fail on RLS.
-4. **Lost or invalid capability.** On `Guest access denied`, or a detail payload for another poll, the stored entry is removed. The page shows "Your guest access to this poll is no longer valid on this device. Join again to take part." and the join prompt returns while the poll is active. Malformed stored entries are discarded without a request. Unavailable storage degrades to a capability that lasts only for the page view.
-5. **Secrecy.** The token is never rendered. Errors are logged as `code`/`message` only, and the token goes nowhere except the guest RPCs.
-6. **Realtime.** Guests do not subscribe; they refresh on load and after their own saves.
+Guests join with a client-generated capability kept per poll in memory and browser storage. The pending token survives uncertain join responses, so retries use F04's idempotent join rather than creating another participant. Failed storage does not discard the capability during the immediate detail reload or same-session navigation. Invalid capabilities are cleared and the page offers to join again.
 
-`npm run test:web:guest` covers storage scoping, tamper handling, storage failures, and error classification. `npm run check` and `npm run build` in `apps/web` cover the store and page.
+The page loads guests through `get_guest_poll_detail`, then obtains the versioned own-response snapshot through `get_availability`. Members and guests both save availability and comment with `save_availability`, keep drafts and request IDs on failure, and explicitly resolve version conflicts. Guest availability controls are enabled. Signed-in joins use `join_poll`, and organizers finalize through `finalize_poll`.
+
+The unreleased application ships this adapter with its backend prerequisites; missing RPCs produce retryable errors and never fall back to direct guest inserts or per-row response writes. Tokens are not rendered or included in logs. Guests refresh on load and do not subscribe to participant/response Realtime events.
+
+See [Web guest access and availability saves](web-availability.md) for the complete retry contract, integration evidence, CI commands, and validation limits.
 
 ## Verification
 

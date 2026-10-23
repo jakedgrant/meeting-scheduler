@@ -2,13 +2,15 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
-	import { user, profile } from '$lib/stores/auth';
+	import { user } from '$lib/stores/auth';
 	import {
 		currentPoll,
 		currentPollTimeOptions,
 		currentPollParticipants,
 		currentPollResponses,
 		currentGuest,
+		currentAvailability,
+		availabilityLoadError,
 		guestNotice,
 		pollsLoading,
 		loadPoll,
@@ -16,18 +18,18 @@
 		updatePollStatus,
 		setSelectedFinalDate,
 		joinPoll,
-		submitAvailability,
-		updateParticipantComment
+		saveAvailability,
+		loadAvailability
 	} from '$lib/stores/polls';
 	import { calendarEnabled, calendarConflicts, calendarStatusError, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
+	import { createAvailabilityEditor } from '$lib/availability-editor';
 	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
 
 	const pollId = $derived($page.params.id as string);
 
 	let isCreator = $derived($currentPoll?.creator_id === $user?.id);
 	// Signed-out guests are identified by the participant id stored with their capability.
-	let isGuest = $derived(!$user && !!$currentGuest);
 	let myParticipant = $derived(
 		$user
 			? $currentPollParticipants.find((p) => p.user_id === $user?.id)
@@ -39,11 +41,18 @@
 	let joiningPoll = $state(false);
 	let joinError = $state('');
 
-	// Track local response changes before saving
-	let localResponses = $state<Record<string, AvailabilityStatus>>({});
-	let localComment = $state('');
+	const editor = createAvailabilityEditor({ save: saveAvailability, load: loadAvailability });
+	const localResponses = $derived($editor.responses);
+	const localComment = $derived($editor.comment);
+	const savingResponses = $derived($editor.saving);
 	let commentError = $state('');
-	let savingResponses = $state(false);
+	let now = $state(Date.now());
+	let clockTimer: ReturnType<typeof setInterval>;
+	let mounted = $state(false);
+	const pollAcceptsResponses = $derived(
+		$currentPoll?.status === 'active' && (!$currentPoll.closes_at || new Date($currentPoll.closes_at).getTime() > now)
+	);
+	const canRespond = $derived(!!myParticipant && pollAcceptsResponses && !!$editor.snapshot && !$availabilityLoadError);
 
 	const MAX_COMMENT_LENGTH = 500;
 
@@ -74,33 +83,22 @@
 	);
 
 	onMount(() => {
-		if (pollId) loadPoll(pollId);
+		mounted = true;
+		clockTimer = setInterval(() => { now = Date.now(); }, 1000);
 	});
 
 	onDestroy(() => {
+		clearInterval(clockTimer);
 		cleanupPollRealtime();
 	});
 
-	// Initialize local responses and comment when participant data loads
 	$effect(() => {
-		if (myParticipant && $currentPollResponses.length > 0) {
-			const myResponses = $currentPollResponses.filter(
-				(r) => r.participant_id === myParticipant?.id
-			);
-			const responseMap: Record<string, AvailabilityStatus> = {};
-			myResponses.forEach((r) => {
-				responseMap[r.time_option_id] = r.status;
-			});
-			localResponses = responseMap;
-		}
+		const identity = $user?.id;
+		if (mounted && pollId) void loadPoll(pollId);
 	});
 
-	// Initialize comment when participant loads
-	$effect(() => {
-		if (myParticipant) {
-			localComment = myParticipant.comment || '';
-		}
-	});
+	// The editor ignores refreshes while dirty, so Realtime cannot replace a draft.
+	$effect(() => { editor.initialize($currentAvailability); });
 
 	// Check for calendar conflicts when poll loads and calendar is enabled
 	$effect(() => {
@@ -111,19 +109,11 @@
 		}
 	});
 
-	// Auto-mark calendar conflicts as unavailable (only if no existing response)
+	// Calendar suggestions are edits, never server-confirmed responses.
 	$effect(() => {
-		if ($calendarConflicts.size > 0 && myParticipant) {
-			const updated = { ...localResponses };
-			let hasChanges = false;
+		if ($calendarConflicts.size > 0 && myParticipant && canRespond && !savingResponses) {
 			for (const conflictId of $calendarConflicts) {
-				if (!updated[conflictId]) {
-					updated[conflictId] = 'unavailable';
-					hasChanges = true;
-				}
-			}
-			if (hasChanges) {
-				localResponses = updated;
+				if (!localResponses[conflictId]) editor.setResponse(conflictId, 'unavailable');
 			}
 		}
 	});
@@ -174,7 +164,7 @@
 	}
 
 	function setResponse(timeOptionId: string, status: AvailabilityStatus) {
-		localResponses = { ...localResponses, [timeOptionId]: status };
+		editor.setResponse(timeOptionId, status);
 	}
 
 	function validateComment(value: string) {
@@ -187,37 +177,13 @@
 	}
 
 	function handleCommentChange(value: string) {
-		localComment = value;
+		editor.setComment(value);
 		validateComment(value);
 	}
 
 	async function saveResponses() {
-		if (!myParticipant) return;
-
-		// Validate comment before saving
-		if (!validateComment(localComment)) {
-			return;
-		}
-
-		savingResponses = true;
-
-		try {
-			// Guests can save their comment; availability needs the guest save command (F06/F10).
-			if (!isGuest) {
-				for (const [timeOptionId, status] of Object.entries(localResponses)) {
-					await submitAvailability(myParticipant.id, timeOptionId, status);
-				}
-			}
-			// Save comment (trimmed, null if empty)
-			const trimmedComment = localComment.trim();
-			await updateParticipantComment(myParticipant.id, trimmedComment || null);
-			// Reload to get updated responses
-			await loadPoll(pollId);
-		} catch (err) {
-			console.error('Failed to save responses:', err);
-		} finally {
-			savingResponses = false;
-		}
+		if (!canRespond || !validateComment(localComment)) return;
+		await editor.save();
 	}
 
 	async function closePoll() {
@@ -275,7 +241,7 @@
 
 		selectingFinalDate = true;
 		try {
-			await setSelectedFinalDate(pollId, timeOption.start_time, timeOption.end_time);
+			await setSelectedFinalDate(pollId, timeOption.id);
 		} catch (err) {
 			console.error('Failed to set final date:', err);
 			alert('Failed to set final date. Please try again.');
@@ -392,7 +358,7 @@
 			</div>
 		{/if}
 
-		{#if !myParticipant && $currentPoll.status === 'active'}
+		{#if !myParticipant && pollAcceptsResponses}
 			<div class="join-prompt">
 				<p>Join this poll to submit your availability</p>
 				{#if !$user}
@@ -455,7 +421,7 @@
 						{@const endFormatted = formatDateTime(option.end_time)}
 						{@const stats = getResponsesForTimeOption(option.id)}
 
-						<div class="time-option-card selectable" onclick={() => selectFinalDate(option)}>
+						<div class="time-option-card selectable">
 							<div class="time-info">
 								<div class="date">{formatted.date}</div>
 								<div class="time">
@@ -473,7 +439,7 @@
 								<span class="stat unavailable" title="Unavailable">{stats.unavailable}</span>
 							</div>
 
-							<button class="select-btn" disabled={selectingFinalDate}>
+							<button class="select-btn" onclick={() => selectFinalDate(option)} disabled={selectingFinalDate}>
 								{selectingFinalDate ? 'Selecting...' : 'Select'}
 							</button>
 						</div>
@@ -491,7 +457,7 @@
 						{@const formatted = formatDateTime(option.start_time)}
 						{@const endFormatted = formatDateTime(option.end_time)}
 						{@const stats = getResponsesForTimeOption(option.id)}
-						{@const myResponse = localResponses[option.id]}
+						{@const myResponse = localResponses[option.id]?.status}
 						{@const hasCalendarConflict = $calendarConflicts.has(option.id)}
 
 						<div class="time-option-card">
@@ -523,12 +489,13 @@
 								</div>
 							</button>
 
-							{#if myParticipant && !isGuest && $currentPoll.status === 'active'}
+							{#if canRespond}
 								<div class="response-buttons">
 									<button
 										class="response-btn available"
 										class:selected={myResponse === 'available'}
 										onclick={() => setResponse(option.id, 'available')}
+										disabled={savingResponses}
 										title="Available"
 									>
 										✓
@@ -537,6 +504,7 @@
 										class="response-btn maybe"
 										class:selected={myResponse === 'maybe'}
 										onclick={() => setResponse(option.id, 'maybe')}
+										disabled={savingResponses}
 										title="Maybe"
 									>
 										?
@@ -545,6 +513,7 @@
 										class="response-btn unavailable"
 										class:selected={myResponse === 'unavailable'}
 										onclick={() => setResponse(option.id, 'unavailable')}
+										disabled={savingResponses}
 										title="Unavailable"
 									>
 										✗
@@ -555,12 +524,34 @@
 					{/each}
 				</div>
 
-				{#if myParticipant && $currentPoll.status === 'active'}
-					{#if isGuest}
-						<p class="guest-availability-note">
-							Availability can't be saved as a guest yet. You can still leave a comment.
-						</p>
-					{/if}
+				{#if $availabilityLoadError}
+					<p class="error" role="alert">{$availabilityLoadError}</p>
+					<button class="btn secondary" onclick={() => loadPoll(pollId)}>Retry loading responses</button>
+				{/if}
+				{#if $editor.error}
+					<p class="error" role="alert">{$editor.error}</p>
+				{/if}
+				{#if $editor.saved}
+					<p role="status">Responses saved.</p>
+				{/if}
+				{#if $editor.conflict}
+					<button class="btn secondary" onclick={editor.reloadAfterConflict} disabled={savingResponses}>
+						Reload saved version and keep my draft
+					</button>
+				{/if}
+				{#if $editor.dirty && $editor.snapshot && $editor.error && !$editor.conflict}
+					<details>
+						<summary>Latest saved responses</summary>
+						{#each $editor.snapshot.responses as response}
+							<p>{formatDateTime($currentPollTimeOptions.find(option => option.id === response.time_option_id)?.start_time ?? '').date}: {response.status}</p>
+						{/each}
+						<p>Comment: {$editor.snapshot.comment || 'None'}</p>
+					</details>
+				{/if}
+				{#if myParticipant && !pollAcceptsResponses}
+					<p>This poll is no longer accepting responses.</p>
+				{/if}
+				{#if canRespond}
 					<div class="comment-section">
 						<div class="comment-header">
 							<label for="participant-comment" class="comment-label">Add a comment (optional)</label>
@@ -575,14 +566,15 @@
 							rows="3"
 							class="comment-textarea"
 							maxlength={MAX_COMMENT_LENGTH}
+							disabled={savingResponses}
 						></textarea>
 						{#if commentError}
 							<p class="comment-error">{commentError}</p>
 						{/if}
 					</div>
 					<div class="save-section">
-						<button class="btn primary" onclick={saveResponses} disabled={savingResponses}>
-							{savingResponses ? 'Saving...' : isGuest ? 'Save Comment' : 'Save Responses'}
+						<button class="btn primary" onclick={saveResponses} disabled={savingResponses || $editor.conflict}>
+							{savingResponses ? 'Saving...' : $editor.error ? 'Retry Save' : 'Save Responses'}
 						</button>
 					</div>
 				{/if}
@@ -631,8 +623,7 @@
 		padding: 2rem;
 	}
 
-	.guest-notice,
-	.guest-availability-note {
+	.guest-notice {
 		padding: 0.75rem 1rem;
 		border-radius: 8px;
 		background: #fff8e1;
