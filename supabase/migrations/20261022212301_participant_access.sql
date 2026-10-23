@@ -228,6 +228,32 @@ REVOKE ALL ON FUNCTION poll_private.new_guest_token(), poll_private.guest_token_
     poll_private.verified_guest_participant(UUID, TEXT) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION poll_private.verified_guest_participant(UUID, TEXT) TO service_role;
 
+-- Mutations serialize before verifying a capability. In particular, never
+-- carry a verification result across a wait for a participant/credential lock:
+-- a claim or rotation may have committed while this operation was waiting.
+-- All capability mutations acquire poll -> participant -> credential locks.
+CREATE FUNCTION poll_private.lock_guest_participant(participant_uuid UUID, guest_token TEXT)
+RETURNS UUID
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    target_poll UUID;
+BEGIN
+    SELECT pp.poll_id INTO target_poll FROM public.poll_participants pp WHERE pp.id = participant_uuid;
+    PERFORM 1 FROM public.polls p WHERE p.id = target_poll FOR SHARE;
+    PERFORM 1 FROM public.poll_participants pp WHERE pp.id = participant_uuid FOR UPDATE;
+    PERFORM 1 FROM private.participant_guest_credentials c
+    WHERE c.participant_id = participant_uuid FOR UPDATE;
+    -- A new statement snapshot after all waits sees committed claim/rotation.
+    IF poll_private.verified_guest_participant(participant_uuid, guest_token) IS NULL THEN
+        RAISE EXCEPTION 'Guest access denied' USING ERRCODE = '42501';
+    END IF;
+    RETURN participant_uuid;
+END;
+$$;
+REVOKE ALL ON FUNCTION poll_private.lock_guest_participant(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+
 CREATE FUNCTION poll_private.join_poll_as_guest(poll_uuid UUID, display_name TEXT, contact_email TEXT)
 RETURNS JSON
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
@@ -346,13 +372,11 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-    guest_id UUID := poll_private.verified_guest_participant(participant_uuid, guest_token);
+    guest_id UUID;
     guest_name TEXT := btrim(display_name);
     participant public.poll_participants;
 BEGIN
-    IF guest_id IS NULL THEN
-        RAISE EXCEPTION 'Guest access denied' USING ERRCODE = '42501';
-    END IF;
+    guest_id := poll_private.lock_guest_participant(participant_uuid, guest_token);
     PERFORM 1 FROM public.polls p
     JOIN public.poll_participants pp ON pp.poll_id = p.id
     WHERE pp.id = guest_id AND p.status = 'active'
@@ -385,9 +409,10 @@ AS $$
 DECLARE
     token TEXT := poll_private.new_guest_token();
 BEGIN
+    PERFORM poll_private.lock_guest_participant(participant_uuid, guest_token);
     UPDATE private.participant_guest_credentials c
     SET token_hash = poll_private.guest_token_hash(token), token_issued_at = now(), updated_at = now()
-    WHERE c.participant_id = poll_private.verified_guest_participant(participant_uuid, guest_token)
+    WHERE c.participant_id = participant_uuid
       AND c.token_hash = poll_private.guest_token_hash(guest_token);
     IF NOT FOUND THEN
         RAISE EXCEPTION 'Guest access denied' USING ERRCODE = '42501';
