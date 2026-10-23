@@ -22,7 +22,11 @@ The coordinator reviewed all ten open architecture PRs and dispatched isolated b
 
 The local combined iOS test head contains coordinator integration `0ce4bc5a1f3ace656ef8473fa4be6acd2feedf83`. Subsequent integration adds the CI environment-context correction and documentation. The final PR head and current checks are available on [PR #69](https://github.com/jakedgrant/meeting-scheduler/pull/69); local results are not described as hosted end-to-end proof.
 
-## Merge dependencies and resource release
+## Integration into main
+
+Although all ten PRs were marked merged, #64/#66/#67/#68/#69 targeted feature branches and were absent from main `a03af56fe0cc6affd171693898d6b11f8e7913e9`. The integration branch merges tested #69 head `2cd63ab000f3f0b787e2dc27500876a0f08f3c96` into that main. That head includes every missing delivery. The [final #69 iOS run](https://github.com/jakedgrant/meeting-scheduler/actions/runs/39921603550), [Android run](https://github.com/jakedgrant/meeting-scheduler/actions/runs/39921603635), and [database/race run](https://github.com/jakedgrant/meeting-scheduler/actions/runs/39921603748) all passed. The integration PR repeats these checks on the combined tree.
+
+## Original merge dependencies and resource release
 
 Merge #63 → #64 → #66. PR #68 branches from #63. Merge #62 before #67. PR #69 includes those prerequisites plus #56, so merge #56, #67 and #68 before #69; GitHub will then remove their already merged changes from its diff. PR #61 is independent. Merge documentation PR #65 after the implementation branches. Preserve the existing stack bases until their parent PRs merge.
 
