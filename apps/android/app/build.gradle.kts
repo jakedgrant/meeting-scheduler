@@ -1,3 +1,5 @@
+import com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +7,45 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.gms.google-services")
     id("com.google.firebase.crashlytics")
+}
+
+// Release signing (F26). Documented in docs/android-release-signing.md.
+//
+// Each input is read from a Gradle property (-P or ~/.gradle/gradle.properties), then
+// from an environment variable of the same name. Release packaging fails unless all
+// four inputs are set and KEYSTORE_FILE names an existing file. Debug builds keep the
+// standard debug key and need none of this.
+fun releaseSigningInput(name: String): String? =
+    providers.gradleProperty(name)
+        .orElse(providers.environmentVariable(name))
+        .orNull
+        ?.takeIf { it.isNotBlank() }
+
+val releaseKeystoreFile: File? = releaseSigningInput("KEYSTORE_FILE")?.let { file(it) }
+val releaseStorePassword = releaseSigningInput("KEYSTORE_PASSWORD")
+val releaseKeyAlias = releaseSigningInput("KEY_ALIAS")
+val releaseKeyPassword = releaseSigningInput("KEY_PASSWORD")
+
+// Explicit opt-in for an unsigned release artifact that a separate, controlled step
+// signs later. Never use it for builds meant for distribution as they are.
+val allowUnsignedRelease =
+    providers.gradleProperty("allowUnsignedRelease").orNull?.toBoolean() == true
+
+// CI's signing check builds against a placeholder google-services.json with no Firebase
+// project, so it passes -PdisableCrashlyticsMappingUpload=true. Real release builds
+// keep uploading the R8 mapping file.
+val disableCrashlyticsMappingUpload =
+    providers.gradleProperty("disableCrashlyticsMappingUpload").orNull?.toBoolean() == true
+
+val releaseSigningProblems: List<String> = buildList {
+    val keystore = releaseKeystoreFile
+    when {
+        keystore == null -> add("KEYSTORE_FILE is not set")
+        !keystore.isFile -> add("KEYSTORE_FILE does not exist or is not a file: $keystore")
+    }
+    if (releaseStorePassword == null) add("KEYSTORE_PASSWORD is not set")
+    if (releaseKeyAlias == null) add("KEY_ALIAS is not set")
+    if (releaseKeyPassword == null) add("KEY_PASSWORD is not set")
 }
 
 android {
@@ -25,24 +66,14 @@ android {
     }
 
     signingConfigs {
-        // Create release signing config
-        // TODO: Update with your actual keystore path and credentials
-        create("release") {
-            // For development, you can use debug keystore
-            // For production, create a release keystore using:
-            // keytool -genkey -v -keystore meeting-scheduler-release.jks -keyalg RSA -keysize 2048 -validity 10000 -alias meeting-scheduler
-
-            // Option 1: Use environment variables (recommended for CI/CD)
-            storeFile = System.getenv("KEYSTORE_FILE")?.let { file(it) }
-            storePassword = System.getenv("KEYSTORE_PASSWORD")
-            keyAlias = System.getenv("KEY_ALIAS")
-            keyPassword = System.getenv("KEY_PASSWORD")
-
-            // Option 2: Use gradle.properties (add to .gitignore)
-            // storeFile = file(project.findProperty("KEYSTORE_FILE") as String? ?: "debug.keystore")
-            // storePassword = project.findProperty("KEYSTORE_PASSWORD") as String?
-            // keyAlias = project.findProperty("KEY_ALIAS") as String?
-            // keyPassword = project.findProperty("KEY_PASSWORD") as String?
+        // Created only when every release signing input is present (see above).
+        if (releaseSigningProblems.isEmpty()) {
+            create("release") {
+                storeFile = releaseKeystoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -55,11 +86,17 @@ android {
                 "proguard-rules.pro"
             )
 
-            // Sign with release config when credentials are available
-            signingConfig = if (System.getenv("KEYSTORE_FILE") != null) {
+            // Never fall back to the debug key. Without complete signing material this
+            // stays unset and validateReleaseSigning fails the packaging tasks, unless
+            // -PallowUnsignedRelease=true was passed.
+            signingConfig = if (releaseSigningProblems.isEmpty()) {
                 signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                null
+            }
+
+            configure<CrashlyticsExtension> {
+                mappingFileUploadEnabled = !disableCrashlyticsMappingUpload
             }
         }
 
@@ -83,6 +120,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -96,6 +134,48 @@ android {
         }
     }
     buildToolsVersion = "36.0.0"
+}
+
+// Fails release packaging when signing material is missing or incomplete. Compiling,
+// linting and unit-testing the release variant still work without it.
+val validateReleaseSigning by tasks.registering {
+    group = "verification"
+    description = "Checks that complete release signing material is configured."
+    val problems = releaseSigningProblems
+    val unsignedAllowed = allowUnsignedRelease
+    doLast {
+        if (problems.isEmpty()) return@doLast
+        if (unsignedAllowed) {
+            logger.warn(
+                "WARNING: building an UNSIGNED release (-PallowUnsignedRelease=true). " +
+                    "Sign it with the release key before distribution. Missing: " +
+                    problems.joinToString("; ")
+            )
+            return@doLast
+        }
+        throw GradleException(
+            buildString {
+                appendLine("Release signing is not configured, so no release artifact was built.")
+                problems.forEach { appendLine("  - $it") }
+                appendLine("Set KEYSTORE_FILE, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD as")
+                appendLine("environment variables or Gradle properties. Release builds never fall")
+                appendLine("back to the debug key. For a deliberately unsigned artifact, pass")
+                appendLine("-PallowUnsignedRelease=true. See docs/android-release-signing.md.")
+            }
+        )
+    }
+}
+
+val releaseOutputTasks = setOf(
+    "assembleRelease",
+    "bundleRelease",
+    "packageRelease",
+    "packageReleaseBundle",
+    "signReleaseBundle",
+    "packageReleaseUniversalApk",
+)
+tasks.named { it in releaseOutputTasks }.configureEach {
+    dependsOn(validateReleaseSigning)
 }
 
 dependencies {

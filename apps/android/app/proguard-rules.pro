@@ -164,3 +164,12 @@
 
 # Aggressive optimization (uncomment if needed)
 # -optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
+
+# ===== GOOGLE API CLIENT / APACHE HTTPCLIENT =====
+
+# google-api-client-android brings in Apache HttpClient, which references JDK-only
+# JNDI and Kerberos (GSS-API) classes that don't exist on Android. Those code paths
+# (LDAP hostname parsing, Kerberos auth) are never reached on Android. Without these
+# rules, R8 fails release minification with "Missing class" errors.
+-dontwarn javax.naming.**
+-dontwarn org.ietf.jgss.**

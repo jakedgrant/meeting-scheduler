@@ -662,29 +662,11 @@ keytool -genkey -v -keystore meeting-scheduler-upload-key.jks -keyalg RSA -keysi
 
 ### Configure Signing in Android Studio
 
-- [ ] Open `app/build.gradle.kts`
-- [ ] Add signing config:
-  ```kotlin
-  android {
-      signingConfigs {
-          create("release") {
-              storeFile = file("/path/to/meeting-scheduler-upload-key.jks")
-              storePassword = "your_store_password"
-              keyAlias = "meeting-scheduler"
-              keyPassword = "your_key_password"
-          }
-      }
+- [ ] `app/build.gradle.kts` already defines the release signing config. Don't edit it to add credentials.
+- [ ] Provide `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` as environment variables (CI) or in `~/.gradle/gradle.properties` (local). See [docs/android-release-signing.md](../../docs/android-release-signing.md).
+- [ ] Release builds fail if any input is missing. They never fall back to the debug key.
 
-      buildTypes {
-          release {
-              signingConfig = signingConfigs.getByName("release")
-              // ... other release config
-          }
-      }
-  }
-  ```
-
-**Security Note:** Don't commit passwords! Use environment variables or gradle.properties
+**Security Note:** Don't commit passwords or keystores. `apps/android/gradle.properties` is tracked by Git, so keep credentials out of it.
 
 ### Build Release APK/AAB
 

@@ -1,6 +1,7 @@
 package com.meetingscheduler.android.services
 
 import android.Manifest
+import android.app.Application
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
@@ -41,8 +42,12 @@ enum class CalendarSource {
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "calendar_settings")
 
+/**
+ * Process-lifetime calendar state (F13). [context] is the Application, so the service never
+ * holds an Activity; [scope] is the application scope.
+ */
 class CalendarService(
-    private val context: Context,
+    private val context: Application,
     private val authService: AuthService,
     private val scope: CoroutineScope
 ) {
@@ -306,20 +311,6 @@ class CalendarService(
         val endTime: Instant,
         val source: CalendarSource
     )
-
-    companion object {
-        private var instance: CalendarService? = null
-
-        fun getInstance(
-            context: Context,
-            authService: AuthService,
-            scope: CoroutineScope
-        ): CalendarService {
-            return instance ?: synchronized(this) {
-                instance ?: CalendarService(context.applicationContext, authService, scope).also { instance = it }
-            }
-        }
-    }
 }
 
 @Serializable
