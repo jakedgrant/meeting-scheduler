@@ -1,0 +1,32 @@
+
+> test:commands:concurrent
+> node --test tests/concurrent-commands.test.mjs
+
+Race runtime: PostgreSQL 18.4 on x86_64-apple-darwin24.6.0, compiled by Apple clang version 17.0.0 (clang-1700.6.3.2), 64-bit
+▶ real PostgreSQL command ordering with independent sessions
+  ✔ claim commits before waiting guest update: old capability denied (27.98675ms)
+  ✔ claim commits before waiting guest save: old capability denied (23.985208ms)
+  ✔ claim commits before waiting guest rotate: old capability denied (1.766042ms)
+  ✔ claim commits before waiting guest claim: old capability denied (1.642959ms)
+  ✔ rotation commits before waiting guest update: old capability denied (1.669541ms)
+  ✔ rotation commits before waiting guest save: old capability denied (1.6305ms)
+  ✔ rotation commits before waiting guest rotate: old capability denied (1.603167ms)
+  ✔ rotation commits before waiting guest claim: old capability denied (1.241958ms)
+  ✔ guest edit commits before waiting claim and its result is preserved (2.212292ms)
+  ✔ member save commits before waiting close (3.270333ms)
+  ✔ close commits before waiting member save: no partial write (1.822125ms)
+  ✔ guest save commits before waiting close (1.830125ms)
+  ✔ close commits before waiting guest save: no partial write (1.326125ms)
+  ✔ finalization commits before waiting option edit: mutation rejected (23.824208ms)
+  ✔ option edit commits before waiting finalization: current interval or rejection (2.888875ms)
+  ✔ finalization commits before waiting option delete: mutation rejected (23.657875ms)
+  ✔ option delete commits before waiting finalization: current interval or rejection (1.586625ms)
+✔ real PostgreSQL command ordering with independent sessions (189.215167ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 234.477667

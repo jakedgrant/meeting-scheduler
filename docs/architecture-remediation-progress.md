@@ -14,7 +14,15 @@ As of October 22, 2026, `main` is at `6f2c547`. These PRs were merged in the agr
 
 F02 and F08 are **implemented and merged**. Before merge, the combined history passed 44 DB tests (17 RPC, 15 billing, 12 calendar), 38 Edge tests (15 billing, 23 calendar), and seven entry-point checks. [Evidence](architecture-remediation-evidence-2026-10-22/README.md). All five test scripts are present in `package.json` on `main`. **Merging did not deploy anything.** Hosted state is tracked separately below.
 
-## Active work
+## Integration of merged feature PRs
+
+Remote `main` was verified at `a03af56fe0cc6affd171693898d6b11f8e7913e9` after all ten PRs were marked merged. PRs #56, #61, #62, #63 and #65 reached main. PRs #64, #66, #67, #68 and #69 merged into their feature-branch bases and were absent from main.
+
+This integration branch starts from that main commit and merges the tested #69 head `2cd63ab000f3f0b787e2dc27500876a0f08f3c96`, which contains all five missing deliveries. No application behavior, migration or test implementation is changed beyond those reviewed deliveries. Merge this integration PR into main before starting F05/F09. The original stack PRs require no further retargeting; for future stacks, verify ancestry on main after each merge rather than relying on the PR's merged status.
+
+The [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md) records prior checks. The integration PR reruns the focused database/concurrency, web, native, billing and calendar workflows against its combined tree. Hosted setup remains separate prelaunch work.
+
+## Delivered work
 
 Review followups started October 23 from the open PR heads. The owner authorized parallel agents, fixes and pushes to the existing branches. Agents request coordinator approval before shared runtime use. The application is unreleased; code acceptance and prelaunch configuration are tracked separately.
 
@@ -28,10 +36,10 @@ Review followups started October 23 from the open PR heads. The owner authorized
 | F06/F10 commands and clients | [#69](https://github.com/jakedgrant/meeting-scheduler/pull/69) | Backend, web, Android and iOS corrections integrated and pushed. All 54 combined iOS package tests pass; see the [October 23 evidence](architecture-remediation-evidence-2026-10-23/README.md). Selected options cannot be edited/deleted after finalization. |
 | F25 iOS checkout | [#61](https://github.com/jakedgrant/meeting-scheduler/pull/61) | Existing clean-checkout build evidence remains sufficient. |
 | F26 Android signing | [#62](https://github.com/jakedgrant/meeting-scheduler/pull/62) | Debug, missing-signing failure, throwaway-certificate and explicit unsigned Release checks pass in CI. |
-| F13 Android lifetimes | [#67](https://github.com/jakedgrant/meeting-scheduler/pull/67) | Application container and six lifetime tests pass CI. Retarget after #62 merges. |
+| F13 Android lifetimes | [#67](https://github.com/jakedgrant/meeting-scheduler/pull/67) | Application container and six lifetime tests pass CI; included in this integration. |
 | Status and merge guidance | [#65](https://github.com/jakedgrant/meeting-scheduler/pull/65) | This tracker; it does not itself close implementation findings. |
 
-Merge prerequisites one at a time: #61 and #56 independently, #62 then #67; #63 then #64 then #66; #68 and finally #69 after their prerequisites. Retarget descendants to main as bases merge. #69 includes validated prerequisite histories, so merging those first narrows its remaining diff. Merge the web and command schema group before deploying a development build: the adapter now calls the F04/F06 APIs directly. #65 can merge once its linked guides are present.
+The original PR dependency order is preserved in Git history. All reviewed deliveries are present in this integration tree; its base is main. Deploy the web/native command clients together with the ordered schema after integration, since the adapters call the F04/F06 APIs directly.
 
 The October 23 evidence distinguishes a source fix from hosted rollout. No public-client retirement period or customer backfill is a merge requirement. Preserve development/beta data deliberately where it actually exists.
 

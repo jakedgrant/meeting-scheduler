@@ -97,11 +97,18 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
   }
   const guest = (await db.query(`INSERT INTO public.poll_participants(poll_id,anonymous_name,anonymous_email)
     VALUES ($1,'Guest','private-guest@example.test') RETURNING *`, [polls.closed.id])).rows[0];
+  // The two foreign rows model legacy cross-poll data. F06 later rejects such
+  // writes for every role, so seed them with its check trigger disabled when
+  // it exists; the summary must still filter rows written before F06.
+  const responseCheck = (await db.query(`SELECT 1 FROM pg_trigger
+    WHERE tgname='responses_10_check_write'`)).rows.length > 0;
+  if (responseCheck) await db.exec('ALTER TABLE public.availability_responses DISABLE TRIGGER responses_10_check_write');
   await db.query(`INSERT INTO public.availability_responses(participant_id,time_option_id,status,note)
     VALUES ($1,$2,'available','Authorized member note'),($3,$2,'maybe','Authorized guest note'),
       ($4,$2,'unavailable','Foreign participant note'),($1,$5,'maybe','Foreign option note')`,
   [memberships[polls.closed.id].id, options[polls.closed.id].id, guest.id,
     memberships[otherPoll.id].id, options[otherPoll.id].id]);
+  if (responseCheck) await db.exec('ALTER TABLE public.availability_responses ENABLE TRIGGER responses_10_check_write');
   await db.query(`INSERT INTO public.subscriptions(user_id,entitlement,is_active,expires_at)
     VALUES ($1,'team_access',true,now()+interval '1 day'),
       ($2,'pro_access',true,now()-interval '1 day')`, [owner, member]);

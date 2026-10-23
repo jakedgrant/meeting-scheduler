@@ -23,10 +23,11 @@ import com.revenuecat.purchases.awaitRestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
+/** Process-lifetime billing state (F13), created by [com.meetingscheduler.android.AppContainer]. */
 class PurchaseService(
     private val application: Application,
     private val scope: CoroutineScope
-) {
+) : BillingIdentity {
     var customerInfo by mutableStateOf<CustomerInfo?>(null)
         private set
     var offerings by mutableStateOf<Offerings?>(null)
@@ -68,7 +69,7 @@ class PurchaseService(
 
     // MARK: - User Management
 
-    suspend fun login(userId: String) {
+    override suspend fun login(userId: String) {
         try {
             val result = Purchases.sharedInstance.awaitLogIn(userId)
             customerInfo = result.customerInfo
@@ -78,7 +79,7 @@ class PurchaseService(
         }
     }
 
-    suspend fun logout() {
+    override suspend fun logout() {
         try {
             val info = Purchases.sharedInstance.awaitLogOut()
             customerInfo = info
@@ -123,16 +124,5 @@ class PurchaseService(
         val info = Purchases.sharedInstance.awaitRestore()
         customerInfo = info
         return info
-    }
-
-    companion object {
-        var instance: PurchaseService? = null
-            private set
-
-        fun getInstance(application: Application, scope: CoroutineScope): PurchaseService {
-            return instance ?: synchronized(this) {
-                instance ?: PurchaseService(application, scope).also { instance = it }
-            }
-        }
     }
 }
