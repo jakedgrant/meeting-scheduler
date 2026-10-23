@@ -1,6 +1,6 @@
 # Architecture remediation progress
 
-Setup verified October 22, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+Updated October 23, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
 ## Merged baseline
 
@@ -25,7 +25,7 @@ Review followups started October 23 from the open PR heads. The owner authorized
 | Account deletion | [#66](https://github.com/jakedgrant/meeting-scheduler/pull/66) | Inherits corrected prerequisites; scoped anonymization/cascade tests run in CI. |
 | F03/F10 web client | [#68](https://github.com/jakedgrant/meeting-scheduler/pull/68) | Guest storage/retry/lifecycle and member/guest transactional flows are complete; 25 checks, type check and production build pass locally and in CI. |
 | F11 and iOS F12 cache/session defects | [#56](https://github.com/jakedgrant/meeting-scheduler/pull/56) | Account storage, read ordering, completeness/deletion and mutation invalidation corrected; 33 simulator package tests pass. New iOS CI uses a dedicated runner simulator. |
-| F06/F10 commands and clients | [#69](https://github.com/jakedgrant/meeting-scheduler/pull/69) | Backend, web and Android corrections integrated; final iOS integration/evidence is recorded in the October 23 report. Selected options cannot be edited/deleted after finalization. |
+| F06/F10 commands and clients | [#69](https://github.com/jakedgrant/meeting-scheduler/pull/69) | Backend, web, Android and iOS corrections integrated and pushed. All 54 combined iOS package tests pass; see the [October 23 evidence](architecture-remediation-evidence-2026-10-23/README.md). Selected options cannot be edited/deleted after finalization. |
 | F25 iOS checkout | [#61](https://github.com/jakedgrant/meeting-scheduler/pull/61) | Existing clean-checkout build evidence remains sufficient. |
 | F26 Android signing | [#62](https://github.com/jakedgrant/meeting-scheduler/pull/62) | Debug, missing-signing failure, throwaway-certificate and explicit unsigned Release checks pass in CI. |
 | F13 Android lifetimes | [#67](https://github.com/jakedgrant/meeting-scheduler/pull/67) | Application container and six lifetime tests pass CI. Retarget after #62 merges. |
@@ -51,7 +51,7 @@ The coordinator granted only the resources below; user-owned devices and service
 
 | Resource | Reservation | Owner |
 | --- | --- | --- |
-| Dedicated iOS simulator | `2843684A-0993-42A5-A850-0B0B61942888`, created for this task; renewal approved through 08:19 UTC October 23 | iOS agent; must shut down/delete its own device at release |
+| Dedicated iOS simulator | `2843684A-0993-42A5-A850-0B0B61942888`, created for this task; renewal approved through 08:19 UTC October 23 | iOS agent; shut down and deleted after the 54-test combined run |
 | Fresh PostgreSQL 18.4 | Unix socket under `/private/tmp/meeting-scheduler-remediation-backend-pg-20261023`, port 56439, TCP disabled | Backend agent; stopped and removed after 17 real lock-wait races |
 | Android build | Separate Gradle cache and temporary build daemon, existing JDK/SDK read only | Coordinator; no emulator or app server |
 | Web | In-process fixtures, type check and build | Web agent; no browser, port or server |
@@ -91,7 +91,7 @@ Merging code does not change hosted state. The following are prelaunch checks or
 - [x] Account deletion: the owner chose anonymization, with comments and response notes replaced by `[user deleted]`. Implemented in #66.
 - [x] F06/F10: guest capability saves implemented in #69.
 - [ ] F05/F09: enforce `max_participants` at join, transactional creation, and pass redemption.
-- [ ] Accept final F10 integration in #69 after the iOS command/client merge. Web and Android are validated; final iOS evidence and prelaunch limits belong in the October 23 report.
+- [x] Accept final F10 integration in #69. Backend, web, Android and iOS are integrated; independent review found no remaining blockers among the seven review gaps. The [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md) records checks, source identities, merge dependencies and prelaunch limits.
 - [ ] Complete broader F12 lifecycle work on web/Android and verify live auth/provider transitions; the reviewed iOS cache/session gaps are fixed in #56. F14 Android callbacks remain separate.
 - [ ] Optional F13 emulator check. The worker asked for one API 36 emulator for about 30 minutes (install the debug build, rotate, background, sign in and out, uninstall). An agent must request a new coordinator reservation before using an emulator; none was used in this remediation.
 - [ ] Next architecture work: F05/F09 limits/creation/pass redemption, remaining F12/F14 lifecycle, F19/F18 bounded reads, and broader F24 launch checks. Do not close these from the current PR evidence.
@@ -145,3 +145,5 @@ Merging code does not change hosted state. The following are prelaunch checks or
   - The first Android CI run failed in R8 on JDK-only classes referenced by Apache HttpClient. Release shrinking had never succeeded before; fixed in `abdcf4c`.
   - No simulator, emulator, local server, or hosted resource was used.
 - **October 23, Android CI:** F26 (#62) passed all four CI checks: debug build and unit tests, release failing without signing, the throwaway-key certificate check, and the unsigned opt-in. GitHub kept building F13 (#67) against a stale merge commit from before the R8 fix, so F13 was rebased onto the F26 head (`d0711ba`); it now passes too. An R8 warning that it can't read Kotlin metadata remains (non-fatal); an Android Gradle Plugin upgrade is a follow-up.
+
+- **October 23, review remediation delivered:** all seven review gaps are addressed and pushed in the existing PR branches. Guest claim/rotation/write races reauthorize after locks; selected finalized options are immutable. Web uses stable guest join retries and in-memory capability fallback. All three clients use transactional saves/finalization with retained drafts and explicit conflict review. iOS cache/session fixes and command integration passed 54 combined simulator tests; web passed 25 checks and check/build; Android passed 15 JVM tests and debug build. Database replay passed 94 checks and 17 observed PostgreSQL lock races, also green in CI on PostgreSQL 17/18. Android signing CI is green. Focused iOS package CI passed on #56 and reruns on the final integrated #69 head. Independent backend review cleared both native adapters and the cache integration. All reserved local runtimes are released. No PR was merged and no hosted environment was changed.
