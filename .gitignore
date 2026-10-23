@@ -38,6 +38,10 @@ supabase/.temp/
 # iOS/macOS
 *.xcworkspace
 *.xcodeproj
+# The iOS app wrapper project is tracked (see docs/ios-checkout.md). Only its
+# shared metadata is versioned; xcuserdata/ and *.xcuserstate stay ignored.
+!/apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj/
+!/apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj/project.xcworkspace/
 xcuserdata/
 DerivedData/
 .build/
