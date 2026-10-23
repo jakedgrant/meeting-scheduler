@@ -26,8 +26,8 @@ Second wave, started October 22 from `main` at `6f2c547`. Each finding has its o
 | Account deletion (existing defect) | [#66](https://github.com/jakedgrant/meeting-scheduler/pull/66) | `claude/participant-account-deletion` | F04 | `2405ece`. Anonymizes participation; comments and response notes become `[user deleted]` (owner decisions) |
 | F06/F10: Response commands | [#69](https://github.com/jakedgrant/meeting-scheduler/pull/69) | `claude/f06-f10-response-commands` | Account deletion | `bc467c8`. Guests save availability with their capability (owner decision); response reads are restricted to owner, member, or verified guest |
 | F25: iOS checkout | [#61](https://github.com/jakedgrant/meeting-scheduler/pull/61) | `claude/f25-ios-checkout` | `main` | `608750f`. Clean-clone builds pass |
-| F26: Android signing | [#62](https://github.com/jakedgrant/meeting-scheduler/pull/62) | `claude/f26-android-signing` | `main` | `abdcf4c`, with the Android CI job (owner decision). The first CI run exposed an existing R8 failure on release builds, fixed with `-dontwarn` rules; the rerun is pending |
-| F13: Android lifetimes | [#67](https://github.com/jakedgrant/meeting-scheduler/pull/67) | `claude/f13-android-lifetimes` | F26 (CI only) | `295a087`. Retarget to `main` after #62 |
+| F26: Android signing | [#62](https://github.com/jakedgrant/meeting-scheduler/pull/62) | `claude/f26-android-signing` | `main` | `abdcf4c`, with the Android CI job (owner decision). The first CI run exposed an existing R8 failure on release builds, fixed with `-dontwarn` rules. **Android CI green** |
+| F13: Android lifetimes | [#67](https://github.com/jakedgrant/meeting-scheduler/pull/67) | `claude/f13-android-lifetimes` | F26 (CI only) | `d0711ba` (rebased onto F26 head so CI builds with the R8 fix). **Android CI green**, including the 6 lifetime tests. Retarget to `main` after #62 |
 | Coordinator status | [#65](https://github.com/jakedgrant/meeting-scheduler/pull/65) | `claude/remediation-status-2026-10-22` | `main` | This tracker |
 
 **Merge order:**
@@ -146,3 +146,4 @@ Merging code does not change hosted state. None of the items below has been esta
   - The replay first exposed an intermittent failure (about one run in three) in the response suite. A fixture picked an option by random UUID order. Fixed in `bc467c8` and verified over eight consecutive runs.
   - The first Android CI run failed in R8 on JDK-only classes referenced by Apache HttpClient. Release shrinking had never succeeded before; fixed in `abdcf4c`.
   - No simulator, emulator, local server, or hosted resource was used.
+- **October 23, Android CI:** F26 (#62) passed all four CI checks: debug build and unit tests, release failing without signing, the throwaway-key certificate check, and the unsigned opt-in. GitHub kept building F13 (#67) against a stale merge commit from before the R8 fix, so F13 was rebased onto the F26 head (`d0711ba`); it now passes too. An R8 warning that it can't read Kotlin metadata remains (non-fatal); an Android Gradle Plugin upgrade is a follow-up.
