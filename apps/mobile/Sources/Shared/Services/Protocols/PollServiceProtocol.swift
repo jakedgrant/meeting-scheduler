@@ -47,7 +47,7 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Poll Status
 
     func updatePollStatus(pollId: UUID, status: PollStatus) async throws
-    func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws
+    func finalizePoll(pollId: UUID, timeOptionId: UUID) async throws -> Poll
 
     // MARK: - Participants
 
@@ -57,8 +57,8 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Availability Responses
 
     func loadResponses(participantIds: [UUID]) async -> [AvailabilityResponse]
-    func submitAvailability(participantId: UUID, timeOptionId: UUID, status: AvailabilityStatus, note: String?) async throws
-    func updateParticipantComment(participantId: UUID, comment: String?) async throws
+    func getAvailability(pollId: UUID, participantId: UUID, guestToken: String?) async throws -> AvailabilitySnapshot
+    func saveAvailability(_ request: SaveAvailabilityRequest) async throws -> AvailabilitySnapshot
 
     // MARK: - Subscription Checks
 

@@ -9,7 +9,7 @@ The SwiftData PR now merges main `6f2c547dbbe51ad78c2ca6aab1bdbaa3005be3d1` with
 - List upserts update only list freshness. An explicit persisted list-membership marker prevents a cached nonmember invitation from appearing as a joined poll on offline list failure. Latest-request generations prevent older same-account list/detail reads from restoring rows removed by a newer read. A separate detail timestamp is set only after a complete detail snapshot, including a legitimately empty snapshot. Partial/paginated poll reads use upserts; the complete member list uses an explicitly named replacement operation.
 - Complete detail reads replace children and responses transactionally. Complete lists evict inaccessible/deleted polls, while scoped child reads reconcile missing rows. Mutations invalidate affected detail (including cached children), and a per-poll generation rejects a detail read that began before a mutation or list eviction. An authoritative not-found/permission result evicts detail rather than returning stale data.
 
-## Verification (October 22, 2026)
+## Verification (October 22–23, 2026)
 
 Xcode 27.1 (27A9269), Swift 6.4. The eight package revisions came from an isolated copy of existing local checkouts, including RevenueCat 5.97.0 and Supabase 2.39.0. No provider service, hosted Supabase project or localhost server was contacted by the tests.
 

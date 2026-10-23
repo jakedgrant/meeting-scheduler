@@ -16,19 +16,30 @@ struct PollDetailView: View {
     @State var participants: [PollParticipant] = []
     @State var responses: [AvailabilityResponse] = []
     @State var myParticipant: PollParticipant?
-    @State var localResponses: [UUID: AvailabilityStatus] = [:]
-    @State var localComment: String = ""
+    @State private var editor = AvailabilityEditor()
+    @State private var actionError: String?
+    @State private var viewGeneration: UInt64 = 0
+    @State private var displayedAccountId: UUID?
+    @State private var displayedPollId: UUID?
     @State var commentError: String = ""
     @State var calendarConflicts: Set<UUID> = []
 
     private let MAX_COMMENT_LENGTH = 500
     @State var isLoading = true
-    @State var isSaving = false
     @State var showClosePollAlert = false
     @State var showSelectFinalDateAlert = false
     @State var finalTimeOption: PollTimeOption?
     @State var isSelectingFinalDate = false
     @State var selectedTimeOption: PollTimeOption?
+
+    private var displaysCurrentIdentity: Bool {
+        displayedAccountId == authService.currentUserId && displayedPollId == pollId
+    }
+
+    private var canRespond: Bool {
+        guard let poll else { return false }
+        return poll.status == .active && (poll.closesAt.map { $0 > Date() } ?? true) && !editor.isClosed
+    }
 
     private var isCreator: Bool {
         poll?.creatorId == authService.currentUserId
@@ -66,7 +77,7 @@ struct PollDetailView: View {
 
     var body: some View {
         Group {
-            if isLoading {
+            if isLoading || displayedAccountId != authService.currentUserId || displayedPollId != pollId {
                 ProgressView("Loading poll...")
             } else if let poll = poll {
                 pollContent(poll)
@@ -74,7 +85,7 @@ struct PollDetailView: View {
                 ContentUnavailableView("Poll not found", systemImage: "exclamationmark.triangle")
             }
         }
-        .navigationTitle(poll?.title ?? "Poll")
+        .navigationTitle(displaysCurrentIdentity ? (poll?.title ?? "Poll") : "Poll")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -82,12 +93,12 @@ struct PollDetailView: View {
 
             ToolbarItem(placement: .principal) {
                 HStack {
-                    Text(poll?.title ?? "Poll")
-                    StatusBadge(status: poll?.status ?? .archived)
+                    Text(displaysCurrentIdentity ? (poll?.title ?? "Poll") : "Poll")
+                    if displaysCurrentIdentity { StatusBadge(status: poll?.status ?? .archived) }
                 }
             }
 
-            if let poll = poll, poll.status == .active {
+            if displaysCurrentIdentity, let poll = poll, poll.status == .active {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button("Share", systemImage: "square.and.arrow.up") {
                         sharePoll()
@@ -95,7 +106,7 @@ struct PollDetailView: View {
                 }
             }
         }
-        .task {
+        .task(id: DetailIdentity(pollId: pollId, accountId: authService.currentUserId)) {
             await loadPollData()
         }
         .alert("Close Poll", isPresented: $showClosePollAlert) {
@@ -112,7 +123,7 @@ struct PollDetailView: View {
                 selectFinalDate()
             }
         } message: {
-            Text("Set \(formattedSelectedOption) as the final meeting time? All participants will be notified.")
+            Text("Set \(formattedSelectedOption) as the final meeting time? This closes responses for the poll.")
         }
         .navigationDestination(item: $selectedTimeOption) { timeOption in
             TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
@@ -127,6 +138,7 @@ struct PollDetailView: View {
             if let error = calendarService.googleCalendarError {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
+            responseFeedbackSection
             pollInfoSection(poll)
             shareCodeSection(poll)
             joinButtonSection(poll)
@@ -284,11 +296,11 @@ struct PollDetailView: View {
                     TimeOptionRow(
                         option: option,
                         responses: responsesForOption(option.id),
-                        myResponse: localResponses[option.id],
+                        myResponse: editor.responses[option.id],
                         hasCalendarConflict: calendarConflicts.contains(option.id),
-                        canRespond: myParticipant != nil && poll.status == .active,
+                        canRespond: myParticipant != nil && editor.saved != nil && canRespond && !editor.isSaving && !editor.isLoading,
                         onResponseChange: { status in
-                            localResponses[option.id] = status
+                            editor.responses[option.id] = status
                         }
                     )
                 }
@@ -299,7 +311,7 @@ struct PollDetailView: View {
 
     @ViewBuilder
     private func commentSection(_ poll: Poll) -> some View {
-        if myParticipant != nil && poll.status == .active {
+        if myParticipant != nil {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
@@ -307,17 +319,17 @@ struct PollDetailView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         Spacer()
-                        Text("\(localComment.count)/\(MAX_COMMENT_LENGTH)")
+                        Text("\(editor.comment.count)/\(MAX_COMMENT_LENGTH)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                     TextField(
                         "e.g., I'm flexible on timing, or I can only attend virtually...",
                         text: Binding(
-                            get: { localComment },
+                            get: { editor.comment },
                             set: { newValue in
                                 if newValue.count <= MAX_COMMENT_LENGTH {
-                                    localComment = newValue
+                                    editor.comment = newValue
                                     commentError = ""
                                 } else {
                                     commentError = "Comment must be \(MAX_COMMENT_LENGTH) characters or less"
@@ -327,6 +339,7 @@ struct PollDetailView: View {
                         axis: .vertical
                     )
                     .lineLimit(2...4)
+                    .disabled(editor.saved == nil || !canRespond || editor.isSaving || editor.isLoading)
                     if !commentError.isEmpty {
                         Text(commentError)
                             .font(.caption)
@@ -339,21 +352,51 @@ struct PollDetailView: View {
 
     @ViewBuilder
     private func saveButtonSection(_ poll: Poll) -> some View {
-        if myParticipant != nil && poll.status == .active {
+        if myParticipant != nil {
             Section {
                 Button(action: saveResponses) {
                     HStack {
                         Spacer()
-                        if isSaving {
+                        if editor.isSaving {
                             ProgressView()
                         } else {
-                            Text("Save Responses")
+                            Text(editor.errorMessage == nil ? "Save Responses" : "Retry Save")
                         }
                         Spacer()
                     }
                 }
-                .disabled(isSaving)
+                .disabled(!canRespond || editor.isSaving || editor.isLoading || editor.saved == nil || editor.needsConflictReview)
+                if !canRespond {
+                    Text("This poll is closed. Your draft is retained.").font(.caption).foregroundStyle(.secondary)
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var responseFeedbackSection: some View {
+        if let actionError {
+            Section { Text(actionError).foregroundStyle(.red).accessibilityIdentifier("poll-action-error") }
+        }
+        if let message = editor.errorMessage {
+            Section {
+                Text(message).foregroundStyle(.red).accessibilityIdentifier("availability-save-error")
+                if let participant = myParticipant, editor.saved == nil || editor.needsConflictReview {
+                    Button(editor.needsConflictReview ? "Load Latest Saved Responses" : "Retry Loading Responses") {
+                        Task {
+                            let generation = viewGeneration
+                            await editor.load(pollId: pollId, participantId: participant.id,
+                                              preservingDraft: true, using: pollService)
+                            guard generation == viewGeneration, displayedAccountId == authService.currentUserId else { return }
+                            applySavedSnapshot()
+                        }
+                    }
+                    .disabled(editor.isLoading || editor.isSaving)
+                }
+            }
+        }
+        if editor.didSave && editor.isSaved {
+            Section { Label("Responses saved", systemImage: "checkmark.circle").foregroundStyle(.green) }
         }
     }
 
@@ -415,62 +458,92 @@ struct PollDetailView: View {
     // MARK: - Data Loading
 
     private func loadPollData() async {
+        viewGeneration &+= 1
+        let generation = viewGeneration
+        let account = authService.currentUserId
+        displayedAccountId = account
+        displayedPollId = pollId
+        editor.reset()
+        poll = nil; timeOptions = []; participants = []; responses = []; myParticipant = nil
+        calendarConflicts = []; actionError = nil; commentError = ""
+        isSelectingFinalDate = false; finalTimeOption = nil; selectedTimeOption = nil
+        showClosePollAlert = false; showSelectFinalDateAlert = false
         isLoading = true
-        defer { isLoading = false }
-
-        guard let detail = await pollService.loadPollDetail(id: pollId) else { return }
-
+        defer { if generation == viewGeneration { isLoading = false } }
+        guard let detail = await pollService.loadPollDetail(id: pollId),
+              generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
         poll = detail.poll
         timeOptions = detail.timeOptions
         participants = detail.participants
         responses = detail.responses
-
-        if let userId = authService.currentUserId {
-            myParticipant = participants.first { $0.userId == userId }
+        if let account { myParticipant = participants.first { $0.userId == account } }
+        if let participant = myParticipant {
+            await editor.load(pollId: pollId, participantId: participant.id, using: pollService)
+            guard generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
+            applySavedSnapshot()
         }
-
-        if let myParticipant {
-            for response in responses where response.participantId == myParticipant.id {
-                localResponses[response.timeOptionId] = response.status
-            }
-            localComment = myParticipant.comment ?? ""
-        }
-
         await calendarService.refreshGoogleCalendarConnection()
+        guard generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
         if calendarService.isEnabled && !timeOptions.isEmpty {
-            calendarConflicts = await calendarService.checkConflicts(for: timeOptions)
-            for conflictId in calendarConflicts where localResponses[conflictId] == nil {
-                localResponses[conflictId] = .unavailable
+            let conflicts = await calendarService.checkConflicts(for: timeOptions)
+            guard generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
+            calendarConflicts = conflicts
+            for conflictId in conflicts where editor.saved != nil && editor.responses[conflictId] == nil {
+                editor.responses[conflictId] = .unavailable
             }
+        }
+    }
+
+    private func applySavedSnapshot() {
+        guard let snapshot = editor.saved, snapshot.pollId == pollId else { return }
+        responses.removeAll { $0.participantId == snapshot.participantId }
+        responses += snapshot.availabilityResponses
+        if let index = participants.firstIndex(where: { $0.id == snapshot.participantId }) {
+            participants[index].comment = snapshot.comment
+            myParticipant = participants[index]
         }
     }
 
     // MARK: - Actions
 
     private func updateStatus(_ status: PollStatus) {
+        let generation = viewGeneration
+        let account = authService.currentUserId
         Task {
             do {
                 try await pollService.updatePollStatus(pollId: pollId, status: status)
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
                 poll?.status = status
+                actionError = nil
             } catch {
-                print("Failed to update status: \(error)")
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                actionError = "The poll status could not be changed. Try again."
             }
         }
     }
 
     private func joinPoll() {
+        let generation = viewGeneration
+        let account = authService.currentUserId
         Task {
             do {
-                myParticipant = try await pollService.joinPoll(pollId: pollId, anonymousName: nil)
-                participants.append(myParticipant!)
+                let participant = try await pollService.joinPoll(pollId: pollId, anonymousName: nil)
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                myParticipant = participant
+                if !participants.contains(where: { $0.id == participant.id }) { participants.append(participant) }
+                await editor.load(pollId: pollId, participantId: participant.id, using: pollService)
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                applySavedSnapshot()
+                actionError = nil
             } catch {
-                print("Failed to join poll: \(error)")
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                actionError = "The poll could not be joined. Reload the poll and try again."
             }
         }
     }
 
     private func validateComment() -> Bool {
-        if localComment.count > MAX_COMMENT_LENGTH {
+        if editor.comment.count > MAX_COMMENT_LENGTH {
             commentError = "Comment must be \(MAX_COMMENT_LENGTH) characters or less"
             return false
         }
@@ -479,80 +552,32 @@ struct PollDetailView: View {
     }
 
     private func saveResponses() {
-        guard let myParticipant = myParticipant else { return }
-
-        // Validate comment
-        guard validateComment() else { return }
-
-        isSaving = true
-
+        guard let participant = myParticipant, validateComment(), canRespond else { return }
+        let generation = viewGeneration
+        let account = authService.currentUserId
         Task {
-            for (optionId, status) in localResponses {
-                do {
-                    try await pollService.submitAvailability(
-                        participantId: myParticipant.id,
-                        timeOptionId: optionId,
-                        status: status,
-                        note: nil
-                    )
-                } catch {
-                    print("Failed to save response: \(error)")
-                }
-            }
-
-            // Save comment (trimmed, nil if empty)
-            let trimmedComment = localComment.trimmingCharacters(in: .whitespacesAndNewlines)
-            let savedComment: String? = trimmedComment.isEmpty ? nil : trimmedComment
-            do {
-                try await pollService.updateParticipantComment(
-                    participantId: myParticipant.id,
-                    comment: savedComment
-                )
-            } catch {
-                print("Failed to save comment: \(error)")
-            }
-
-            // Update local state instead of re-fetching from the server
-            for (optionId, status) in localResponses {
-                if let idx = responses.firstIndex(where: {
-                    $0.participantId == myParticipant.id && $0.timeOptionId == optionId
-                }) {
-                    responses[idx].status = status
-                } else {
-                    responses.append(AvailabilityResponse(
-                        participantId: myParticipant.id,
-                        timeOptionId: optionId,
-                        status: status
-                    ))
-                }
-            }
-            if let idx = participants.firstIndex(where: { $0.id == myParticipant.id }) {
-                participants[idx].comment = savedComment
-            }
-
-            isSaving = false
+            await editor.save(pollId: pollId, participantId: participant.id, using: pollService)
+            guard generation == viewGeneration, account == authService.currentUserId else { return }
+            if editor.didSave { applySavedSnapshot() }
         }
     }
 
     private func selectFinalDate() {
-        guard let option = finalTimeOption else { return }
-
+        guard let option = finalTimeOption, !isSelectingFinalDate else { return }
+        let generation = viewGeneration
+        let account = authService.currentUserId
         isSelectingFinalDate = true
-
         Task {
+            defer { if generation == viewGeneration { isSelectingFinalDate = false } }
             do {
-                try await pollService.setSelectedFinalDate(
-                    pollId: pollId,
-                    startTime: option.startTime,
-                    endTime: option.endTime
-                )
-                // Update local state instead of re-fetching the poll
-                poll?.selectedStartTime = option.startTime
-                poll?.selectedEndTime = option.endTime
+                let finalized = try await pollService.finalizePoll(pollId: pollId, timeOptionId: option.id)
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                poll = finalized
+                actionError = nil
             } catch {
-                print("Failed to set final date: \(error)")
+                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                actionError = "The final time could not be confirmed. Reload the poll and try again."
             }
-            isSelectingFinalDate = false
         }
     }
 
@@ -979,4 +1004,9 @@ struct ResponseButton: View {
     .environment(\.authService, MockAuthService.signedIn)
     .environment(\.pollService, mock)
     .environment(\.calendarService, MockCalendarService.disabled)
+}
+
+private struct DetailIdentity: Hashable {
+    let pollId: UUID
+    let accountId: UUID?
 }

@@ -126,7 +126,8 @@ public final class PollService: PollServiceProtocol {
     /// Time ranges keyed by poll ID — populated during loadMyPolls() via a single batch query.
     public private(set) var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
-    private var supabase: SupabaseClient { SupabaseService.shared.client }
+    var supabase: SupabaseClient { injectedClient ?? SupabaseService.shared.client }
+    private let injectedClient: SupabaseClient?
     private let currentUserId: @MainActor () -> UUID?
     private let listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))?
     private let detailLoader: (@MainActor (UUID) async throws -> PollDetail)?
@@ -143,6 +144,7 @@ public final class PollService: PollServiceProtocol {
     }()
 
     private init() {
+        self.injectedClient = nil
         self.persistence = AccountPersistence.shared
         self.currentUserId = { AuthService.shared.currentUserId }
         self.listLoader = nil
@@ -155,13 +157,20 @@ public final class PollService: PollServiceProtocol {
         currentUserId: @escaping @MainActor () -> UUID? = { AuthService.shared.currentUserId },
         listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))? = nil,
         detailLoader: (@MainActor (UUID) async throws -> PollDetail)? = nil,
-        statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)? = nil
+        statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)? = nil,
+        client: SupabaseClient? = nil
     ) {
+        self.injectedClient = client
         self.persistence = persistence
         self.currentUserId = currentUserId
         self.listLoader = listLoader
         self.detailLoader = detailLoader
         self.statusUpdater = statusUpdater
+    }
+
+    /// Uses an isolated cache and identity for intercepted-transport tests.
+    public convenience init(client: SupabaseClient) {
+        self.init(persistence: InMemoryPersistenceProvider(), currentUserId: { nil }, client: client)
     }
 
     /// Called synchronously at every auth identity boundary, before any new account work.
@@ -179,22 +188,29 @@ public final class PollService: PollServiceProtocol {
         try? persistence.selectAccount(userId)
     }
 
-    private func beginRequest() -> UInt64 {
+    func beginRequest() -> UInt64 {
         accountDidChange(to: currentUserId())
         return accountGeneration
     }
 
-    private func isCurrent(_ generation: UInt64) -> Bool {
+    func isCurrent(_ generation: UInt64) -> Bool {
         generation == accountGeneration && currentUserId() == accountId
     }
 
-    private func invalidateDetail(_ pollId: UUID) {
+    func invalidateDetail(_ pollId: UUID) {
         detailGenerations[pollId, default: 0] &+= 1
         try? persistence.invalidatePollDetail(pollId)
     }
 
-    private func invalidateAllDetails() {
-        for poll in (try? persistence.fetchAllPolls()) ?? [] { invalidateDetail(poll.id) }
+    func acceptFinalizedPoll(_ poll: Poll) {
+        // A list read started before finalization cannot restore the old active row.
+        listGeneration &+= 1
+        isLoading = false
+        invalidateDetail(poll.id)
+        try? persistence.savePolls([poll])
+        myPolls = myPolls.map { $0.id == poll.id ? poll : $0 }
+        createdPolls = createdPolls.map { $0.id == poll.id ? poll : $0 }
+        joinedPolls = joinedPolls.map { $0.id == poll.id ? poll : $0 }
     }
 
     // MARK: - Formatting
@@ -524,28 +540,6 @@ public final class PollService: PollServiceProtocol {
         }
     }
 
-    public func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws {
-        let generation = beginRequest()
-        let formatter = ISO8601DateFormatter()
-
-        try await supabase
-            .from("polls")
-            .update([
-                "selected_start_time": AnyJSON.string(formatter.string(from: startTime)),
-                "selected_end_time": AnyJSON.string(formatter.string(from: endTime))
-            ])
-            .eq("id", value: pollId.uuidString)
-            .execute()
-
-        guard isCurrent(generation) else { throw CancellationError() }
-        invalidateDetail(pollId)
-        // Update local state
-        if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
-            myPolls[index].selectedStartTime = startTime
-            myPolls[index].selectedEndTime = endTime
-        }
-    }
-
     // MARK: - Participants
 
     public func loadParticipants(pollId: UUID) async -> [PollParticipant] {
@@ -570,27 +564,13 @@ public final class PollService: PollServiceProtocol {
 
     public func joinPoll(pollId: UUID, anonymousName: String? = nil) async throws -> PollParticipant {
         let generation = beginRequest()
-        var data: [String: AnyJSON] = [
-            "poll_id": .string(pollId.uuidString)
-        ]
-
-        if let userId = accountId {
-            data["user_id"] = .string(userId.uuidString)
-        } else if let name = anonymousName {
-            data["anonymous_name"] = .string(name)
-        }
-
-        let response: PollParticipant = try await supabase
-            .from("poll_participants")
-            .insert(data)
-            .select()
-            .single()
-            .execute()
-            .value
-
-        guard isCurrent(generation) else { throw CancellationError() }
+        struct JoinResult: Decodable { let participant: PollParticipant; let created: Bool }
+        let result: JoinResult = try await supabase
+            .rpc("join_poll", params: ["poll_uuid": AnyJSON.string(pollId.uuidString)])
+            .execute().value
+        guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
         invalidateDetail(pollId)
-        return response
+        return result.participant
     }
 
     // MARK: - Availability Responses
@@ -616,43 +596,6 @@ public final class PollService: PollServiceProtocol {
             print("Failed to load responses: \(error)")
             return (try? persistence.fetchResponses(for: participantIds)) ?? []
         }
-    }
-
-    public func submitAvailability(
-        participantId: UUID,
-        timeOptionId: UUID,
-        status: AvailabilityStatus,
-        note: String? = nil
-    ) async throws {
-        let generation = beginRequest()
-        let data: [String: AnyJSON] = [
-            "participant_id": .string(participantId.uuidString),
-            "time_option_id": .string(timeOptionId.uuidString),
-            "status": .string(status.rawValue),
-            "note": note.map { .string($0) } ?? .null
-        ]
-
-        try await supabase
-            .from("availability_responses")
-            .upsert(data, onConflict: "participant_id,time_option_id")
-            .execute()
-        guard isCurrent(generation) else { throw CancellationError() }
-        invalidateAllDetails()
-    }
-
-    public func updateParticipantComment(participantId: UUID, comment: String?) async throws {
-        let generation = beginRequest()
-        let data: [String: AnyJSON] = [
-            "comment": comment.map { .string($0) } ?? .null
-        ]
-
-        try await supabase
-            .from("poll_participants")
-            .update(data)
-            .eq("id", value: participantId.uuidString)
-            .execute()
-        guard isCurrent(generation) else { throw CancellationError() }
-        invalidateAllDetails()
     }
 
     // MARK: - Subscription Checks
