@@ -15,6 +15,7 @@ public final class MockPollService: PollServiceProtocol {
     public var sampleResponses: [AvailabilityResponse]
     public var availabilityLoader: (@MainActor (UUID, UUID, String?) async throws -> AvailabilitySnapshot)?
     public var availabilitySaver: (@MainActor (SaveAvailabilityRequest) async throws -> AvailabilitySnapshot)?
+    public var creator: (@MainActor (CreatePollRequest) async throws -> PollCreationResult)?
     public var finalizer: (@MainActor (UUID, UUID) async throws -> Poll)?
     private var responseVersion: Int64 = 0
 
@@ -181,22 +182,17 @@ public final class MockPollService: PollServiceProtocol {
         return PollDetail(poll: poll, timeOptions: timeOptions, participants: participants, responses: responses)
     }
 
-    public func createPoll(
-        title: String,
-        description: String?,
-        location: String?,
-        timezone: String,
-        closesAt: Date?
-    ) async throws -> Poll {
-        Poll(creatorId: UUID(), title: title, description: description, location: location, status: .active, shareCode: "NEW123")
+    public func createPoll(_ request: CreatePollRequest) async throws -> PollCreationResult {
+        if let creator { return try await creator(request) }
+        let poll = Poll(creatorId: UUID(), title: request.payload.title, description: request.payload.description,
+                        location: request.payload.location, status: .active, shareCode: "NEW123")
+        return PollCreationResult(poll: poll, timeOptions: request.payload.timeOptions.map {
+            PollTimeOption(pollId: poll.id, startTime: $0.startTime, endTime: $0.endTime, isAllDay: $0.isAllDay)
+        })
     }
 
     public func loadTimeOptions(pollId: UUID) async -> [PollTimeOption] {
         sampleTimeOptions.filter { $0.pollId == pollId }
-    }
-
-    public func addTimeOptions(pollId: UUID, options: [(start: Date, end: Date, isAllDay: Bool)]) async throws -> [PollTimeOption] {
-        options.map { PollTimeOption(pollId: pollId, startTime: $0.start, endTime: $0.end, isAllDay: $0.isAllDay) }
     }
 
     public func updatePollStatus(pollId: UUID, status: PollStatus) async throws {}
@@ -246,7 +242,4 @@ public final class MockPollService: PollServiceProtocol {
         return snapshot
     }
 
-    public func canCreatePoll() async -> Bool { true }
-
-    public func countActivePolls() async -> Int { createdPolls.filter { $0.status == .active }.count }
 }
