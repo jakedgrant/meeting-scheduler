@@ -97,6 +97,8 @@ test('account deletion anonymizes participation and keeps existing cascades on P
   const responses = (await db.query(`INSERT INTO public.availability_responses(participant_id,time_option_id,status,note)
     VALUES ($1,$2,'available','Morning works'),($1,$3,'unavailable',NULL) RETURNING *`,
   [membership.id, ...joined.options])).rows;
+  await db.query(`INSERT INTO public.availability_responses(participant_id,time_option_id,status,note)
+    VALUES ($1,$2,'maybe','Other note')`, [otherMembership.id, joined.options[0]]);
   const ownMember = (await db.query(`INSERT INTO public.poll_participants(poll_id,user_id) VALUES ($1,$2) RETURNING *`,
     [own.id, other])).rows[0];
   await db.query(`INSERT INTO public.availability_responses(participant_id,time_option_id,status) VALUES ($1,$2,'maybe')`,
@@ -132,13 +134,21 @@ test('account deletion anonymizes participation and keeps existing cascades on P
     assert.deepEqual([quietRow.user_id, quietRow.anonymous_name, quietRow.comment], [null, 'Deleted user', null]);
     const kept = (await db.query(`SELECT id,status,note FROM public.availability_responses WHERE participant_id=$1 ORDER BY id`,
       [membership.id])).rows;
-    assert.deepEqual(kept, responses.map(r => ({ id: r.id, status: r.status, note: r.note })).sort((a, b) => a.id.localeCompare(b.id)));
+    // Statuses are kept; existing note text is replaced and a NULL note stays NULL.
+    const expected = responses.map(r => ({ id: r.id, status: r.status, note: r.note === null ? null : '[user deleted]' }));
+    assert.deepEqual(kept, expected.sort((a, b) => a.id.localeCompare(b.id)));
+    assert.deepEqual(kept.map(r => r.note).sort(), ['[user deleted]', null].sort());
+    const othersNote = (await db.query(`SELECT note FROM public.availability_responses WHERE participant_id=$1`,
+      [otherMembership.id])).rows;
+    assert.deepEqual(othersNote, [{ note: 'Other note' }], 'other participants\' notes are untouched');
+    assert.equal(JSON.stringify((await db.query('SELECT * FROM public.availability_responses')).rows)
+      .includes('Morning works'), false);
     const otherRow = (await db.query('SELECT user_id,comment FROM public.poll_participants WHERE id=$1', [otherMembership.id])).rows[0];
     assert.deepEqual(otherRow, { user_id: other, comment: 'Other comment' });
     await asRole('authenticated', owner, async () => {
       const summary = await scalar('SELECT public.get_poll_with_summary($1) AS result', [joined.id]);
       assert.ok(summary.participants.some(p => p.id === membership.id && p.display_name === 'Deleted user'));
-      assert.deepEqual(summary.time_options.map(o => o.responses.total).sort(), [1, 1]);
+      assert.deepEqual(summary.time_options.map(o => o.responses.total).sort(), [1, 2]);
     });
   });
 

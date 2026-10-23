@@ -7,7 +7,8 @@
 -- anonymous, capability-less row:
 --   * user_id -> NULL, display name -> 'Deleted user'
 --   * a non-null comment -> '[user deleted]' (a NULL comment stays NULL)
---   * availability responses are kept on the row
+--   * availability responses are kept on the row with their statuses; a
+--     non-null response note -> '[user deleted]' (a NULL note stays NULL)
 --   * any private guest credential (verifier, contact email) is deleted, so the
 --     row can never verify as a guest or be claimed
 --   * F04 merge-audit copies that name the user are deleted
@@ -23,6 +24,11 @@ BEGIN
     DELETE FROM private.participant_guest_credentials c
     USING public.poll_participants pp
     WHERE c.participant_id = pp.id AND pp.user_id = OLD.id;
+
+    UPDATE public.availability_responses ar
+    SET note = '[user deleted]'
+    FROM public.poll_participants pp
+    WHERE ar.participant_id = pp.id AND pp.user_id = OLD.id AND ar.note IS NOT NULL;
 
     -- Runs as the function owner, so the F03/F04 identity trigger permits the
     -- user -> NULL unlink and the name change (it blocks only API callers and

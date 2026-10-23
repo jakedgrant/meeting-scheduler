@@ -16,7 +16,8 @@ A `BEFORE DELETE` trigger on `public.profiles`, `profiles_anonymize_participatio
 | `user_id` | `NULL` |
 | `anonymous_name` | `Deleted user` |
 | `comment` | `[user deleted]` if the user had written one; a `NULL` comment stays `NULL` |
-| Availability responses, including notes | Kept on the row |
+| Availability responses | Kept on the row with their statuses |
+| Response `note` | `[user deleted]` if the user had written one; a `NULL` note stays `NULL` |
 | Private guest credential (verifier and contact email), for example from a claimed guest row | Deleted |
 | F04 merge-audit copies whose archived row names the user | Deleted |
 
@@ -26,8 +27,8 @@ Everything else is unchanged. The user's own polls are still deleted through `cr
 
 ## Choices to confirm
 
-- The comment marker replaces existing text only. If the owner wants every former member row marked, change the `CASE` to an unconditional `'[user deleted]'`.
-- Response `note` text written by the deleted user is kept with the responses. The decision preserves responses; if notes count as personal data to erase, clear `note` in the same trigger.
+- The comment and note markers replace existing text only; `NULL` values stay `NULL`. If the owner wants every former member row marked, make the replacement unconditional.
+- Response notes are replaced by owner decision (October 22); other participants' notes are untouched.
 
 ## Verification
 
@@ -43,7 +44,7 @@ npm run test:account-deletion:db
 - calendar, subscription, pass, and session rows
 - merge-audit copies
 
-It checks anonymization, kept responses and summaries, failed claims and guest reads with the old capability, the existing cascades including calendar revocation queuing, audit erasure, function grants, and blocked Data API unlinking.
+It checks anonymization, kept response statuses with replaced notes, untouched notes of other participants, summaries, failed claims and guest reads with the old capability, the existing cascades including calendar revocation queuing, audit erasure, function grants, and blocked Data API unlinking.
 
 ## Hosted rollout
 
