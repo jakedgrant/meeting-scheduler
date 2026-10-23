@@ -80,10 +80,11 @@ public final class PurchaseService: PurchaseServiceProtocol {
 
     public func refreshCustomerInfo() async {
         let generation = accountGeneration
+        guard let userId = accountUserId, Purchases.shared.appUserID == userId else { return }
         do {
             let info = try await Purchases.shared.customerInfo()
             guard generation == accountGeneration,
-                  accountUserId == nil || Purchases.shared.appUserID == accountUserId else { return }
+                  accountUserId == userId, Purchases.shared.appUserID == userId else { return }
             customerInfo = info
         } catch {
             print("Failed to get customer info: \(error)")
@@ -107,16 +108,18 @@ public final class PurchaseService: PurchaseServiceProtocol {
 
     public func purchase(package: Package) async throws -> CustomerInfo {
         let generation = accountGeneration
+        guard let userId = accountUserId, Purchases.shared.appUserID == userId else { throw AuthError.notAuthenticated }
         let result = try await Purchases.shared.purchase(package: package)
-        guard generation == accountGeneration else { throw CancellationError() }
+        guard generation == accountGeneration, accountUserId == userId, Purchases.shared.appUserID == userId else { throw CancellationError() }
         customerInfo = result.customerInfo
         return result.customerInfo
     }
 
     public func restorePurchases() async throws -> CustomerInfo {
         let generation = accountGeneration
+        guard let userId = accountUserId, Purchases.shared.appUserID == userId else { throw AuthError.notAuthenticated }
         let customerInfo = try await Purchases.shared.restorePurchases()
-        guard generation == accountGeneration else { throw CancellationError() }
+        guard generation == accountGeneration, accountUserId == userId, Purchases.shared.appUserID == userId else { throw CancellationError() }
         self.customerInfo = customerInfo
         return customerInfo
     }

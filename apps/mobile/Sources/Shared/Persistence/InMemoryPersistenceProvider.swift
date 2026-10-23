@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
+    private var listedPollIds: Set<UUID> = []
     private var polls: [UUID: Poll] = [:]
     private var timeOptions: [UUID: [PollTimeOption]] = [:]
     private var participants: [UUID: [PollParticipant]] = [:]
@@ -26,7 +27,16 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     public func replacePollsSnapshot(_ polls: [Poll]) throws {
         let ids = Set(polls.map(\.id))
         for id in self.polls.keys.filter({ !ids.contains($0) }) { try deletePoll(id: id) }
+        try saveListedPolls(polls)
+    }
+
+    public func saveListedPolls(_ polls: [Poll]) throws {
         try savePolls(polls)
+        listedPollIds.formUnion(polls.map(\.id))
+    }
+
+    public func fetchListedPolls() throws -> [Poll] {
+        try fetchAllPolls().filter { listedPollIds.contains($0.id) }
     }
 
     // MARK: - Polls
@@ -54,6 +64,7 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     }
 
     public func deletePoll(id: UUID) throws {
+        listedPollIds.remove(id)
         polls.removeValue(forKey: id)
         timeOptions.removeValue(forKey: id)
         for participant in participants[id] ?? [] { responses.removeValue(forKey: participant.id) }
@@ -199,6 +210,7 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     }
 
     public func clearAll() throws {
+        listedPollIds.removeAll()
         polls.removeAll()
         timeOptions.removeAll()
         participants.removeAll()

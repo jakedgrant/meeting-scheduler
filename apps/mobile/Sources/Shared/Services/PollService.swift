@@ -133,6 +133,7 @@ public final class PollService: PollServiceProtocol {
     private let statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)?
     private var accountId: UUID?
     private var accountGeneration: UInt64 = 0
+    private var listGeneration: UInt64 = 0
     private var detailGenerations: [UUID: UInt64] = [:]
     private let persistence: any PersistenceProviderProtocol
     private let timeRangeFormatter = {
@@ -211,10 +212,12 @@ public final class PollService: PollServiceProtocol {
     /// without waiting for the network. A background fetch then refreshes from the server.
     public func loadMyPolls() async {
         let generation = beginRequest()
+        listGeneration &+= 1
+        let listRequest = listGeneration
         guard let userId = accountId else { return }
 
         // 1. Return cached data immediately
-        if let cached = try? persistence.fetchAllPolls(), !cached.isEmpty {
+        if let cached = try? persistence.fetchListedPolls(), !cached.isEmpty {
             createdPolls = cached.filter { $0.creatorId == userId }
             joinedPolls = cached.filter { $0.creatorId != userId }
             myPolls = createdPolls + joinedPolls
@@ -224,7 +227,7 @@ public final class PollService: PollServiceProtocol {
 
         // 2. Fetch from server (only show spinner if cache was empty)
         isLoading = myPolls.isEmpty
-        defer { if isCurrent(generation) { isLoading = false } }
+        defer { if isCurrent(generation) && listRequest == listGeneration { isLoading = false } }
 
         do {
             let result: (created: [Poll], joined: [Poll])
@@ -237,7 +240,7 @@ public final class PollService: PollServiceProtocol {
                     .value
                 result = (response.created_polls, response.joined_polls)
             }
-            guard isCurrent(generation) else { return }
+            guard isCurrent(generation) && listRequest == listGeneration else { return }
             createdPolls = result.created
             joinedPolls = result.joined
             myPolls = createdPolls + joinedPolls
@@ -258,7 +261,7 @@ public final class PollService: PollServiceProtocol {
             async let participantsFetch = batchLoadParticipantPollIds(pollIds: pollIds)
             let (timeOptionSummaries, participantPollIds) = await (timeOptionsFetch, participantsFetch)
 
-            guard isCurrent(generation) else { return }
+            guard isCurrent(generation) && listRequest == listGeneration else { return }
             // Derive time ranges (options are ordered by start_time ascending)
             var timeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
             for summary in timeOptionSummaries {
@@ -289,7 +292,7 @@ public final class PollService: PollServiceProtocol {
             }
 
         } catch {
-            guard isCurrent(generation) else { return }
+            guard isCurrent(generation) && listRequest == listGeneration else { return }
             print("Failed to load polls: \(error)")
             // On network failure, keep cached data visible rather than clearing
             if myPolls.isEmpty {
@@ -373,7 +376,7 @@ public final class PollService: PollServiceProtocol {
     /// On network failure, falls back to stale cached data.
     public func loadPollDetail(id: UUID) async -> PollDetail? {
         let generation = beginRequest()
-        detailGenerations[id, default: 0] &+= 0
+        detailGenerations[id, default: 0] &+= 1
         let detailGeneration = detailGenerations[id, default: 0]
         if persistence.isDetailFresh(id, maxAge: 300),
            let cached = try? persistence.fetchPollDetail(id: id) { return cached }
@@ -446,7 +449,7 @@ public final class PollService: PollServiceProtocol {
             .value
 
         guard isCurrent(generation) else { throw CancellationError() }
-        try? persistence.savePolls([response])
+        try? persistence.saveListedPolls([response])
         myPolls.insert(response, at: 0)
         return response
     }

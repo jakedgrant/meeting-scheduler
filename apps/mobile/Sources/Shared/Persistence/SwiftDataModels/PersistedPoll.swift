@@ -4,6 +4,7 @@ import SwiftData
 @Model
 public final class PersistedPoll {
     @Attribute(.unique) public var id: UUID
+    public var isListed: Bool = false
     public var creatorId: UUID
     public var title: String
     public var pollDescription: String?

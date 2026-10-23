@@ -11,6 +11,9 @@ public protocol PersistenceProviderProtocol: Sendable {
     /// Reconcile a complete, authoritative list, including polls no longer accessible.
     func replacePollsSnapshot(_ polls: [Poll]) throws
     func fetchAllPolls() throws -> [Poll]
+    /// Only polls established by the account's list or a successful create/join.
+    func fetchListedPolls() throws -> [Poll]
+    func saveListedPolls(_ polls: [Poll]) throws
     func fetchPoll(id: UUID) throws -> Poll?
     func deletePoll(id: UUID) throws
 

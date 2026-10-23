@@ -70,9 +70,25 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
                 participantCounts.removeValue(forKey: existing.id)
                 timeRanges.removeValue(forKey: existing.id)
             }
-            try savePolls(polls)
+            try saveListedPolls(polls)
             try modelContext.save()
         }
+    }
+
+    public func saveListedPolls(_ polls: [Poll]) throws {
+        try savePolls(polls)
+        for poll in polls {
+            let id = poll.id
+            let record = try modelContext.fetch(FetchDescriptor<PersistedPoll>(predicate: #Predicate { $0.id == id })).first
+            record?.isListed = true
+        }
+        try saveChanges()
+    }
+
+    public func fetchListedPolls() throws -> [Poll] {
+        try modelContext.fetch(FetchDescriptor<PersistedPoll>(
+            predicate: #Predicate { $0.isListed }, sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )).map { $0.toModel() }
     }
 
     // MARK: - Polls

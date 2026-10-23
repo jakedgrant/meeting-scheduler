@@ -123,4 +123,77 @@ final class PollServiceLifecycleTests: XCTestCase {
         XCTAssertNil(try cache.fetchPollDetail(id: poll.id))
     }
 
+    func testCachedInvitationDoesNotInventOfflineJoinedMembership() async throws {
+        let account = UUID()
+        let cache = SwiftDataPersistenceProvider(inMemory: true)
+        let invitation = Poll(creatorId: UUID(), title: "Not joined")
+        let service = PollService(persistence: cache, currentUserId: { account }, listLoader: { throw Failure.offline })
+        service.accountDidChange(to: account)
+        try cache.savePollDetail(PollDetail(poll: invitation, timeOptions: [], participants: [], responses: []))
+        await service.loadMyPolls()
+        XCTAssertTrue(service.myPolls.isEmpty)
+        XCTAssertTrue(service.joinedPolls.isEmpty)
+        XCTAssertNotNil(try cache.fetchPollDetail(id: invitation.id))
+    }
+
+    func testOlderListCannotResurrectPollRemovedByNewerCompleteList() async throws {
+        let account = UUID()
+        let cache = SwiftDataPersistenceProvider(inMemory: true)
+        let poll = Poll(creatorId: account, title: "Deleted")
+        var calls = 0
+        var first: CheckedContinuation<(created: [Poll], joined: [Poll]), Error>?
+        let service = PollService(persistence: cache, currentUserId: { account }, listLoader: {
+            calls += 1
+            if calls == 1 { return try await withCheckedThrowingContinuation { first = $0 } }
+            if calls == 2 { return ([], []) }
+            throw Failure.offline
+        })
+        let oldLoad = Task { await service.loadMyPolls() }
+        while first == nil { await Task.yield() }
+        await service.loadMyPolls()
+        first?.resume(returning: ([poll], []))
+        await oldLoad.value
+        await service.loadMyPolls()
+        XCTAssertTrue(service.myPolls.isEmpty)
+        XCTAssertNil(try cache.fetchPoll(id: poll.id))
+    }
+
+    func testOlderDetailCannotRestoreChildrenRemovedByNewerSnapshot() async throws {
+        let account = UUID()
+        let cache = SwiftDataPersistenceProvider(inMemory: true)
+        let poll = Poll(creatorId: account, title: "Changed")
+        let participant = PollParticipant(pollId: poll.id, userId: account)
+        var calls = 0
+        var first: CheckedContinuation<PollDetail, Error>?
+        let service = PollService(persistence: cache, currentUserId: { account }, detailLoader: { _ in
+            calls += 1
+            if calls == 1 { return try await withCheckedThrowingContinuation { first = $0 } }
+            return PollDetail(poll: poll, timeOptions: [], participants: [], responses: [])
+        })
+        let oldLoad = Task { await service.loadPollDetail(id: poll.id) }
+        while first == nil { await Task.yield() }
+        _ = await service.loadPollDetail(id: poll.id)
+        first?.resume(returning: PollDetail(poll: poll, timeOptions: [], participants: [participant], responses: []))
+        let stale = await oldLoad.value
+        XCTAssertNil(stale)
+        XCTAssertTrue(try cache.fetchPollDetail(id: poll.id)?.participants.isEmpty == true)
+    }
+
+    func testCompleteListEvictionRejectsPreviouslyStartedDetail() async throws {
+        let account = UUID()
+        let cache = SwiftDataPersistenceProvider(inMemory: true)
+        let poll = Poll(creatorId: account, title: "Removed")
+        var first: CheckedContinuation<PollDetail, Error>?
+        let service = PollService(persistence: cache, currentUserId: { account }, listLoader: { ([], []) }, detailLoader: { _ in
+            try await withCheckedThrowingContinuation { first = $0 }
+        })
+        let oldLoad = Task { await service.loadPollDetail(id: poll.id) }
+        while first == nil { await Task.yield() }
+        await service.loadMyPolls()
+        first?.resume(returning: PollDetail(poll: poll, timeOptions: [], participants: [], responses: []))
+        let stale = await oldLoad.value
+        XCTAssertNil(stale)
+        XCTAssertNil(try cache.fetchPollDetail(id: poll.id))
+    }
+
 }

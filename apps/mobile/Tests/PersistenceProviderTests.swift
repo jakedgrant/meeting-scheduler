@@ -346,4 +346,16 @@ final class PersistenceProviderTests: XCTestCase {
         }
     }
 
+    func testOnlyAuthoritativeMembershipAppearsInCachedList() throws {
+        for provider in makeProviders() {
+            let invitation = makeSamplePoll()
+            let membership = makeSamplePoll()
+            try provider.savePollDetail(PollDetail(poll: invitation, timeOptions: [], participants: [], responses: []))
+            try provider.saveListedPolls([membership])
+            XCTAssertEqual(try provider.fetchListedPolls().map(\.id), [membership.id])
+            try provider.replacePollsSnapshot([])
+            XCTAssertTrue(try provider.fetchListedPolls().isEmpty)
+        }
+    }
+
 }
