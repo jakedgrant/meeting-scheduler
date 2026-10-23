@@ -22,7 +22,6 @@ struct CreatePollView: View {
     @State var timeOptions: [TimeOption] = [TimeOption()]
     @State private var editor = PollCreationEditor()
     @State private var useEventPass = false
-    @State private var draftTimezone = TimeZone.current.identifier
     private var isLoading: Bool { editor.isSubmitting }
     @State var errorMessage: String?
 
@@ -298,7 +297,7 @@ struct CreatePollView: View {
         errorMessage = nil
         let payload = editor.mustResolvePending ? editor.pending?.payload : PollCreationPayload(
             title: title, description: description.isEmpty ? nil : description,
-            location: location.isEmpty ? nil : location, timezone: draftTimezone,
+            location: location.isEmpty ? nil : location, timezone: TimeZone.current.identifier,
             closesAt: hasDueDate ? dueDate : nil,
             timeOptions: buildTimeOptions().map { PollCreationOption(startTime: $0.start, endTime: $0.end, isAllDay: $0.isAllDay) },
             useEventPass: useEventPass
@@ -320,7 +319,6 @@ struct CreatePollView: View {
         dueDate = payload?.closesAt
         hasDueDate = dueDate != nil
         useEventPass = payload?.useEventPass ?? false
-        draftTimezone = payload?.timezone ?? TimeZone.current.identifier
         isAllDay = payload?.timeOptions.first?.isAllDay ?? false
         timeOptions = payload?.timeOptions.map { TimeOption(date: $0.startTime, startTime: $0.startTime, endTime: $0.endTime) } ?? [TimeOption()]
         errorMessage = nil

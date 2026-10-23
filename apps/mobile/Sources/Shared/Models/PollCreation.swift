@@ -103,7 +103,7 @@ public struct PollCreationResult: Codable, Sendable {
 }
 
 public enum PollCreationError: Error, LocalizedError, Equatable {
-    case authentication, quota, passUnavailable, invalidPayload, changedOperation, shareCodeUnavailable, transport, draftStorage
+    case authentication, quota, passUnavailable, invalidPayload, changedOperation, shareCodeUnavailable, transport, draftStorage, draftUnreadable
     public var errorDescription: String? {
         switch self {
         case .authentication: "Sign in again before creating this poll. Your draft has been retained."
@@ -113,6 +113,7 @@ public enum PollCreationError: Error, LocalizedError, Equatable {
         case .changedOperation: "This retry does not match the original creation. Your draft has been retained. Reopen the form to recover the original request."
         case .shareCodeUnavailable: "A share code could not be allocated. Retry this creation. Your draft has been retained."
         case .transport: "Creation could not be confirmed. Retry to recover or finish the same poll. Your submitted draft is retained and locked until this is resolved."
+        case .draftUnreadable: "Your saved creation could not be read. Check My Polls, then reopen this form to retry loading your saved request before creating another poll."
         case .draftStorage: "Your draft could not be saved on this device. Free some storage and retry before creating the poll."
         }
     }

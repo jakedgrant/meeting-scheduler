@@ -60,7 +60,7 @@ public final class PollCreationEditor {
                 pending = envelope.request; mustResolvePending = envelope.unresolved
                 if mustResolvePending { errorMessage = PollCreationError.transport.localizedDescription }
             }
-        } catch { canReadDraft = false; errorMessage = PollCreationError.draftStorage.localizedDescription }
+        } catch { canReadDraft = false; errorMessage = PollCreationError.draftUnreadable.localizedDescription }
     }
 
     private func persist(account: UUID, unresolved: Bool) throws {
@@ -70,7 +70,7 @@ public final class PollCreationEditor {
 
     public func submit(_ payload: PollCreationPayload, using service: any PollServiceProtocol) async {
         guard !isSubmitting, result == nil else { return }
-        guard canReadDraft else { errorMessage = PollCreationError.draftStorage.localizedDescription; return }
+        guard canReadDraft else { errorMessage = PollCreationError.draftUnreadable.localizedDescription; return }
         guard let accountId else { errorMessage = PollCreationError.authentication.localizedDescription; return }
         // Never create a second poll to resolve an uncertain first request.
         if mustResolvePending && pending?.payload != payload {

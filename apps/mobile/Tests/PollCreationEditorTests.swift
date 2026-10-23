@@ -129,6 +129,18 @@ final class PollCreationEditorTests: XCTestCase {
         XCTAssertEqual(calls, 0); XCTAssertNotNil(editor.errorMessage); XCTAssertNil(editor.result)
     }
 
+    func testUnreadableSavedDraftBlocksAnotherCreationAndExplainsRecovery() async throws {
+        let store = MemoryCreationDraftStore(); store.data[account] = Data("invalid json".utf8)
+        let editor = PollCreationEditor(store: store); editor.selectAccount(account)
+        let service = MockPollService.empty
+        var sends = 0
+        service.creator = { request in sends += 1; return self.saved(request) }
+        await editor.submit(payload(), using: service)
+        XCTAssertEqual(sends, 0); XCTAssertNil(editor.result)
+        XCTAssertTrue(editor.errorMessage?.contains("Check My Polls") == true)
+        XCTAssertEqual(store.data[account], Data("invalid json".utf8))
+    }
+
     func testAtomicFileDraftSurvivesNewEditorAndKeepsAccountsSeparate() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "creation-test-\(UUID())", directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: directory) }
