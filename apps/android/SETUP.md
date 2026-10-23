@@ -48,15 +48,9 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
    .requestIdToken("YOUR_WEB_CLIENT_ID_HERE")
    ```
 
-### 4. Configure Environment Variables (Optional)
+### 4. Release Signing (Release Builds Only)
 
-For signing configuration, create `gradle.properties`:
-
-```bash
-cp gradle.properties.template gradle.properties
-```
-
-Edit `gradle.properties` and add your keystore credentials (DO NOT commit this file).
+Debug builds need no signing setup. Release builds (`assembleRelease`, `bundleRelease`) fail unless `KEYSTORE_FILE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, and `KEY_PASSWORD` are set as environment variables or in your user-level `~/.gradle/gradle.properties`. They never fall back to the debug key. Don't put credentials in `apps/android/gradle.properties`: that file is tracked by Git. See [docs/android-release-signing.md](../../docs/android-release-signing.md).
 
 ### 5. Sync and Build
 
