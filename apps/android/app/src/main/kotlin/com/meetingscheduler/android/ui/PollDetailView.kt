@@ -28,6 +28,7 @@ import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
@@ -65,6 +66,11 @@ fun PollDetailView(
     var commentError by remember { mutableStateOf("") }
     var calendarConflicts by remember { mutableStateOf<Set<String>>(emptySet()) }
 
+    val saveSession = remember(pollId, authService.currentUser?.id) { AvailabilitySaveSession() }
+    var availabilityLoaded by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
+    var saveError by remember(pollId, authService.currentUser?.id) { mutableStateOf<String?>(null) }
+    var hasVersionConflict by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
+    var conflictSnapshot by remember(pollId, authService.currentUser?.id) { mutableStateOf<AvailabilitySnapshot?>(null) }
     val MAX_COMMENT_LENGTH = 500
     var isLoading by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
@@ -97,8 +103,34 @@ fun PollDetailView(
         }
     }
 
-    LaunchedEffect(pollId) {
+    fun applySavedAvailability(saved: AvailabilitySnapshot) {
+        responses = responses.filter { it.participantId != saved.participantId } + saved.responseRows()
+        participants = participants.map { if (it.id == saved.participantId) it.copy(comment = saved.comment) else it }
+        myParticipant = participants.firstOrNull { it.id == saved.participantId }
+        localResponses = saved.responses.associate { it.timeOptionId to it.status }
+        localComment = saved.comment.orEmpty()
+    }
+
+    suspend fun loadSavedAvailability() {
+        try {
+            val saved = pollService.getAvailability(pollId)
+            saveSession.acceptLoaded(saved)
+            applySavedAvailability(saved)
+            availabilityLoaded = true
+            saveError = null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            saveError = "Could not load your saved availability. Retry before editing."
+        }
+    }
+
+    LaunchedEffect(pollId, authService.currentUser?.id) {
         isLoading = true
+        availabilityLoaded = false
+        localResponses = emptyMap()
+        localComment = ""
+        myParticipant = null
         poll = pollService.loadPoll(pollId)
 
         if (poll != null) {
@@ -112,9 +144,7 @@ fun PollDetailView(
             responses = pollService.loadResponses(timeOptions.map { it.id })
 
             myParticipant?.let { participant ->
-                val myResponses = responses.filter { it.participantId == participant.id }
-                localResponses = myResponses.associate { it.timeOptionId to it.status }
-                localComment = participant.comment ?: ""
+                loadSavedAvailability()
             }
 
             // Refresh safe connection metadata, then check all slots in one call.
@@ -378,6 +408,7 @@ fun PollDetailView(
                                         val participant = pollService.joinPoll(pollId)
                                         myParticipant = participant
                                         participants = participants + participant
+                                        loadSavedAvailability()
                                     } catch (e: Exception) {
                                         println("Failed to join poll: ${e.message}")
                                     }
@@ -448,9 +479,11 @@ fun PollDetailView(
                         responses = responsesForOption(option.id),
                         myResponse = localResponses[option.id],
                         hasCalendarConflict = calendarConflicts.contains(option.id),
-                        canRespond = myParticipant != null && poll?.status == PollStatus.ACTIVE,
+                        canRespond = myParticipant != null && poll?.status == PollStatus.ACTIVE && availabilityLoaded && !isSaving,
                         onResponseChange = { status ->
-                            localResponses = localResponses + (option.id to status)
+                            if (!isSaving && availabilityLoaded) {
+                                localResponses = localResponses + (option.id to status)
+                            }
                         },
                         onClick = { onNavigateToResponses(option.id) }
                     )
@@ -482,6 +515,7 @@ fun PollDetailView(
                                 }
                                 OutlinedTextField(
                                     value = localComment,
+                                    enabled = !isSaving && availabilityLoaded,
                                     onValueChange = { newValue ->
                                         if (newValue.length <= MAX_COMMENT_LENGTH) {
                                             localComment = newValue
@@ -508,6 +542,29 @@ fun PollDetailView(
                     }
                 }
 
+                if (myParticipant != null && saveError != null) {
+                    item {
+                        Text(saveError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        if (!availabilityLoaded) {
+                            TextButton(onClick = { scope.launch { loadSavedAvailability() } }) {
+                                Text("Retry loading saved responses")
+                            }
+                        } else if (hasVersionConflict) {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    try {
+                                        conflictSnapshot = pollService.getAvailability(pollId)
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        saveError = "Could not load the latest version. Your draft is unchanged. Try again."
+                                    }
+                                }
+                            }) { Text("Review latest saved version") }
+                        }
+                    }
+                }
+
                 // Save Responses Button
                 if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
@@ -521,33 +578,31 @@ fun PollDetailView(
 
                                 scope.launch {
                                     isSaving = true
-                                    myParticipant?.let { participant ->
-                                        try {
-                                            val responseInputs = localResponses.map { (optionId, status) ->
-                                                PollService.ResponseInput(
-                                                    timeOptionId = optionId,
-                                                    status = status,
-                                                    note = null
-                                                )
-                                            }
-                                            pollService.saveResponses(participant.id, responseInputs)
-                                            // Save comment (trimmed, null if empty)
-                                            val trimmedComment = localComment.trim()
-                                            pollService.updateParticipantComment(
-                                                participant.id,
-                                                if (trimmedComment.isEmpty()) null else trimmedComment
-                                            )
-                                            responses = pollService.loadResponses(timeOptions.map { it.id })
-                                            participants = pollService.loadParticipants(pollId)
-                                        } catch (e: Exception) {
-                                            println("Failed to save responses: ${e.message}")
+                                    val savingUserId = authService.currentUser?.id
+                                    try {
+                                        val draft = AvailabilityDraft(localResponses, localComment.trim().ifEmpty { null })
+                                        val saved = saveSession.save(draft) { request ->
+                                            pollService.saveAvailability(pollId, request)
                                         }
+                                        if (authService.currentUser?.id == savingUserId) {
+                                            applySavedAvailability(saved)
+                                            saveError = null
+                                            hasVersionConflict = false
+                                        }
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: AvailabilityVersionConflict) {
+                                        saveError = error.message
+                                        hasVersionConflict = true
+                                    } catch (error: Exception) {
+                                        saveError = "Availability was not confirmed saved. Your draft is unchanged. Tap Save Responses to retry."
+                                    } finally {
+                                        isSaving = false
                                     }
-                                    isSaving = false
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isSaving && commentError.isEmpty()
+                            enabled = !isSaving && availabilityLoaded && !hasVersionConflict && commentError.isEmpty()
                         ) {
                             if (isSaving) {
                                 CircularProgressIndicator(
@@ -632,6 +687,31 @@ fun PollDetailView(
         )
     }
 
+    conflictSnapshot?.let { latest ->
+        AlertDialog(
+            onDismissRequest = { conflictSnapshot = null },
+            title = { Text("Availability changed") },
+            text = { Text("Latest saved responses: ${latest.responses.joinToString { it.status.name.lowercase() }}\nComment: ${latest.comment.orEmpty()}\nYour draft is still on this screen.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    saveSession.acceptLoaded(latest)
+                    conflictSnapshot = null
+                    hasVersionConflict = false
+                    saveError = "Your draft is unchanged. Tap Save Responses to replace the latest version with your draft."
+                }) { Text("Keep my draft") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    saveSession.acceptLoaded(latest)
+                    applySavedAvailability(latest)
+                    conflictSnapshot = null
+                    hasVersionConflict = false
+                    saveError = null
+                }) { Text("Use saved version") }
+            },
+        )
+    }
+
     // Select Final Date Dialog
     if (showSelectFinalDateDialog) {
         val formattedOption = finalTimeOption?.let { option ->
@@ -658,14 +738,9 @@ fun PollDetailView(
                         isSelectingFinalDate = true
                         finalTimeOption?.let { option ->
                             try {
-                                pollService.setSelectedFinalDate(
-                                    pollId,
-                                    option.startTime,
-                                    option.endTime
-                                )
-                                poll = pollService.loadPoll(pollId)
+                                poll = pollService.finalizePoll(pollId, option.id)
                             } catch (e: Exception) {
-                                println("Failed to set final date: ${e.message}")
+                                saveError = "The final date could not be saved. Try again."
                             }
                         }
                         isSelectingFinalDate = false

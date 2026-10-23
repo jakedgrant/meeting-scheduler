@@ -35,9 +35,10 @@ org.gradle.caching=true
 org.gradle.configuration-cache=true
 
 # ===== SIGNING CONFIGURATION =====
-# Uncomment and fill in your signing credentials
-# DO NOT commit this file with real credentials!
-# Add gradle.properties to .gitignore
+# Put these in your user-level ~/.gradle/gradle.properties, or export them as
+# environment variables. NEVER put them in apps/android/gradle.properties: that
+# file is tracked by Git. Release packaging fails unless all four are set.
+# See docs/android-release-signing.md.
 
 # KEYSTORE_FILE=/path/to/your/keystore.jks
 # KEYSTORE_PASSWORD=your_keystore_password
