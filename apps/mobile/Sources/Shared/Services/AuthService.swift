@@ -22,64 +22,90 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     public var currentUserEmail: String? { currentUser?.email }
 
     private let supabase = SupabaseService.shared.client
+    private let persistence: any PersistenceProviderProtocol
+    private var identityGeneration: UInt64 = 0
     private var currentNonce: String?
     private var appleSignInContinuation: CheckedContinuation<Void, Error>?
 
     private override init() {
+        self.persistence = AccountPersistence.shared
         super.init()
         Task {
             await initialize()
         }
     }
 
-    public func initialize() async {
-        // Get initial session
-        do {
-            let session = try await supabase.auth.session
-            currentSession = session
-            currentUser = session.user
-            if let userId = currentUser?.id {
-                await loadProfile(userId: userId)
-                await PurchaseService.shared.login(userId: userId.uuidString)
-                Task { await CalendarService.shared.refreshGoogleCalendarConnection() }
-            }
-        } catch {
-            print("No existing session: \(error)")
-        }
-
-        isLoading = false
-
-        // Listen for auth changes
-        Task {
-            for await (event, session) in supabase.auth.authStateChanges {
-                await handleAuthChange(event: event, session: session)
-            }
-        }
+    /// Test-friendly initializer that accepts a custom persistence provider.
+    public init(persistence: any PersistenceProviderProtocol) {
+        self.persistence = persistence
+        super.init()
     }
 
-    private func handleAuthChange(event: AuthChangeEvent, session: Session?) async {
-        if currentUser?.id != session?.user.id {
-            CalendarService.shared.resetGoogleCalendarState()
+    public func initialize() async {
+        // Register first: session restoration, profile loading and provider I/O must
+        // never delay consuming sign-out/expiry events during application startup.
+        let generation = identityGeneration
+        Task {
+            for await (event, session) in supabase.auth.authStateChanges {
+                handleAuthChange(event: event, session: session)
+                isLoading = false
+            }
         }
-        currentSession = session
-        currentUser = session?.user
+        do {
+            let session = try await supabase.auth.session
+            if generation == identityGeneration {
+                handleAuthChange(event: .initialSession, session: session)
+            }
+        } catch {
+            if generation == identityGeneration { applySession(nil) }
+        }
+        isLoading = false
+    }
 
+    private func handleAuthChange(event: AuthChangeEvent, session: Session?) {
+        applySession(session)
+        // Do not block the auth stream on profile/provider I/O: a later sign-out must
+        // clear state immediately even while an old account request is suspended.
+        let generation = identityGeneration
         switch event {
-        case .signedIn:
-            if let userId = session?.user.id {
+        case .initialSession, .signedIn:
+            guard let userId = session?.user.id else { return }
+            Task {
                 await loadProfile(userId: userId)
+                guard identityGeneration == generation, currentUserId == userId else { return }
                 await PurchaseService.shared.login(userId: userId.uuidString)
-                Task { await CalendarService.shared.refreshGoogleCalendarConnection() }
+                guard identityGeneration == generation else { return }
+                await CalendarService.shared.refreshGoogleCalendarConnection()
             }
         case .signedOut:
-            profile = nil
-            await PurchaseService.shared.logout()
+            Task { await PurchaseService.shared.logout() }
         default:
             break
         }
     }
 
+    private func applySession(_ session: Session?) {
+        let changed = currentUser?.id != session?.user.id
+        currentSession = session
+        currentUser = session?.user
+        guard changed else { return }
+        identityGeneration &+= 1
+        profile = nil
+        try? persistence.selectAccount(session?.user.id)
+        PollService.shared.accountDidChange(to: session?.user.id)
+        CalendarService.shared.resetGoogleCalendarState()
+        PurchaseService.shared.resetAccountState(userId: session?.user.id.uuidString)
+    }
+
     private func loadProfile(userId: UUID) async {
+        let generation = identityGeneration
+        guard currentUserId == userId else { return }
+        // Return cached profile immediately
+        if let cached = try? persistence.fetchProfile(id: userId) {
+            profile = cached
+        }
+
+        // Then refresh from server
         do {
             let response: Profile = try await supabase
                 .from("profiles")
@@ -89,6 +115,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                 .execute()
                 .value
 
+            guard generation == identityGeneration, currentUserId == userId else { return }
+            try? persistence.saveProfile(response)
             profile = response
         } catch {
             print("Failed to load profile: \(error)")
@@ -148,6 +176,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
 
     public func signOut() async throws {
         try await supabase.auth.signOut()
+        applySession(nil)
     }
 
     // MARK: - Profile Updates
@@ -157,6 +186,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             throw AuthError.notAuthenticated
         }
 
+        let generation = identityGeneration
         var updates: [String: AnyJSON] = [:]
         if let displayName = displayName {
             updates["display_name"] = .string(displayName)
@@ -177,6 +207,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             .execute()
             .value
 
+        guard generation == identityGeneration, currentUserId == userId else { throw CancellationError() }
+        try? persistence.saveProfile(response)
         profile = response
     }
 

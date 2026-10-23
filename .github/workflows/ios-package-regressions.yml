@@ -1,0 +1,48 @@
+name: iOS package regressions
+
+on:
+  pull_request:
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/ios-package-regressions.yml'
+      - 'scripts/ci/ios-package-regressions.sh'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/ios-package-regressions.yml'
+      - 'scripts/ci/ios-package-regressions.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-regressions:
+    # Official runner inventory: macos-26 is arm64 and includes Xcode 26.6.
+    # https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the package and run provider, lifecycle and availability regressions
+        env:
+          IOS_CI_OUTPUT: ${{ runner.temp }}/ios-package-regressions
+        run: bash scripts/ci/ios-package-regressions.sh
+      - name: Upload build logs and test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-package-regressions-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ios-package-regressions/*.log
+            ${{ runner.temp }}/ios-package-regressions/*.txt
+            ${{ runner.temp }}/ios-package-regressions/*.json
+            ${{ runner.temp }}/ios-package-regressions/Regressions.xcresult
+          if-no-files-found: warn
