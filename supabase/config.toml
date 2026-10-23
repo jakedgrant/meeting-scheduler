@@ -58,3 +58,28 @@ backend = "postgres"
 # Disable JWT verification for webhook (uses its own auth header)
 [functions.revenuecat-webhook]
 verify_jwt = false
+
+# Internal billing worker: separate secret, service-only leased repository.
+[functions.billing-worker]
+verify_jwt = false
+
+# Calendar user endpoints verify JWT signatures with auth.getClaims and require
+# a live auth.sessions record inside their handler. This supports current signing
+# keys without relying on legacy gateway verification or caller identity headers.
+[functions.calendar-connection]
+verify_jwt = false
+
+[functions.check-calendar-conflicts]
+verify_jwt = false
+
+# Google's callback is protected by expiring, single-use state and PKCE.
+[functions.calendar-oauth-callback]
+verify_jwt = false
+
+# Internal worker: requires CALENDAR_MAINTENANCE_SECRET, not an end-user JWT.
+[functions.calendar-maintenance]
+verify_jwt = false
+
+# Retired endpoint returns 410 and never reads credentials or user identities.
+[functions.store-calendar-token]
+verify_jwt = false

@@ -1,0 +1,60 @@
+name: Calendar maintenance
+
+on:
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: calendar-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    # Configure only after the new backend and secrets have been deployed.
+    if: ${{ vars.CALENDAR_MAINTENANCE_URL != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Retry revocations, expire OAuth attempts, and rotate encrypted records
+        env:
+          MAINTENANCE_URL: ${{ vars.CALENDAR_MAINTENANCE_URL }}
+          MAINTENANCE_SECRET: ${{ secrets.CALENDAR_MAINTENANCE_SECRET }}
+        shell: python
+        run: |
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          url = os.environ['MAINTENANCE_URL']
+          parsed = urllib.parse.urlsplit(url)
+          secret = os.environ['MAINTENANCE_SECRET']
+          if (parsed.scheme != 'https' or not parsed.hostname
+              or parsed.username or parsed.password or parsed.query or parsed.fragment
+              or parsed.path != '/functions/v1/calendar-maintenance' or len(secret) < 43):
+              sys.exit('Invalid calendar maintenance configuration.')
+
+          # A redirect must never forward this backend credential to another host.
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args, **kwargs):
+                  return None
+
+          request = urllib.request.Request(url, method='POST', data=b'{}', headers={
+              'Authorization': 'Bearer ' + secret,
+              'Content-Type': 'application/json',
+          })
+          try:
+              with urllib.request.build_opener(NoRedirect).open(request, timeout=90) as response:
+                  result = json.load(response)
+              counts = {key: result[key] for key in ('revoked', 'rotated')}
+              if any(type(value) is not int or value < 0 for value in counts.values()):
+                  raise ValueError()
+          except Exception:
+              # Never echo a response body, header, token, or exception containing one.
+              sys.exit('Calendar maintenance failed. Inspect the safe Edge Function error codes.')
+          print(json.dumps(counts))

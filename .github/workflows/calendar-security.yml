@@ -1,0 +1,36 @@
+name: Calendar security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  calendar-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.3
+      - name: Install locked database test runtime
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Replay migrations and verify database privileges
+        run: npm run test:calendar:db
+      - name: Type-check calendar entry points
+        run: >-
+          deno check --frozen --config supabase/functions/deno.json
+          supabase/functions/calendar-connection/index.ts
+          supabase/functions/check-calendar-conflicts/index.ts
+          supabase/functions/calendar-oauth-callback/index.ts
+          supabase/functions/calendar-maintenance/index.ts
+          supabase/functions/store-calendar-token/index.ts
+      - name: Verify calendar security behavior without network or environment access
+        run: npm run test:calendar:edge

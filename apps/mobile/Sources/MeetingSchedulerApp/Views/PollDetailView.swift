@@ -124,6 +124,9 @@ struct PollDetailView: View {
     @ViewBuilder
     private func pollContent(_ poll: Poll) -> some View {
         List {
+            if let error = calendarService.googleCalendarError {
+                Text(error).font(.caption).foregroundStyle(.secondary)
+            }
             pollInfoSection(poll)
             shareCodeSection(poll)
             joinButtonSection(poll)
@@ -433,6 +436,7 @@ struct PollDetailView: View {
             localComment = myParticipant.comment ?? ""
         }
 
+        await calendarService.refreshGoogleCalendarConnection()
         if calendarService.isEnabled && !timeOptions.isEmpty {
             calendarConflicts = await calendarService.checkConflicts(for: timeOptions)
             for conflictId in calendarConflicts where localResponses[conflictId] == nil {

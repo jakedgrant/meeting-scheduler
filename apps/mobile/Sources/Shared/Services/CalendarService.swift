@@ -24,6 +24,10 @@ public final class CalendarService: CalendarServiceProtocol {
     // Google Calendar properties
     public private(set) var googleCalendarEnabled = false
     public private(set) var googleCalendarLoading = false
+    public private(set) var googleCalendarError: String?
+    public private(set) var googleCalendarAccountEmail: String?
+    private let oauthSession = CalendarOAuthSession()
+    private var connectionGeneration = 0
 
     // Overall enabled state (true if any source is enabled)
     public var isEnabled: Bool {
@@ -75,7 +79,7 @@ public final class CalendarService: CalendarServiceProtocol {
     /// Load calendar integration preferences from UserDefaults
     private func loadPreferences() {
         appleCalendarEnabled = UserDefaults.standard.bool(forKey: "appleCalendarEnabled")
-        googleCalendarEnabled = UserDefaults.standard.bool(forKey: "googleCalendarEnabled")
+        UserDefaults.standard.removeObject(forKey: "googleCalendarEnabled")
     }
 
     /// Enable/disable Apple Calendar
@@ -99,107 +103,90 @@ public final class CalendarService: CalendarServiceProtocol {
         // Update local state
         appleCalendarEnabled = enabled
         UserDefaults.standard.set(enabled, forKey: "appleCalendarEnabled")
-
-        // Sync to Supabase
-        await syncPreferencesToSupabase()
     }
 
-    /// Enable/disable Google Calendar
-    public func setGoogleCalendarEnabled(_ enabled: Bool) async {
-        if enabled {
-            // Check if token already exists
-            let hasToken = await hasGoogleCalendarToken()
-            if hasToken {
-                // Already authorized, just enable
-                googleCalendarEnabled = true
-                UserDefaults.standard.set(true, forKey: "googleCalendarEnabled")
-                await syncPreferencesToSupabase()
-                return
-            }
+    public func resetGoogleCalendarState() {
+        connectionGeneration += 1
+        oauthSession.cancel()
+        googleCalendarEnabled = false
+        googleCalendarLoading = false
+        googleCalendarError = nil
+        googleCalendarAccountEmail = nil
+    }
 
-            // No token exists, need to authorize
-            do {
-                // Trigger Google OAuth with calendar scope
-                let authorized = try await AuthService.shared.authorizeGoogleCalendar()
-                if authorized {
-                    googleCalendarEnabled = true
-                    UserDefaults.standard.set(true, forKey: "googleCalendarEnabled")
-                } else {
-                    googleCalendarEnabled = false
-                    print("Google Calendar authorization did not return tokens")
-                }
-            } catch {
-                print("Failed to authorize Google Calendar: \(error)")
-                googleCalendarEnabled = false
-            }
+    public func refreshGoogleCalendarConnection() async {
+        guard !googleCalendarLoading else { return }
+        guard let userId = AuthService.shared.currentUserId else {
+            resetGoogleCalendarState()
             return
         }
-
-        // Disable Google Calendar
-        googleCalendarEnabled = false
-        UserDefaults.standard.set(false, forKey: "googleCalendarEnabled")
-
-        // Clear tokens from Supabase
+        let generation = connectionGeneration
         do {
-            var updates: [String: AnyJSON] = [:]
-            updates["google_calendar_refresh_token"] = .null
-            updates["google_calendar_token_expires_at"] = .null
-            updates["google_calendar_access_token"] = .null
-            try await SupabaseService.shared.client
-                .from("profiles")
-                .update(updates)
-                .eq("id", value: AuthService.shared.currentUser?.id.uuidString ?? "")
-                .execute()
-        } catch {
-            print("Failed to clear Google Calendar tokens: \(error)")
-        }
-
-        await syncPreferencesToSupabase()
-    }
-
-    /// Check if Google Calendar has a valid token in Supabase
-    public func hasGoogleCalendarToken() async -> Bool {
-        do {
-            guard let userId = AuthService.shared.currentUser?.id else { return false }
-
-            let profile: GoogleCalendarProfile = try await SupabaseService.shared.client
-                .from("profiles")
-                .select("google_calendar_refresh_token, google_calendar_token_expires_at, google_calendar_access_token")
-                .eq("id", value: userId.uuidString)
-                .single()
-                .execute()
-                .value
-
-            // Check if refresh token exists and access token isn't expired
-            if let refreshToken = profile.google_calendar_refresh_token,
-               !refreshToken.isEmpty {
-                // Token exists, mark Google Calendar as available
-                if !googleCalendarEnabled {
-                    googleCalendarEnabled = true
-                    UserDefaults.standard.set(true, forKey: "googleCalendarEnabled")
-                }
-                return true
+            let status: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
+                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            googleCalendarEnabled = status.connected
+            googleCalendarAccountEmail = status.accountEmail
+            googleCalendarError = status.requiresReconnect ? "Reconnect Google Calendar in Settings." : nil
+            if status.revocationPending {
+                googleCalendarError = "Disconnected. Google access revocation is being retried."
             }
-
-            return false
         } catch {
-            print("Failed to check Google Calendar token: \(error)")
-            return false
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            googleCalendarEnabled = false
+            googleCalendarAccountEmail = nil
+            googleCalendarError = "Google Calendar connection could not be checked."
         }
     }
 
-    /// Sync preferences to Supabase
-    private func syncPreferencesToSupabase() async {
+    public func setGoogleCalendarEnabled(_ enabled: Bool) async {
+        guard let userId = AuthService.shared.currentUserId else { return }
+        oauthSession.cancel()
+        connectionGeneration += 1
+        let generation = connectionGeneration
+        googleCalendarLoading = true
+        googleCalendarError = nil
+        defer { if generation == connectionGeneration { googleCalendarLoading = false } }
         do {
-            var updates: [String: AnyJSON] = [:]
-            updates["calendar_integration_enabled"] = .bool(isEnabled)
-            try await SupabaseService.shared.client
-                .from("profiles")
-                .update(updates)
-                .eq("id", value: AuthService.shared.currentUser?.id.uuidString ?? "")
-                .execute()
+            if !enabled {
+                let status: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
+                    "calendar-connection", options: FunctionInvokeOptions(body: ["action": "disconnect"]))
+                guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+                googleCalendarEnabled = status.connected
+                googleCalendarAccountEmail = status.accountEmail
+                if status.revocationPending { googleCalendarError = "Disconnected. Google access revocation is being retried." }
+                return
+            }
+            let initialStatus: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
+                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            googleCalendarEnabled = initialStatus.connected
+            googleCalendarAccountEmail = initialStatus.accountEmail
+            if googleCalendarEnabled { return }
+            let result: CalendarAuthorizationStart = try await SupabaseService.shared.client.functions.invoke(
+                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "start", "target": "ios"]))
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            guard let url = URL(string: result.authorizationURL), url.scheme == "https",
+                  url.host == "accounts.google.com", url.path == "/o/oauth2/v2/auth" else {
+                throw CalendarConnectionError.authorizationFailed
+            }
+            let callback = try await oauthSession.authenticate(url: url)
+            guard callback.scheme == Config.appScheme, callback.host == "calendar", callback.path == "/callback",
+                  URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems?
+                    .first(where: { $0.name == "calendar" })?.value == "connected" else {
+                throw CalendarConnectionError.authorizationFailed
+            }
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            let finalStatus: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
+                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            googleCalendarEnabled = finalStatus.connected
+            googleCalendarAccountEmail = finalStatus.accountEmail
+            if !googleCalendarEnabled { throw CalendarConnectionError.authorizationFailed }
         } catch {
-            print("Failed to sync calendar preferences to Supabase: \(error)")
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
+            googleCalendarError = (error as? CalendarConnectionError)?.localizedDescription
+                ?? "Google Calendar could not be updated. Try again."
         }
     }
 
@@ -280,9 +267,11 @@ public final class CalendarService: CalendarServiceProtocol {
 
     /// Check Google Calendar for conflicts via Edge Function
     private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
+        guard let userId = AuthService.shared.currentUserId else { return Set() }
+        let generation = connectionGeneration
         do {
             googleCalendarLoading = true
-            defer { googleCalendarLoading = false }
+            defer { if generation == connectionGeneration { googleCalendarLoading = false } }
 
             // Build the request payload
             let timeOptionsArray = timeOptions.map { option in
@@ -303,10 +292,15 @@ public final class CalendarService: CalendarServiceProtocol {
                     options: FunctionInvokeOptions(body: requestBody)
                 )
 
+            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return Set() }
+            guard response.success else { throw CalendarConnectionError.unavailable }
+            googleCalendarError = nil
             let conflictIds = Set(response.conflictingIds.compactMap { UUID(uuidString: $0) })
             return conflictIds
         } catch {
-            print("Failed to check Google Calendar conflicts: \(error)")
+            if AuthService.shared.currentUserId == userId, generation == connectionGeneration {
+                googleCalendarError = "Google Calendar could not be checked. Review your availability before saving."
+            }
             return Set()
         }
     }
@@ -413,12 +407,18 @@ public final class CalendarService: CalendarServiceProtocol {
 
 // MARK: - Helper Types
 
-private struct GoogleCalendarProfile: Decodable {
-    let google_calendar_refresh_token: String?
-    let google_calendar_token_expires_at: String?
-    let google_calendar_access_token: String?
+private struct CalendarConnectionStatus: Decodable {
+    let connected: Bool
+    let accountEmail: String?
+    let requiresReconnect: Bool
+    let revocationPending: Bool
+}
+
+private struct CalendarAuthorizationStart: Decodable {
+    let authorizationURL: String
 }
 
 private struct GoogleCalendarConflictResponse: Decodable {
+    let success: Bool
     let conflictingIds: [String]
 }

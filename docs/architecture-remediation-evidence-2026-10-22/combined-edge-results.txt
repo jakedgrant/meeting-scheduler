@@ -1,0 +1,131 @@
+Check supabase/functions/_shared/billing/billing_test.ts
+Check supabase/functions/_shared/calendar/calendar_test.ts
+Check supabase/functions/_shared/calendar/identity_sdk_test.ts
+running 15 tests from ./supabase/functions/_shared/billing/billing_test.ts
+active promotional grants retain canonical identity without invented product/receipt; inactive promos cannot block paid access ... ok (6ms)
+custom provider IDs match exactly; only UUID identities accept case variants or explicit verified canonical ownership ... ok (1ms)
+webhook authenticates, rejects wrong methods/configuration and never leaks request data ... ok (1ms)
+payload validation rejects malformed/missing IDs, timestamps, API versions, invalid JSON and oversized bodies before acceptance ... ok (1ms)
+acceptance strips subscriber attributes and waits for durable storage; conflicts and database failures return retryable failure ...
+------- output -------
+{"component":"billing_webhook","code":"accept_failed"}
+----- output end -----
+acceptance strips subscriber attributes and waits for durable storage; conflicts and database failures return retryable failure ... ok (1ms)
+unknown/test/other-environment events have explicit dispositions; transfers reconcile both identities ... ok (62µs)
+optional HMAC verifies original bytes and delivery timestamp in addition to shared authorization ... ok (619µs)
+complete paginated subscription, purchase and nested entitlement lists retain all relevant grants and pass quantity ... ok (346µs)
+a failed later page, malformed record, mismatched environment/identity or hostile continuation cannot produce a partial snapshot ... ok (645µs)
+provider configuration, rate limits, and first-request missing-customer are distinct recoverable failures ... ok (717µs)
+canonical gives_access handles grace, cancellation/pause, lifetime purchases, unrelated products and refunds ... ok (374µs)
+UUID case variants union their paid states and deduplicate the same receipt without multiplying quantity ... ok (712µs)
+absent casing variant is safe only on first request; any partial/later-page failure blocks complete ...
+------- output -------
+{"component":"billing_worker","code":"provider_http_404"}
+----- output end -----
+absent casing variant is safe only on first request; any partial/later-page failure blocks complete ... ok (312µs)
+unknown identities and missing profiles fail durably before provider lookup ...
+------- output -------
+{"component":"billing_worker","code":"unknown_identity"}
+{"component":"billing_worker","code":"missing_profile"}
+----- output end -----
+unknown identities and missing profiles fail durably before provider lookup ... ok (99µs)
+processing/provider errors retain work; stale completion and worker-secret checks are explicit ...
+------- output -------
+{"component":"billing_worker","code":"database_unavailable"}
+----- output end -----
+processing/provider errors retain work; stale completion and worker-secret checks are explicit ... ok (366µs)
+running 22 tests from ./supabase/functions/_shared/calendar/calendar_test.ts
+AES-GCM is randomized and binds encrypted credentials to owner and purpose ... ok (839µs)
+versioned key ring reads retired keys and encrypts with the active key ... ok (6ms)
+PKCE implements the RFC 7636 S256 test vector ... ok (121µs)
+identity rejects forged tokens and caller-supplied x-user-id without touching privileged storage ...
+------- post-test output -------
+calendar_request_failed {
+  requestId: "8e675351-8648-49ca-acfa-387926ed4596",
+  code: "authentication_required"
+}
+calendar_request_failed {
+  requestId: "090bbfab-d71a-401a-b9aa-40670ca4c285",
+  code: "authentication_required"
+}
+----- post-test output end -----
+identity rejects forged tokens and caller-supplied x-user-id without touching privileged storage ... ok (7ms)
+verified claims still require issuer, audience, role, expiry, session and a non-anonymous user ... ok (699µs)
+status response contains metadata only and cannot be redirected to another user ...
+------- post-test output -------
+calendar_request_failed {
+  requestId: "c3693967-b2c2-4a71-9fff-f7a15dfa413e",
+  code: "invalid_request"
+}
+calendar_request_failed {
+  requestId: "7d91b995-3714-4653-9032-c8c927250a8c",
+  code: "invalid_return_target"
+}
+calendar_request_failed {
+  requestId: "a59fbce7-2d4c-4f78-913c-2e1a885a00e1",
+  code: "invalid_action"
+}
+----- post-test output end -----
+status response contains metadata only and cannot be redirected to another user ... ok (3ms)
+OAuth state stores only a hash and encrypted PKCE verifier, then callback stores only encrypted tokens ... ok (840µs)
+cancelled OAuth leaves no connection and never reflects provider errors into redirects ... ok (573µs)
+a callback issued before disconnect cannot reconnect the account ... ok (399µs)
+an exchanging callback blocks reconnect until its failed grant is cleaned up ... ok (1ms)
+reconnect revokes a retained grant before requesting another consent ... ok (512µs)
+disconnect clears local credentials before Google revocation and retries failures durably ...
+------- post-test output -------
+calendar_revocation_retry
+calendar_revocation_retry
+----- post-test output end -----
+disconnect clears local credentials before Google revocation and retries failures durably ... ok (1ms)
+refresh uses actual expiry and preserves an existing refresh token when Google omits rotation ... ok (833µs)
+a refresh completing after disconnect cannot restore credentials ... ok (1ms)
+revoked grants require reconnect instead of appearing conflict-free ...
+------- post-test output -------
+calendar_request_failed {
+  requestId: "0525fde0-6f5c-48dd-9f53-20000635947e",
+  code: "reconnect_required"
+}
+----- post-test output end -----
+revoked grants require reconnect instead of appearing conflict-free ... ok (1ms)
+Google failures are non-successful HTTP responses with no fabricated conflict list ...
+------- post-test output -------
+calendar_request_failed {
+  requestId: "56e87162-bff8-4033-b5f6-02b91d5e66bb",
+  code: "provider_unavailable"
+}
+----- post-test output end -----
+Google failures are non-successful HTTP responses with no fabricated conflict list ... ok (735µs)
+Google 401 is refreshed once and a repeated rejection invalidates the grant ... ok (612µs)
+one FreeBusy request covers many slots and honors half-open interval boundaries ... ok (824µs)
+FreeBusy per-calendar errors and malformed coverage are failures, even with HTTP 200 ... ok (211µs)
+option validation bounds workload and rejects duplicate IDs, naive timestamps and invalid ranges ... ok (386µs)
+HTTP enforces methods, origin allowlists, input size and bearer authentication ...
+------- post-test output -------
+calendar_request_failed {
+  requestId: "34b39c2c-7be6-4d4f-bafb-e310c37d1383",
+  code: "method_not_allowed"
+}
+calendar_request_failed {
+  requestId: "c923ef97-a3e1-4918-9b8d-37a05e9c2ca0",
+  code: "origin_not_allowed"
+}
+calendar_request_failed {
+  requestId: "cfe27f41-af88-4333-8446-d05161c3f4fa",
+  code: "request_too_large"
+}
+----- post-test output end -----
+HTTP enforces methods, origin allowlists, input size and bearer authentication ... ok (640µs)
+maintenance requires a separate server credential and key rotation never returns plaintext ...
+------- post-test output -------
+calendar_request_failed {
+  requestId: "8c7ba8cc-9362-40b1-89bc-3fa7f06248c2",
+  code: "authentication_required"
+}
+----- post-test output end -----
+maintenance requires a separate server credential and key rotation never returns plaintext ... ok (924µs)
+running 1 test from ./supabase/functions/_shared/calendar/identity_sdk_test.ts
+actual Supabase SDK verifies ES256 signatures before privileged session lookup ... ok (44ms)
+
+ok | 38 passed | 0 failed (195ms)
+
