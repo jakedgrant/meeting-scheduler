@@ -91,8 +91,16 @@ export function createAvailabilityEditor(commands: {
 	}
 
 	function edit(update: Partial<Pick<EditorState, 'responses' | 'comment'>>) {
-		if (get(state).saving) return
-		pending = null
+		const current = get(state)
+		if (current.saving) return
+		const next = { ...current, ...update }
+		const sameResponses = Object.keys(current.responses).length === Object.keys(next.responses).length
+			&& Object.entries(current.responses).every(([id, entry]) =>
+				next.responses[id]?.status === entry.status && next.responses[id]?.note === entry.note)
+		if (sameResponses && current.comment === next.comment) return
+		// DOM input/change events and clicks on an already-selected response do
+		// not create a different logical save. Preserve its idempotency key.
+		if (!sameResponses || current.comment.trim() !== next.comment.trim()) pending = null
 		state.update(value => ({ ...value, ...update, dirty: true, error: null, saved: false }))
 	}
 

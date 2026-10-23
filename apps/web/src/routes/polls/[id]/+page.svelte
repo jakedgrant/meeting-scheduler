@@ -24,6 +24,7 @@
 	import { calendarEnabled, calendarConflicts, calendarStatusError, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
 	import { createAvailabilityEditor } from '$lib/availability-editor';
+	import { createPollPageSession } from '$lib/poll-page-session';
 	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
 
 	const pollId = $derived($page.params.id as string);
@@ -41,6 +42,7 @@
 	let joiningPoll = $state(false);
 	let joinError = $state('');
 
+	const pageSession = createPollPageSession();
 	const editor = createAvailabilityEditor({ save: saveAvailability, load: loadAvailability });
 	const localResponses = $derived($editor.responses);
 	const localComment = $derived($editor.comment);
@@ -88,13 +90,19 @@
 	});
 
 	onDestroy(() => {
+		pageSession.invalidate();
 		clearInterval(clockTimer);
 		cleanupPollRealtime();
 	});
 
 	$effect(() => {
 		const identity = $user?.id;
-		if (mounted && pollId) void loadPoll(pollId);
+		if (mounted && pollId) {
+			pageSession.activate();
+			joiningPoll = false;
+			joinError = '';
+			void loadPoll(pollId);
+		}
 	});
 
 	// The editor ignores refreshes while dirty, so Realtime cannot replace a draft.
@@ -149,17 +157,22 @@
 			return;
 		}
 
+		const sessionIsCurrent = pageSession.capture();
+		const joinedPollId = pollId;
+		const joinedUserId = $user?.id;
+		const isCurrent = () => sessionIsCurrent() && pollId === joinedPollId && $user?.id === joinedUserId;
 		joiningPoll = true;
 		joinError = '';
 
 		try {
-			await joinPoll(pollId, anonymousName.trim() || undefined);
-			// Reload to get updated participant list
-			await loadPoll(pollId);
+			await pageSession.joinAndReload(
+				() => joinPoll(joinedPollId, anonymousName.trim() || undefined),
+				() => isCurrent() ? loadPoll(joinedPollId) : Promise.resolve()
+			);
 		} catch (err) {
-			joinError = err instanceof Error ? err.message : 'Failed to join poll';
+			if (isCurrent()) joinError = err instanceof Error ? err.message : 'Failed to join poll';
 		} finally {
-			joiningPoll = false;
+			if (isCurrent()) joiningPoll = false;
 		}
 	}
 

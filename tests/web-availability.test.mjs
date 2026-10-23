@@ -58,7 +58,7 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
   };
   const output = join(directory, 'bundle.mjs');
   await build({
-    stdin: { contents: `export * from '${lib}/stores/polls.ts'; export {createAvailabilityEditor} from '${lib}/availability-editor.ts'; export {user} from '${lib}/stores/auth.ts'; export {get} from 'svelte/store'; export {render} from 'svelte/server'; export {default as Page} from '${root}/apps/web/src/routes/polls/[id]/+page.svelte';`, resolveDir: join(root, 'apps/web') },
+    stdin: { contents: `export * from '${lib}/stores/polls.ts'; export {createAvailabilityEditor} from '${lib}/availability-editor.ts'; export {createPollPageSession} from '${lib}/poll-page-session.ts'; export {user} from '${lib}/stores/auth.ts'; export {get} from 'svelte/store'; export {render} from 'svelte/server'; export {default as Page} from '${root}/apps/web/src/routes/polls/[id]/+page.svelte';`, resolveDir: join(root, 'apps/web') },
     outfile: output, bundle: true, platform: 'node', format: 'esm', tsconfigRaw: {},
     plugins: [{ name: 'offline-fixture', setup(b) {
       b.onResolve({ filter: /^\$lib\// }, args => {
@@ -328,4 +328,116 @@ test('failed conflict reload keeps the conflict and cannot send an unsafe retry'
   assert.equal(actual.get(editor).conflict, true);
   assert.equal(actual.get(editor).comment, 'Preserved');
   assert.equal(state.calls.filter(call => call.name === 'save_availability').length, 1);
+});
+
+
+for (const member of [false, true]) {
+  test(`${member ? 'member' : 'guest'} same-value edits preserve failed save request ID`, async t => {
+    const { actual, state } = await fixture(t, { member });
+    if (!member) await actual.joinPoll(pollId, 'Guest');
+    await actual.loadPoll(pollId);
+    const editor = actual.createAvailabilityEditor({ save: actual.saveAvailability, load: actual.loadAvailability });
+    editor.initialize(actual.get(actual.currentAvailability));
+    editor.setResponse(optionId, 'maybe');
+    editor.setComment('Draft');
+    const requests = [];
+    state.handler = (name, args) => {
+      if (name !== 'save_availability') return;
+      requests.push(structuredClone(args));
+      return requests.length === 1 ? { error: { message: 'Lost committed reply' } }
+        : { data: snapshot({ version: 3, comment: 'Draft', responses: [response('maybe')], replayed: true }) };
+    };
+    await editor.save();
+    editor.setResponse(optionId, 'maybe');
+    editor.setComment('Draft');
+    await editor.save();
+    assert.deepEqual(requests[1], requests[0]);
+    assert.equal(actual.get(editor).saved, true);
+  });
+}
+
+for (const boundary of ['destroy', 'route', 'account']) {
+  test(`late guest join after ${boundary} cannot restore detail or restart its page reload`, async t => {
+    const { actual, state } = await fixture(t);
+    const pageSession = actual.createPollPageSession();
+    pageSession.activate();
+    let complete;
+    state.handler = (name, args) => name === 'join_poll_as_guest'
+      ? new Promise(resolve => { complete = () => resolve({ data: { participant: state.participant, guest_token: args.guest_token } }); })
+      : undefined;
+    let reloads = 0;
+    const joining = pageSession.joinAndReload(
+      () => actual.joinPoll(pollId, 'Guest'),
+      async () => { reloads++; await actual.loadPoll(pollId); }
+    );
+    actual.cleanupPollRealtime();
+    if (boundary === 'destroy') pageSession.invalidate();
+    else pageSession.activate();
+    if (boundary === 'route') actual.currentPoll.set({ ...poll, id: otherPollId });
+    if (boundary === 'account') actual.user.set({ id: memberId });
+    complete();
+    await joining;
+    assert.equal(reloads, 0);
+    assert.equal(actual.get(actual.currentGuest), null);
+    assert.equal(actual.get(actual.currentAvailability), null);
+    assert.equal(state.calls.some(call => call.name === 'get_guest_poll_detail'), false);
+    assert.equal(actual.get(actual.currentPoll)?.id ?? null, boundary === 'route' ? otherPollId : null);
+  });
+}
+
+for (const command of ['get_availability', 'save_availability']) {
+  test(`stale denied ${command} cannot erase a newer guest capability`, async t => {
+    const { actual, state } = await fixture(t);
+    await actual.joinPoll(pollId, 'Guest');
+    await actual.loadPoll(pollId);
+    const oldCapability = actual.get(actual.currentGuest);
+    let complete;
+    state.handler = name => name === command
+      ? new Promise(resolve => { complete = () => resolve({ error: { code: '42501', message: 'Guest access denied' } }); })
+      : undefined;
+    const pending = (command === 'get_availability'
+      ? actual.loadAvailability(pollId, participantId)
+      : actual.saveAvailability({ pollId, participantId, requestId: crypto.randomUUID(), expectedVersion: 1, responses: [], comment: 'Old guest' }))
+      .catch(error => error);
+    actual.cleanupPollRealtime();
+    // A current detail request detects rotation, then the user joins again.
+    state.handler = name => name === 'get_guest_poll_detail' ? { error: { code: '42501', message: 'Guest access denied' } } : undefined;
+    await actual.loadPoll(pollId);
+    state.handler = undefined;
+    await actual.joinPoll(pollId, 'Guest again');
+    await actual.loadPoll(pollId);
+    const newCapability = actual.get(actual.currentGuest);
+    assert.notEqual(newCapability.token, oldCapability.token);
+    complete();
+    await pending;
+    assert.deepEqual(actual.get(actual.currentGuest), newCapability);
+    await actual.loadPoll(pollId);
+    assert.deepEqual(actual.get(actual.currentGuest), newCapability);
+    assert.equal(actual.get(actual.guestNotice), null);
+  });
+}
+
+
+test('late successful join cannot replace a capability acquired after revocation', async t => {
+  const { actual, state } = await fixture(t);
+  await actual.joinPoll(pollId, 'Guest');
+  await actual.loadPoll(pollId);
+  const oldCapability = actual.get(actual.currentGuest);
+  let complete;
+  state.handler = (name, args) => name === 'join_poll_as_guest'
+    ? new Promise(resolve => { complete = () => resolve({ data: { participant: state.participant, guest_token: args.guest_token } }); })
+    : undefined;
+  const oldJoin = actual.joinPoll(pollId, 'Retry guest');
+  actual.cleanupPollRealtime();
+  state.handler = name => name === 'get_guest_poll_detail' ? { error: { code: '42501', message: 'Guest access denied' } } : undefined;
+  await actual.loadPoll(pollId);
+  state.handler = undefined;
+  await actual.joinPoll(pollId, 'Guest again');
+  const newCapability = actual.get(actual.currentGuest);
+  assert.notEqual(newCapability.token, oldCapability.token);
+  complete();
+  await oldJoin;
+  assert.deepEqual(actual.get(actual.currentGuest), newCapability);
+  await actual.loadPoll(pollId);
+  assert.deepEqual(actual.get(actual.currentGuest), newCapability);
 });

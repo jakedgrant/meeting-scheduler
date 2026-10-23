@@ -121,11 +121,15 @@ interface GuestPollDetail {
   responses: AvailabilityResponse[]
 }
 
-function dropGuestCapability(pollId: string) {
+function dropGuestCapability(pollId: string, expectedToken: string) {
+  // A late denial must never revoke a capability acquired by a later join.
+  const currentToken = guestCapabilities.get(pollId)?.token ?? pendingGuestTokens.get(pollId)
+  if (currentToken !== expectedToken) return
   guestCapabilities.delete(pollId)
   pendingGuestTokens.delete(pollId)
-  clearGuestCapability(browserStorage(), pollId)
-  clearPendingGuestToken(browserStorage(), pollId)
+  const storage = browserStorage()
+  if (readGuestCapability(storage, pollId)?.token === expectedToken) clearGuestCapability(storage, pollId)
+  if (readPendingGuestToken(storage, pollId) === expectedToken) clearPendingGuestToken(storage, pollId)
   if (requestedPollId === pollId) {
     currentGuest.set(null)
     guestNotice.set(GUEST_ACCESS_LOST_MESSAGE)
@@ -142,14 +146,14 @@ async function loadGuestPoll(pollId: string, guest: GuestCapability, generation:
   if (generation !== loadGeneration) return true
   if (error) {
     if (isGuestAccessDenied(error)) {
-      dropGuestCapability(pollId)
+      dropGuestCapability(pollId, guest.token)
       return false
     }
     throw error
   }
   const detail = data as GuestPollDetail
   if (!detail?.poll || detail.poll.id !== pollId) {
-    dropGuestCapability(pollId)
+    dropGuestCapability(pollId, guest.token)
     return false
   }
   currentGuest.set(guest)
@@ -409,11 +413,14 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
   pendingGuestTokens.set(pollId, token)
   savePendingGuestToken(browserStorage(), pollId, token)
   const identity = identityGeneration
+  const generation = loadGeneration
   const { data, error } = await supabase.rpc('join_poll_as_guest', {
     poll_uuid: pollId, display_name: name ?? '', contact_email: email ?? null, guest_token: token
   })
   if (error) {
-    if (isGuestAccessDenied(error)) dropGuestCapability(pollId)
+    if (identity === identityGeneration && generation === loadGeneration && isGuestAccessDenied(error)) {
+      dropGuestCapability(pollId, token)
+    }
     throw error
   }
   const result = data as { participant: PollParticipant; guest_token: string }
@@ -421,11 +428,13 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
   if (!isValidCapability(capability) || capability.token !== token || result.participant.poll_id !== pollId) {
     throw new Error('The guest join could not be confirmed. Please retry.')
   }
+  const currentToken = guestCapabilities.get(pollId)?.token ?? pendingGuestTokens.get(pollId)
+  if (currentToken !== token) return result.participant
   guestCapabilities.set(pollId, capability)
   pendingGuestTokens.delete(pollId)
   clearPendingGuestToken(browserStorage(), pollId)
   saveGuestCapability(browserStorage(), pollId, capability)
-  if (identity === identityGeneration) {
+  if (identity === identityGeneration && generation === loadGeneration) {
     guestNotice.set(null)
     currentGuest.set(capability)
   }
@@ -449,11 +458,16 @@ function availabilityIdentity(pollId: string, participantId: string) {
 }
 
 export async function loadAvailability(pollId: string, participantId: string): Promise<AvailabilitySnapshot> {
+  const identity = identityGeneration
+  const generation = loadGeneration
+  const requestIdentity = availabilityIdentity(pollId, participantId)
   const { data, error } = await supabase.rpc('get_availability', {
-    poll_uuid: pollId, ...availabilityIdentity(pollId, participantId)
+    poll_uuid: pollId, ...requestIdentity
   })
   if (error) {
-    if (isGuestAccessDenied(error)) dropGuestCapability(pollId)
+    if (identity === identityGeneration && generation === loadGeneration && requestIdentity.guest_token && isGuestAccessDenied(error)) {
+      dropGuestCapability(pollId, requestIdentity.guest_token)
+    }
     throw error
   }
   return checkedSnapshot(data, pollId, participantId)
@@ -496,13 +510,16 @@ async function loadCurrentAvailability(pollId: string, participantId: string, ge
 export async function saveAvailability(save: AvailabilitySave): Promise<AvailabilitySnapshot> {
   const identity = identityGeneration
   const generation = loadGeneration
+  const requestIdentity = availabilityIdentity(save.pollId, save.participantId)
   const { data, error } = await supabase.rpc('save_availability', {
     poll_uuid: save.pollId, request_id: save.requestId,
     expected_version: save.expectedVersion, responses: save.responses, comment: save.comment,
-    ...availabilityIdentity(save.pollId, save.participantId)
+    ...requestIdentity
   })
   if (error) {
-    if (isGuestAccessDenied(error)) dropGuestCapability(save.pollId)
+    if (identity === identityGeneration && generation === loadGeneration && requestIdentity.guest_token && isGuestAccessDenied(error)) {
+      dropGuestCapability(save.pollId, requestIdentity.guest_token)
+    }
     throw error
   }
   const snapshot = checkedSnapshot(data, save.pollId, save.participantId)
