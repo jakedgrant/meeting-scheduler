@@ -126,14 +126,17 @@ public final class PollService: PollServiceProtocol {
     /// Time ranges keyed by poll ID — populated during loadMyPolls() via a single batch query.
     public private(set) var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
-    private let supabase = SupabaseService.shared.client
+    let supabase: SupabaseClient
     private let timeRangeFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, h:mm a"
         return formatter
     }()
 
-    private init() {}
+    private init() { self.supabase = SupabaseService.shared.client }
+
+    /// Allows transport regression tests without a running server or account session.
+    public init(client: SupabaseClient) { self.supabase = client }
 
     // MARK: - Formatting
 
@@ -379,25 +382,6 @@ public final class PollService: PollServiceProtocol {
         }
     }
 
-    public func setSelectedFinalDate(pollId: UUID, startTime: Date, endTime: Date) async throws {
-        let formatter = ISO8601DateFormatter()
-
-        try await supabase
-            .from("polls")
-            .update([
-                "selected_start_time": AnyJSON.string(formatter.string(from: startTime)),
-                "selected_end_time": AnyJSON.string(formatter.string(from: endTime))
-            ])
-            .eq("id", value: pollId.uuidString)
-            .execute()
-
-        // Update local state
-        if let index = myPolls.firstIndex(where: { $0.id == pollId }) {
-            myPolls[index].selectedStartTime = startTime
-            myPolls[index].selectedEndTime = endTime
-        }
-    }
-
     // MARK: - Participants
 
     public func loadParticipants(pollId: UUID) async -> [PollParticipant] {
@@ -417,25 +401,13 @@ public final class PollService: PollServiceProtocol {
     }
 
     public func joinPoll(pollId: UUID, anonymousName: String? = nil) async throws -> PollParticipant {
-        var data: [String: AnyJSON] = [
-            "poll_id": .string(pollId.uuidString)
-        ]
-
-        if let userId = AuthService.shared.currentUser?.id {
-            data["user_id"] = .string(userId.uuidString)
-        } else if let name = anonymousName {
-            data["anonymous_name"] = .string(name)
-        }
-
-        let response: PollParticipant = try await supabase
-            .from("poll_participants")
-            .insert(data)
-            .select()
-            .single()
-            .execute()
-            .value
-
-        return response
+        // Native screens require sign-in. The server resolves auth.uid(), and a retry
+        // returns the same membership instead of creating another participant.
+        struct JoinResult: Decodable { let participant: PollParticipant; let created: Bool }
+        let result: JoinResult = try await supabase
+            .rpc("join_poll", params: ["poll_uuid": AnyJSON.string(pollId.uuidString)])
+            .execute().value
+        return result.participant
     }
 
     // MARK: - Availability Responses
@@ -457,37 +429,6 @@ public final class PollService: PollServiceProtocol {
             print("Failed to load responses: \(error)")
             return []
         }
-    }
-
-    public func submitAvailability(
-        participantId: UUID,
-        timeOptionId: UUID,
-        status: AvailabilityStatus,
-        note: String? = nil
-    ) async throws {
-        let data: [String: AnyJSON] = [
-            "participant_id": .string(participantId.uuidString),
-            "time_option_id": .string(timeOptionId.uuidString),
-            "status": .string(status.rawValue),
-            "note": note.map { .string($0) } ?? .null
-        ]
-
-        try await supabase
-            .from("availability_responses")
-            .upsert(data, onConflict: "participant_id,time_option_id")
-            .execute()
-    }
-
-    public func updateParticipantComment(participantId: UUID, comment: String?) async throws {
-        let data: [String: AnyJSON] = [
-            "comment": comment.map { .string($0) } ?? .null
-        ]
-
-        try await supabase
-            .from("poll_participants")
-            .update(data)
-            .eq("id", value: participantId.uuidString)
-            .execute()
     }
 
     // MARK: - Subscription Checks
