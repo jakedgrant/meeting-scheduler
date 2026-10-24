@@ -110,3 +110,18 @@ At **2026-10-24 18:50:32 UTC**, `adb -s emulator-5584 emu kill` returned OK and 
 Final logs: `/private/tmp/android-attempt-final3-build.log`, `/private/tmp/android-attempt-final3-runtime.log`, `/private/tmp/android-attempt-final-cold-check.log`, `/private/tmp/android-attempt-final-{stale-cold,current-warm,current-cold}-{ui,pending}.xml`, `/private/tmp/android-attempt-final-calendar.log`, and `/private/tmp/android-attempt-final-invalid.log`. The reproduction script is `/private/tmp/android-attempt-runtime-check.py`. A first manually unquoted ADB diagnostic dropped URL parameters at the Android shell; only the final correctly quoted script runs above count as cold/warm evidence.
 
 The owner must configure `meetingscheduler://auth/callback\?attempt=*` under Supabase's documented glob rules and verify query preservation through real OTP/browser providers. Hosted allowlist acceptance, email delivery, Google consent/cancellation and real sign-in remain unverified. No hosted configuration changed. See the updated [external configuration actions](../../../android-auth-callbacks.md#required-external-configuration). Combined independent review remains the coordinator's integration gate.
+
+## Final integrated compile and JVM replay
+
+The coordinator reran the final integrated source at `f3df14f3328bfd051b51de61465e6d8c4b3ec78f` with the isolated JDK/SDK/cache:
+
+```bash
+JAVA_HOME=/private/tmp/meeting-fix-jdk21/jdk-21.0.12.1+1/Contents/Home \
+ANDROID_HOME=/private/tmp/meeting-fix-android-sdk \
+GRADLE_USER_HOME=/private/tmp/session-integration-gradle \
+apps/android/gradlew -p apps/android --no-daemon --offline \
+  -PdisableCrashlyticsMappingUpload=true \
+  :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+Build succeeded in 19 seconds (73 tasks). XML results contain **64 tests, zero failures/errors/skips**. Log: `/private/tmp/session-final-android-build.log`. No emulator, server or provider was started. The earlier two emulator tests remain tied to the identical tested Android subtree in the source manifest.
