@@ -10,6 +10,8 @@ The original checkout was fast-forwarded to this main after the coordinator back
 
 The coordinator owns [the session contract](session-lifecycle.md), integration, shared scripts/workflows, tracker and final review. Separate owners implement web F12/F22, Android F12/F14 and residual iOS F12/provider boundaries. Each owns its platform's auth, service and composition files, avoiding overlapping edits. No backend contract or migration change is planned. The existing iOS cache/session deliveries in #56/#69 and the creation guards in #71 remain baseline behavior.
 
+The iOS-only continuation finished source `ed8c8a4` (integrated as `1164341`): **109 tests pass**, package and tracked wrapper builds pass, dependency pins are unchanged, and its fresh simulator was deleted. OTP/browser callbacks correlate their persisted originating UUID; SDK verifier/session writes and native Apple results retain attempt ownership. The [iOS follow-up evidence](architecture-remediation-evidence-2026-10-23/f12-f14-f22/ios.md#callback-correlation-follow-up-final-verification) records the exact source, commands, coordinator review corrections and owner redirect checks. Web and Android remained stopped. Android needs a focused callback receipt-correlation audit before final F14 closure; no web restart is currently needed. Combined independent review, PR publication and CI remain pending.
+
 Source, test, review and resource evidence is tracked in [F12/F14/F22 evidence](architecture-remediation-evidence-2026-10-23/f12-f14-f22/README.md). F21/F16 dates/calendar and F19 → F18 → F20 reads/realtime remain queued. No merge, deployment or hosted configuration change is authorized.
 
 ## F05/F09 delivery, October 23
