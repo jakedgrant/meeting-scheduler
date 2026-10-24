@@ -373,13 +373,17 @@ fun SettingsView(
                     Button(
                         onClick = {
                             scope.launch {
+                                val owner = authService.currentUser?.id
+                                val generation = authService.identityGeneration
                                 isSigningOut = true
                                 try {
                                     authService.signOut()
+                                } catch (e: kotlinx.coroutines.CancellationException) { throw e
                                 } catch (e: Exception) {
-                                    println("Sign out failed: ${e.message}")
+                                    if (authService.isCurrent(owner, generation)) println("Sign out failed: ${e.message}")
+                                } finally {
+                                    if (authService.isCurrent(owner, generation)) isSigningOut = false
                                 }
-                                isSigningOut = false
                             }
                         },
                         modifier = Modifier

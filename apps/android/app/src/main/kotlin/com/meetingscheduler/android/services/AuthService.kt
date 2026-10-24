@@ -6,9 +6,9 @@ import androidx.compose.runtime.setValue
 import com.meetingscheduler.android.models.Profile
 import io.github.jan.supabase.auth.user.UserInfo
 import io.github.jan.supabase.auth.user.UserSession
-import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.async
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -32,7 +32,6 @@ class AuthService(
     private val gateway: AuthGateway = SupabaseAuthGateway(),
     private val attempts: AuthAttemptStore = MemoryAuthAttemptStore(),
 ) : PollSessionIdentity {
-    private val supabase by lazy { SupabaseService.client }
     override var identityGeneration by mutableStateOf(0L)
         private set
     var currentUser by mutableStateOf<UserInfo?>(null)
@@ -62,13 +61,14 @@ class AuthService(
         return { boundaries -= reset }
     }
 
+    private val signedOutSessions = mutableSetOf<String>()
     private var disposed = false
     private var authAttemptRevision = 0L
     private val ready = kotlinx.coroutines.CompletableDeferred<Unit>()
     private var initialized = false
     val callbackRouter: AuthCallbackRouter = AuthCallbackRouter(
         scope = scope,
-        sessionKey = { "${currentUser?.id}:$identityGeneration" },
+        sessionKey = { "${authSessionIdentity(currentSession) ?: "null"}:$identityGeneration" },
         awaitReady = { gateway.awaitInitialization(); ready.await() },
         exchange = { code ->
             val attemptId = callbackRouter.pendingAttemptId
@@ -121,11 +121,11 @@ class AuthService(
     }
 
     private fun acceptSession(incoming: UserSession?) {
-        val session = incoming?.takeIf { it.expiresAt > kotlin.time.Clock.System.now() }
+        val session = incoming?.takeIf { it.expiresAt > kotlin.time.Clock.System.now() && authSessionIdentity(it) !in signedOutSessions }
         expiryJob?.cancel()
         val initial = !initialized
         initialized = true
-        val changed = currentUser?.id != session?.user?.id
+        val changed = authSessionIdentity(currentSession) != authSessionIdentity(session)
         currentSession = session
         currentUser = session?.user
         isLoading = false
@@ -151,9 +151,10 @@ class AuthService(
         identities.trySend(currentUser?.id)
         val id = currentUser?.id ?: return
         val generation = identityGeneration
+        val credential = checkNotNull(session).accessToken
         profileJob = scope.launch {
             try {
-                val loaded = gateway.loadProfile(id)
+                val loaded = gateway.loadProfile(id, credential)
                 if (isCurrent(id, generation)) profile = loaded
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) {
@@ -169,7 +170,7 @@ class AuthService(
         disposed = true
         ++authAttemptRevision
         callbackRouter.cancelFlow()
-        jobs.forEach { it.cancel() }
+        jobs.toList().forEach { it.cancel() }
         profileJob?.cancel()
         expiryJob?.cancel()
         boundaries.clear()
@@ -230,10 +231,22 @@ class AuthService(
     }
 
     suspend fun signOut() {
+        val original = currentSession // Capture before resetting UI or suspending.
+        authSessionIdentity(original)?.let { signedOutSessions += it }
         ++authAttemptRevision
         callbackRouter.cancelFlow()
         acceptSession(null)
-        gateway.signOut()
+        val generation = identityGeneration
+        // Resetting the authenticated subtree disposes the caller's screen scope.
+        // The application owns cleanup/revocation even if that caller stops waiting.
+        val cleanup = scope.async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { gateway.signOut(original) }
+        jobs += cleanup
+        cleanup.invokeOnCompletion { jobs -= cleanup }
+        try { cleanup.await() }
+        catch (error: Exception) {
+            if (!isCurrent(null, generation)) throw kotlinx.coroutines.CancellationException("Session changed during sign-out")
+            throw error
+        }
     }
 
     // MARK: - Profile Updates
@@ -248,17 +261,15 @@ class AuthService(
             timezone?.let { put("timezone", it) }
         }
 
-        val response = supabase
-            .from("profiles")
-            .update(updates) {
-                filter {
-                    eq("id", userId)
-                }
-            }
-            .decodeSingle<Profile>()
-
-        if (!isCurrent(userId, generation)) throw kotlinx.coroutines.CancellationException("Account changed")
-        profile = response
+        val credential = currentSession?.accessToken ?: throw AuthError.NotAuthenticated
+        try {
+            val response = gateway.updateProfile(userId, credential, updates)
+            if (!isCurrent(userId, generation)) throw kotlinx.coroutines.CancellationException("Account changed")
+            profile = response
+        } catch (error: Exception) {
+            if (!isCurrent(userId, generation)) throw kotlinx.coroutines.CancellationException("Account changed")
+            throw error
+        }
     }
 
     sealed class AuthError : Exception() {

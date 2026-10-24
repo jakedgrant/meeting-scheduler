@@ -4,7 +4,6 @@ import com.meetingscheduler.android.models.Profile
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserSession
-import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.withLock
 
@@ -17,16 +16,18 @@ fun authRedirectUrl(attemptId: String): String {
 /** Injected boundary retains the pinned SDK's persistence, PKCE verifier and refresh logic. */
 interface AuthGateway {
     val status: Flow<SessionStatus>
-    suspend fun loadProfile(userId: String): Profile
+    suspend fun loadProfile(userId: String, credential: String): Profile
+    suspend fun updateProfile(userId: String, credential: String, updates: kotlinx.serialization.json.JsonObject): Profile = error("Profile updates unavailable")
     suspend fun awaitInitialization()
     suspend fun exchangeCode(code: String, isCurrent: () -> Boolean = { true }): UserSession
     suspend fun googleSession(idToken: String, nonce: String?): UserSession
     suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean = { true })
     suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean = { true })
-    suspend fun signOut()
+    suspend fun signOut(previous: UserSession?)
     suspend fun importSession(session: UserSession, isCurrent: () -> Boolean = { true })
 }
 
+@OptIn(io.github.jan.supabase.annotations.SupabaseExperimental::class)
 class SupabaseAuthGateway(
     private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
     private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Main.immediate,
@@ -36,9 +37,13 @@ class SupabaseAuthGateway(
     private val mutations = kotlinx.coroutines.sync.Mutex()
     private val client get() = injectedClient ?: SupabaseService.client
     override val status get() = client.auth.sessionStatus
-    override suspend fun loadProfile(userId: String): Profile = client.from("profiles").select {
+    override suspend fun loadProfile(userId: String, credential: String): Profile = accountPostgrest(client, credential).from("profiles").select {
         filter { eq("id", userId) }
     }.decodeSingle()
+    override suspend fun updateProfile(userId: String, credential: String, updates: kotlinx.serialization.json.JsonObject): Profile =
+        accountPostgrest(client, credential).from("profiles").update(updates) {
+            filter { eq("id", userId) }
+        }.decodeSingle()
     override suspend fun awaitInitialization() = client.auth.awaitInitialization()
     // Do not import until the router verifies that the initiating session still owns it.
     override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean) = starts.withLock {
@@ -66,15 +71,19 @@ class SupabaseAuthGateway(
         client.auth.signInWith(io.github.jan.supabase.auth.providers.Google, redirectUrl = redirectUrl)
         if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
     }
-    override suspend fun signOut() {
-        val previous = kotlinx.coroutines.withContext(dispatcher) { mutations.withLock {
-            val previous = client.auth.currentSessionOrNull()
-            client.auth.stopAutoRefreshForCurrentSession()
-            client.auth.clearSession()
-            previous
-        } } ?: return
-        // Revocation must not clear a later shared session on success or failure.
-        // A separate ephemeral SDK client owns only the captured old credential.
+    override suspend fun signOut(previous: UserSession?) {
+        if (previous == null) return
+        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + dispatcher) { mutations.withLock {
+            // This bounded local mutation survives teardown; remote I/O below remains cancellable.
+            // A queued cleanup may remove only its initiating server session. A
+            // refreshed token in that same lineage still belongs to this logout.
+            if (authSessionIdentity(client.auth.currentSessionOrNull()) == authSessionIdentity(previous)) {
+                client.auth.stopAutoRefreshForCurrentSession()
+                client.auth.clearSession()
+            }
+        } }
+        // Revoke the captured original even if a replacement was installed while
+        // waiting. The ephemeral SDK cannot clear or revoke the shared replacement.
         revokeSnapshot(previous)
     }
 

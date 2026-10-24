@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.authRedirectUrl
+import io.github.jan.supabase.auth.auth
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -14,6 +15,46 @@ import org.junit.runner.RunWith
 /** Offline OS/Activity integration. No provider session or account is used. */
 @RunWith(AndroidJUnit4::class)
 class SessionActivityTest {
+    @Test fun sdkRefreshPreservesAttemptButFreshSameAccountSessionInvalidatesIt() = kotlinx.coroutines.runBlocking {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val app = context.applicationContext as MeetingSchedulerApplication
+        val auth = app.container.authService
+        val sdk = com.meetingscheduler.android.services.SupabaseService.client
+        fun session(lineage: String, revision: Int): io.github.jan.supabase.auth.user.UserSession {
+            val encoder = java.util.Base64.getUrlEncoder().withoutPadding()
+            fun encode(value: String) = encoder.encodeToString(value.toByteArray())
+            val payload = encode("{\"session_id\":\"$lineage\",\"revision\":$revision}")
+            val token = "${encode("{\"alg\":\"HS256\"}")}.$payload.signature"
+            return kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString("""{"access_token":"$token","refresh_token":"synthetic-$lineage","expires_in":3600,"token_type":"bearer","user":{"id":"a0000000-0000-0000-0000-000000000001","aud":"authenticated"}}""")
+        }
+        var generation = 0L
+        lateinit var old: String
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { sdk.auth.importSession(session("old-server-session", 1), autoRefresh = false) }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync { generation = auth.identityGeneration; old = auth.callbackRouter.beginFlow() }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { sdk.auth.importSession(session("old-server-session", 2), autoRefresh = false) }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync { assertEquals(generation, auth.identityGeneration); assertEquals(old, auth.callbackRouter.pendingAttemptId) }
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) { sdk.auth.importSession(session("new-server-session", 1), autoRefresh = false) }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertTrue(auth.identityGeneration > generation); assertNull(auth.callbackRouter.pendingAttemptId)
+                val current = auth.callbackRouter.beginFlow()
+                auth.handleDeepLink(authRedirectUrl(old) + "&code=obsolete-synthetic-code")
+                auth.handleDeepLink(authRedirectUrl(old) + "&error=access_denied")
+                assertEquals(current, auth.callbackRouter.pendingAttemptId); assertNull(auth.callbackError)
+            }
+        } finally {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                sdk.auth.stopAutoRefreshForCurrentSession(); sdk.auth.clearSession()
+            }
+            instrumentation.waitForIdleSync()
+        }
+    }
+
+
     @Test fun warmAuthCallbackSurvivesRecreationAndCalendarRouteDoesNotEnterAuth() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext

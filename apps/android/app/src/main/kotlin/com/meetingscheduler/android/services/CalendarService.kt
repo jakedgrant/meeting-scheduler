@@ -57,6 +57,7 @@ class CalendarService(
     private val writeDevicePreference: (suspend (String, Boolean) -> Unit)? = null,
     private val readPermission: (() -> Boolean)? = null,
     private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
+    private val readDeviceConflicts: (suspend (List<PollTimeOption>) -> Set<String>)? = null,
 ) {
     private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val json = Json { ignoreUnknownKeys = true }
@@ -128,9 +129,13 @@ class CalendarService(
         val allowed = enabled && hasCalendarPermission
         appleCalendarEnabled = allowed
         // Captured account key is intentional: old writes cannot change B's preference.
-        if (writeDevicePreference != null) writeDevicePreference.invoke(id, allowed)
-        else context?.dataStore?.edit { it[booleanPreferencesKey("appleCalendarEnabled:$id")] = allowed }
-        if (!authService.isCurrent(id, session)) return
+        try {
+            if (writeDevicePreference != null) writeDevicePreference.invoke(id, allowed)
+            else context?.dataStore?.edit { it[booleanPreferencesKey("appleCalendarEnabled:$id")] = allowed }
+        } catch (error: Exception) {
+            if (!authService.isCurrent(id, session)) throw CancellationException("Account changed")
+            throw error
+        }
     }
 
     fun resetGoogleCalendarState() {
@@ -150,9 +155,17 @@ class CalendarService(
             setBody(body.toString())
         }
 
-    private suspend fun connection(action: String, target: String? = null): String {
+    private data class RequestOwner(val id: String, val session: Long, val generation: Int, val credential: String)
+    private fun captureOwner(): RequestOwner? {
+        val id = authService.currentUser?.id ?: return null
+        val credential = authService.currentSession?.accessToken ?: return null
+        return RequestOwner(id, authService.identityGeneration, connectionGeneration, credential)
+    }
+    private fun isCurrent(owner: RequestOwner) = authService.isCurrent(owner.id, owner.session) && owner.generation == connectionGeneration
+    private suspend fun connection(owner: RequestOwner, action: String, target: String? = null): String {
+        if (!isCurrent(owner)) throw CancellationException("Account changed before calendar dispatch")
         connectionTransport?.let { return it(action, target) }
-        val credential = authService.currentSession?.accessToken ?: throw IllegalStateException("Account changed before calendar dispatch")
+        val credential = owner.credential
         val response = invokeOwned("calendar-connection", buildJsonObject {
             put("action", action)
             target?.let { put("target", it) }
@@ -166,8 +179,9 @@ class CalendarService(
         val userId = authService.currentUser?.id ?: run { resetGoogleCalendarState(); return }
         val session = authService.identityGeneration
         val generation = connectionGeneration
+        val owner = captureOwner() ?: return
         try {
-            val status = json.decodeFromString<ConnectionStatus>(connection("status"))
+            val status = json.decodeFromString<ConnectionStatus>(connection(owner, "status"))
             if (!authService.isCurrent(userId, session) || generation != connectionGeneration) return
             googleCalendarEnabled = status.connected
             googleCalendarAccountEmail = status.accountEmail
@@ -191,23 +205,24 @@ class CalendarService(
         connectionGeneration++
         val session = authService.identityGeneration
         val generation = connectionGeneration
+        val owner = captureOwner() ?: return
         googleCalendarLoading = true
         calendarError = null
         try {
             if (!enabled) {
-                val status = json.decodeFromString<ConnectionStatus>(connection("disconnect"))
+                val status = json.decodeFromString<ConnectionStatus>(connection(owner, "disconnect"))
                 if (!authService.isCurrent(userId, session) || generation != connectionGeneration) return
                 googleCalendarEnabled = status.connected
                 googleCalendarAccountEmail = status.accountEmail
                 if (status.revocationPending) calendarError = "Disconnected. Google access revocation is being retried."
                 return
             }
-            val status = json.decodeFromString<ConnectionStatus>(connection("status"))
+            val status = json.decodeFromString<ConnectionStatus>(connection(owner, "status"))
             if (!authService.isCurrent(userId, session) || generation != connectionGeneration) return
             googleCalendarEnabled = status.connected
             googleCalendarAccountEmail = status.accountEmail
             if (googleCalendarEnabled) return
-            val start = json.decodeFromString<AuthorizationStart>(connection("start", "android"))
+            val start = json.decodeFromString<AuthorizationStart>(connection(owner, "start", "android"))
             if (!authService.isCurrent(userId, session) || generation != connectionGeneration) return
             val uri = Uri.parse(start.authorizationURL)
             if (uri.scheme != "https" || uri.host != "accounts.google.com" || uri.path != "/o/oauth2/v2/auth") {
@@ -228,16 +243,21 @@ class CalendarService(
     /** One bounded backend call for all options; no provider tokens reach Android. */
     suspend fun checkPollConflicts(options: List<PollTimeOption>): Set<String> {
         if (options.isEmpty()) return emptySet()
-        val userId = authService.currentUser?.id
-        val session = authService.identityGeneration
-        val generation = connectionGeneration
+        val owner = captureOwner() ?: return emptySet()
+        val userId = owner.id
+        val session = owner.session
+        val generation = owner.generation
+        val deviceEnabled = appleCalendarEnabled
+        val googleEnabled = googleCalendarEnabled
         calendarError = null
         val conflicts = mutableSetOf<String>()
-        if (appleCalendarEnabled) {
+        if (deviceEnabled) {
             try {
-                conflicts.addAll(withContext(Dispatchers.IO) {
-                    options.filter { checkAppleCalendarConflicts(it.startTime, it.endTime).isNotEmpty() }.map { it.id }
-                })
+                val device = readDeviceConflicts?.invoke(options) ?: withContext(Dispatchers.IO) {
+                    options.filter { checkAppleCalendarConflicts(it.startTime, it.endTime).isNotEmpty() }.map { it.id }.toSet()
+                }
+                if (!isCurrent(owner)) return emptySet()
+                conflicts.addAll(device)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -246,9 +266,10 @@ class CalendarService(
                 }
             }
         }
-        if (googleCalendarEnabled) {
+        if (!isCurrent(owner)) return emptySet()
+        if (googleEnabled) {
             try {
-                val credential = authService.currentSession?.accessToken ?: throw IllegalStateException("Sign in before checking calendars")
+                val credential = owner.credential
                 val response = invokeOwned("check-calendar-conflicts", buildJsonObject {
                     put("timeOptions", kotlinx.serialization.json.buildJsonArray {
                         options.forEach { option ->

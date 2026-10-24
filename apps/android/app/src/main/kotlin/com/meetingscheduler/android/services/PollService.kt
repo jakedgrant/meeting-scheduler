@@ -149,7 +149,8 @@ class PollService(
 
     suspend fun loadPoll(id: String): Poll? = withSession {
         return@withSession try {
-            supabase
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("polls")
                 .select {
                     filter {
@@ -210,7 +211,8 @@ class PollService(
 
     suspend fun loadTimeOptions(pollId: String): List<PollTimeOption> = withSession {
         return@withSession try {
-            supabase
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("poll_time_options")
                 .select {
                     filter {
@@ -234,10 +236,9 @@ class PollService(
             put("status", status.name.lowercase())
         }
 
-        supabase
+        accountPostgrest(supabase, credential)
             .from("polls")
             .update(update) {
-                headers[io.ktor.http.HttpHeaders.Authorization] = "Bearer $credential"
                 filter {
                     eq("id", pollId)
                 }
@@ -266,7 +267,8 @@ class PollService(
 
     suspend fun loadParticipants(pollId: String): List<PollParticipant> = withSession {
         return@withSession try {
-            supabase
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("poll_participants")
                 .select(columns = io.github.jan.supabase.postgrest.query.Columns.raw("*, profiles(display_name)")) {
                     filter {
@@ -304,7 +306,8 @@ class PollService(
         if (timeOptionIds.isEmpty()) return@withSession emptyList()
 
         return@withSession try {
-            supabase
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("availability_responses")
                 .select {
                     filter {

@@ -22,13 +22,13 @@ private class Gateway : AuthGateway {
     var magic: suspend () -> Unit = {}
     var native: suspend () -> UserSession = { session("A") }
     val installed = mutableListOf<String>()
-    override suspend fun loadProfile(userId: String) = load(userId)
+    override suspend fun loadProfile(userId: String, credential: String) = load(userId)
     override suspend fun awaitInitialization() = initialize()
     override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean) = session("A")
     override suspend fun googleSession(idToken: String, nonce: String?) = native()
     override suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean) = magic()
     override suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean) = browser()
-    override suspend fun signOut() {}
+    override suspend fun signOut(previous: UserSession?) {}
     override suspend fun importSession(session: UserSession, isCurrent: () -> Boolean) { installed += session.user!!.id }
     suspend fun user(id: String?) { status.emit(if (id == null) SessionStatus.NotAuthenticated() else SessionStatus.Authenticated(session(id))) }
 }

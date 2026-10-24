@@ -147,7 +147,7 @@ class AuthSdkTransportTest {
             }, AtomicSessionManager("ephemeral", settings(mutableMapOf())))
             val gateway = SupabaseAuthGateway(client, Dispatchers.Unconfined, revocationClient = { revoker })
             gateway.importSession(session("A"))
-            val signout = async { runCatching { gateway.signOut() } }
+            val signout = async { runCatching { gateway.signOut(client.auth.currentSessionOrNull()) } }
             withTimeout(1000) { remoteStarted.await() }
             assertNull(client.auth.currentSessionOrNull()); assertNull(manager.loadSession())
             if (replacement != null) gateway.importSession(session(replacement, token = "new-$replacement"))
@@ -188,7 +188,7 @@ class AuthSdkTransportTest {
     private fun service(client: io.github.jan.supabase.SupabaseClient, scope: CoroutineScope): AuthService {
         val gateway = SupabaseAuthGateway(client, Dispatchers.Unconfined)
         return AuthService(scope, null, object : AuthGateway by gateway {
-            override suspend fun loadProfile(userId: String) = Profile(userId, "$userId@example.test",
+            override suspend fun loadProfile(userId: String, credential: String) = Profile(userId, "$userId@example.test",
                 createdAt = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z"), updatedAt = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z"))
         })
     }
@@ -407,13 +407,13 @@ class AuthSdkTransportTest {
         val stamp = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z")
         val gateway = object : AuthGateway {
             override val status = events
-            override suspend fun loadProfile(userId: String) = Profile(userId, "$userId@example.test", createdAt = stamp, updatedAt = stamp)
+            override suspend fun loadProfile(userId: String, credential: String) = Profile(userId, "$userId@example.test", createdAt = stamp, updatedAt = stamp)
             override suspend fun awaitInitialization() {}
             override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean): UserSession = error("unused")
             override suspend fun googleSession(idToken: String, nonce: String?): UserSession = error("unused")
             override suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean) {}
             override suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean) {}
-            override suspend fun signOut() {}
+            override suspend fun signOut(previous: UserSession?) {}
             override suspend fun importSession(session: UserSession, isCurrent: () -> Boolean) {}
         }
         val scope = createApplicationScope(Dispatchers.Unconfined)
