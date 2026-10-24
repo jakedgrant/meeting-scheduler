@@ -468,6 +468,37 @@ final class SessionTransportTests: XCTestCase {
         service.dispose()
     }
 
+    func testProfileEditCancelsOlderSameAccountReadBeforeItCanRestoreCachedValues() async throws {
+        let sdk = client()
+        let a = UUID()
+        let read = AdaptationGate()
+        try await signIn(a, client: sdk)
+        let initial = sdk.auth.currentSession!
+        let (events, _) = AsyncStream<(event: AuthChangeEvent, session: Session?)>.makeStream()
+        let service = AuthService(
+            persistence: InMemoryPersistenceProvider(),
+            dependencies: .init(
+                events: { events }, restore: { initial },
+                loadProfile: { id in
+                    await read.pause()
+                    return Profile(id: id, email: "test@example.invalid", displayName: "old")
+                }, signOut: {}, accountChanged: { _ in }, refreshCalendar: {}), client: sdk)
+        await service.initialize()
+        await settle { read.waiting.count == 1 }
+        let update = Task { try await service.updateProfile(displayName: "new", avatarUrl: nil, timezone: nil) }
+        await settle { LifecycleURLProtocol.count(path: "/rest/v1/profiles") == 1 }
+        let changed = Profile(id: a, email: "test@example.invalid", displayName: "new")
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        LifecycleURLProtocol.reply(path: "/rest/v1/profiles", data: try encoder.encode(changed))
+        try await update.value
+        XCTAssertEqual(service.profile?.displayName, "new")
+        read.release()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(service.profile?.displayName, "new")
+        service.dispose()
+    }
+
     func testOwnedLogoutPreservesNewStorageAtRemoveGapAndRevokesOnlyCapturedLocalSession() async throws {
         for fails in [false, true] {
             let adapter = adapter()

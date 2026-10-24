@@ -382,6 +382,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             }
 
             let generation = sessionGeneration
+            // A profile read started before this edit cannot restore its older row.
+            profileTask?.cancel()
             let supabase = self.supabase
             var updates: [String: AnyJSON] = [:]
             if let displayName = displayName {
