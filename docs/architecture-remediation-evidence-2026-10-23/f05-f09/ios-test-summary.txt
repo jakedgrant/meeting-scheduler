@@ -1,0 +1,27 @@
+Test Suite 'All tests' started at 2026-10-23 17:58:09.364.
+Test Suite 'MeetingSchedulerTests.xctest' started at 2026-10-23 17:58:09.369.
+Test Suite 'AvailabilityCommandTransportTests' started at 2026-10-23 17:58:09.369.
+Test Suite 'AvailabilityCommandTransportTests' passed at 2026-10-23 17:58:09.668.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.295 (0.299) seconds
+Test Suite 'AvailabilityEditorTests' started at 2026-10-23 17:58:09.670.
+Test Suite 'AvailabilityEditorTests' passed at 2026-10-23 17:58:09.685.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.013 (0.015) seconds
+Test Suite 'MeetingSchedulerTests' started at 2026-10-23 17:58:09.685.
+Test Suite 'MeetingSchedulerTests' passed at 2026-10-23 17:58:09.686.
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+Test Suite 'PersistenceProviderTests' started at 2026-10-23 17:58:09.686.
+Test Suite 'PersistenceProviderTests' passed at 2026-10-23 17:58:09.906.
+	 Executed 23 tests, with 0 failures (0 unexpected) in 0.214 (0.220) seconds
+Test Suite 'PollCreationEditorTests' started at 2026-10-23 17:58:09.906.
+Test Suite 'PollCreationEditorTests' passed at 2026-10-23 17:58:09.947.
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.037 (0.040) seconds
+Test Suite 'PollCreationTransportTests' started at 2026-10-23 17:58:09.947.
+Test Suite 'PollCreationTransportTests' passed at 2026-10-23 17:58:10.013.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.064 (0.066) seconds
+Test Suite 'PollServiceLifecycleTests' started at 2026-10-23 17:58:10.013.
+Test Suite 'PollServiceLifecycleTests' passed at 2026-10-23 17:58:10.137.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.122 (0.124) seconds
+Test Suite 'MeetingSchedulerTests.xctest' passed at 2026-10-23 17:58:10.137.
+	 Executed 71 tests, with 0 failures (0 unexpected) in 0.744 (0.768) seconds
+Test Suite 'All tests' passed at 2026-10-23 17:58:10.138.
+	 Executed 71 tests, with 0 failures (0 unexpected) in 0.744 (0.774) seconds

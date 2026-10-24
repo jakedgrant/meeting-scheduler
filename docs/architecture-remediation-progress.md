@@ -2,6 +2,18 @@
 
 Updated October 23, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F05/F09 delivery, October 23
+
+The coordinator fetched `origin/main` at `5b9c5e46a1fc7f023339a755297774e60f0c5806` and verified #70 merged on October 23. Its exact head `040f9ee480f7ad2f1beb41e6d27b7f46cc363ba6` and the heads of #64, #66, #67, #68 and #69 are all ancestors of main. The original checkout stayed at its existing commit; its untracked `.claude/worktrees/` was preserved. All new work uses isolated clones from that verified main.
+
+F05/F09 joins one backend transaction to the web, iOS and Android creation screens. The agreed command and product rules are documented in [creation commands](creation-commands.md). Backend limits use the private billing contract; local premium booleans and quota preflights do not authorize creation. A failed or uncertain creation retains its draft and operation identity. An uncertain request must resolve through replay before edits can create another operation.
+
+The owner confirmed these rules during this delivery: pass-funded polls leave the one free slot available; pass spending requires explicit opt-in and takes the oldest eligible unit; current Pro/Team access takes priority and keeps the pass; reopening a subscription-funded premium poll requires a current supporting tier. Existing active polls remain intact. Spent/refunded receipt ownership and historical pass funding remain separate.
+
+Ownership: one backend agent owns the additive CLI migration and database/race tests; platform agents own web/iOS adapters; the coordinator owns Android, shared configuration, workflows, integration and this tracker. Independent source reviews cover the combined tree after fixes. [Evidence and exact source identities](architecture-remediation-evidence-2026-10-23/f05-f09/README.md).
+
+No merge or hosted deployment is authorized by this delivery. Hosted/provider validation and distribution credentials remain prelaunch work. Remaining F12/F14/F22 lifecycle, F21/F16 date/calendar and F19 → F18 → F20 reads/realtime work stay queued.
+
 ## Merged baseline
 
 As of October 22, 2026, `main` is at `6f2c547`. These PRs were merged in the agreed order:
@@ -98,7 +110,7 @@ Merging code does not change hosted state. The following are prelaunch checks or
 - [x] Publish the finding PRs; the October 23 remediation pushes update those existing branches without rewriting history.
 - [x] Account deletion: the owner chose anonymization, with comments and response notes replaced by `[user deleted]`. Implemented in #66.
 - [x] F06/F10: guest capability saves implemented in #69.
-- [ ] F05/F09: enforce `max_participants` at join, transactional creation, and pass redemption.
+- [x] F05/F09: implemented across backend/web/iOS/Android, combined replay and independent review complete. Main-targeted PR delivery and CI are recorded in the linked evidence; merging and hosted rollout remain separate.
 - [x] Accept final F10 integration in #69. Backend, web, Android and iOS are integrated; independent review found no remaining blockers among the seven review gaps. The [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md) records checks, source identities, merge dependencies and prelaunch limits.
 - [ ] Complete broader F12 lifecycle work on web/Android and verify live auth/provider transitions; the reviewed iOS cache/session gaps are fixed in #56. F14 Android callbacks remain separate.
 - [ ] Optional F13 emulator check. The worker asked for one API 36 emulator for about 30 minutes (install the debug build, rotate, background, sign in and out, uninstall). An agent must request a new coordinator reservation before using an emulator; none was used in this remediation.

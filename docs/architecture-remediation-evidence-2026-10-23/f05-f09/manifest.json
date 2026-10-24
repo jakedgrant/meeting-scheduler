@@ -1,0 +1,43 @@
+{
+  "baseline": "5b9c5e46a1fc7f023339a755297774e60f0c5806",
+  "combined_implementation": "1cfb5f06a5f5f1c998aa62d9897b29298b07ed1e",
+  "reviewed_documentation": "53f092cdfeeebe776ce94b293d7a1d5cc913c370",
+  "source_commits": {
+    "backend": "5f9d118d35b64b067715b2daf00ffb291683fe21",
+    "web": "c8a352df47ca3634e7018b1dbd89dff6296458a8",
+    "ios": "ec31397128593352532e5e47441faf9ca8242993",
+    "android": "9b9ca3cb54b204e745de9f4f3f09d61e86e00c1b"
+  },
+  "pr70_head": "040f9ee480f7ad2f1beb41e6d27b7f46cc363ba6",
+  "migration_sha256": {
+    "00001_initial_schema.sql": "328a7a8c796d88238bf11ed03d2b09ff71dee0eacbb19a1834dd353e456a1051",
+    "00002_add_poll_share_codes.sql": "cc77c1e177242a0dacce60abacae4b977491f84a61274120711f35839c978678",
+    "00003_add_participated_polls_function.sql": "c00ad31799145fc688e2d8bd6bb0c73d90546d6652ab93257e64a52c83a96e2a",
+    "00004_fix_participated_polls_function.sql": "ba844cf9891c37e52afc18d7d811ecd3c42b057e52b304aeb31c6feb1fef92e7",
+    "00005_remove_distinct_from_joined_polls.sql": "96cd8da3563fce112e2a1e4b57c454580729906edb500e3672893e44d23a5642",
+    "00006_fix_closed_poll_access.sql": "e10fa24d1387515873ada93a986aef1fdbc0421b4523ceb118dafb3991da3457",
+    "00007_fix_rls_recursion.sql": "28c7b588dbef6d330d35ae0a9aa661673dbce62270dbdbc87ae067432d2f7ca4",
+    "00008_add_calendar_integration.sql": "87ece03202f61c9cf0e951db6efabb88d32e7a6eeef5389c8dac91b14d0adf6f",
+    "00009_add_participant_comment.sql": "2185045a1caa2039d5a5965c7f6e307a8cc79964db9a7f2bf1d502cf23104569",
+    "00010_add_comment_security.sql": "8051610275d9f244ed42a13bdec556c97453f223d89c97f0b7f52cbcfbae2e14",
+    "20261022025019_private_calendar_credentials.sql": "7cf06fb0395484f870fad4f602b9d4aa12b3224491a63dad6c328f35bd85bb9d",
+    "20261022181851_privileged_rpc_authorization.sql": "5b3383ee8b52d9e9908d775af92620bfbe98e5755dbb62e8c34e4643a5cd2950",
+    "20261022181918_durable_billing_webhooks.sql": "a7abbea7e35b41356bd94aee7ac5a0d686db6e115c36db5eec17ed33b5a05807",
+    "20261022212301_participant_access.sql": "62b871b047b45cd664f9a0c5cec1e2d763f1cfe75a89e2f1a8aeb5db9e694b22",
+    "20261022213242_membership_integrity.sql": "4ef91af10a81388bf597e08f59ba57d62ffad6fc768e6ecf073cdce9ffa0e351",
+    "20261022235817_participant_account_deletion.sql": "cf3882d637db3b6ec43bbbec273ea3bceb4ccbb7a29313516f3f3f3ab59a9533",
+    "20261023000544_response_commands.sql": "62ccb294725c9f39db7557ebdf17179d7a3a0ec27b33efa38f0c57a9fcb2edea",
+    "20261023224522_transactional_poll_creation.sql": "3e4fafca08e39fab9e4e3a8a73e85f546a68047542df0ae94fc8f71c32f5dfb0"
+  },
+  "results": {
+    "database_checks": 142,
+    "new_creation_database_checks": 48,
+    "observed_creation_lock_waits": 24,
+    "existing_lock_races": 17,
+    "web_tests": 56,
+    "ios_tests": 71,
+    "android_jvm_tests": 26,
+    "edge_tests": 38,
+    "entrypoints": 7
+  }
+}

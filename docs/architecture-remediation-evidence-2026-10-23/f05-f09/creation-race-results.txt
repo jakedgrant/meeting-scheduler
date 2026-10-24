@@ -1,0 +1,36 @@
+PostgreSQL 18.4 on x86_64-apple-darwin24.6.0, compiled by Apple clang version 17.0.0 (clang-1700.6.3.2), 64-bit
+▶ F05/F09 independent PostgreSQL creation, redemption and capacity races
+  ✔ competing free creates serialize and commit only one active poll (100.597041ms)
+  ✔ same operation after a lost reply waits and returns the original result (11.040417ms)
+  ✔ changed same-ID payload waits then rejects without a second poll (10.6625ms)
+  ✔ one pass cannot fund competing operations (20.117292ms)
+  ✔ locked pass eligibility is rechecked after billing revoked_at=now() (23.813541ms)
+  ✔ locked pass eligibility is rechecked after billing redeemed_at=now() (23.65425ms)
+  ✔ locked pass eligibility is rechecked after billing verified_until=now()-interval '1 second' (23.633459ms)
+  ✔ locked pass eligibility is rechecked after billing user_id=$2 (24.030167ms)
+  ✔ subscription naturally expires while waiting for owner lock (free slot empty) (664.2555ms)
+  ✔ subscription naturally expires while waiting for owner lock (free slot occupied) (691.075459ms)
+  ✔ pass naturally expires while creation waits for its row lock (679.297708ms)
+  ✔ deadline naturally expires while creation waits for pass lock (702.763625ms)
+  ✔ subscription naturally expires while premium reopening waits for owner lock (687.744625ms)
+  ✔ join deadline expires while command waits for poll lock (690.769166ms)
+  ✔ join deadline expires while direct insert waits for poll lock (670.23575ms)
+  ✔ competing member joins cannot exceed final place (17.9415ms)
+  ✔ competing guest joins cannot exceed final place (37.349125ms)
+  ✔ competing direct member joins cannot exceed final place (12.535416ms)
+  ✔ competing direct guest joins cannot exceed final place (11.942917ms)
+  ✔ same membership concurrent retry succeeds at capacity (11.8435ms)
+  ✔ same guest capability concurrent retry succeeds at capacity (12.134375ms)
+  ✔ reactivation serializes before competing creation (29.152666ms)
+  ✔ creation serializes before competing reactivation (41.951625ms)
+Observed 24 independent-session PostgreSQL Lock waits.
+  ✔ direct option additions serialize at 500-option boundary (19.311ms)
+✔ F05/F09 independent PostgreSQL creation, redemption and capacity races (5298.998125ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5346.441792

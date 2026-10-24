@@ -1,0 +1,20 @@
+> Task :app:mergeDebugJavaResource UP-TO-DATE
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:mergeProjectDexDebug
+> Task :app:packageDebug
+> Task :app:createDebugApkListingFileRedirect UP-TO-DATE
+> Task :app:assembleDebug
+
+> Task :app:compileDebugUnitTestKotlin
+w: file:///private/tmp/meeting-scheduler-f05-f09-integration/apps/android/app/src/test/kotlin/com/meetingscheduler/android/PollCreationSessionTest.kt:9:8 'typealias Instant = Instant' is deprecated. This type is deprecated in favor of `kotlin.time.Instant`.
+w: file:///private/tmp/meeting-scheduler-f05-f09-integration/apps/android/app/src/test/kotlin/com/meetingscheduler/android/PollCreationSessionTest.kt:16:27 'typealias Instant = Instant' is deprecated. This type is deprecated in favor of `kotlin.time.Instant`.
+w: file:///private/tmp/meeting-scheduler-f05-f09-integration/apps/android/app/src/test/kotlin/com/meetingscheduler/android/PollCreationSessionTest.kt:18:37 'typealias Instant = Instant' is deprecated. This type is deprecated in favor of `kotlin.time.Instant`.
+w: file:///private/tmp/meeting-scheduler-f05-f09-integration/apps/android/app/src/test/kotlin/com/meetingscheduler/android/PollCreationSessionTest.kt:22:58 'typealias Instant = Instant' is deprecated. This type is deprecated in favor of `kotlin.time.Instant`.
+
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes UP-TO-DATE
+> Task :app:testDebugUnitTest
+
+BUILD SUCCESSFUL in 20s
+45 actionable tasks: 8 executed, 37 up-to-date

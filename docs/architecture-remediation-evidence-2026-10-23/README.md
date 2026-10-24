@@ -35,3 +35,7 @@ All runtime use was reserved with the coordinator. The fresh PostgreSQL instance
 ## Prelaunch boundary
 
 The application is unreleased. Source fixes and disposable test evidence support merging this work. Before launch, apply the ordered migrations in the target environment, verify effective hosted grants/RLS/RPC exposure, and exercise signed-in/native and browser guest journeys against that environment. Configure real Android release signing and verify a clean iOS app-wrapper archive for distribution. Local tests and throwaway CI signing do not establish those environment-specific facts. Broader open architecture findings (including other-platform account isolation, creation/pass redemption and provider workflows) remain tracked separately.
+
+## F05/F09 continuation
+
+PR #70 subsequently merged at main `5b9c5e46a1fc7f023339a755297774e60f0c5806`, including its exact head `040f9ee480f7ad2f1beb41e6d27b7f46cc363ba6` and all five previously missing deliveries. The coordinator verified ancestry before implementation. New transactional creation, pass, quota, capacity and three-client evidence is recorded separately in [F05/F09 evidence](f05-f09/README.md). The earlier counts above remain baseline evidence.
