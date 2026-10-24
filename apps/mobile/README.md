@@ -6,7 +6,7 @@ Email links and browser Google sign-in use Supabase PKCE with a persisted, singl
 meetingscheduler://auth/callback?attempt=<UUID>
 ```
 
-The app accepts only that auth scheme, host and path, with exactly one matching attempt and one nonempty `code` (or a provider `error`). It checks the originating account and JWT session identity before the SDK exchanges the code. A missing, malformed, duplicate or obsolete attempt cannot consume a newer intent or rotate its verifier. Request a fresh link from this build for older links without an attempt. Calendar OAuth remains on its separate calendar route; native Apple ID-token sign-in does not use this redirect.
+The app accepts only that auth scheme, host and path, with exactly one matching attempt and one nonempty `code` (or a provider `error`). It checks the originating account and JWT session identity before the SDK exchanges the code. A missing, malformed, duplicate or obsolete attempt cannot consume a newer intent or rotate its verifier. Request a fresh link from this build for older links without an attempt. Calendar OAuth remains on its separate calendar route; native Apple ID-token sign-in does not use this redirect. Starting Apple sign-in supersedes earlier browser/email intents, and its SDK result retains that original attempt even if another sign-in starts.
 
 The project owner must configure Supabase **Authentication → URL Configuration → Redirect URLs** to accept the attempt query. Use this allowlist pattern, with one literal backslash before `?`:
 

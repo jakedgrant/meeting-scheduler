@@ -59,6 +59,14 @@ private final class OAuthReplyGate {
 }
 
 @MainActor
+private final class AppleReplyGate {
+    var replies: [CheckedContinuation<AuthService.AppleCredentials, any Error>] = []
+    func launch() async throws -> AuthService.AppleCredentials {
+        try await withCheckedThrowingContinuation { replies.append($0) }
+    }
+}
+
+@MainActor
 final class SessionTransportTests: XCTestCase {
     private func client() -> SupabaseClient {
         LifecycleURLProtocol.waiting.withLock { $0 = [] }
@@ -291,7 +299,8 @@ final class SessionTransportTests: XCTestCase {
     }
     private func correlationService(
         adapter: SessionAuthAdapter, sdk: SupabaseClient, intents: AuthCallbackIntentStore,
-        launch: (@MainActor (URL) async throws -> URL)? = nil
+        launch: (@MainActor (URL) async throws -> URL)? = nil,
+        launchApple: (@MainActor () async throws -> AuthService.AppleCredentials)? = nil
     ) -> AuthService {
         var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
         dependencies.accountChanged = { _ in adapter.accountDidChange() }
@@ -304,6 +313,7 @@ final class SessionTransportTests: XCTestCase {
         }
         dependencies.callbackIntents = intents
         dependencies.launchOAuth = launch
+        dependencies.launchApple = launchApple
         dependencies.refreshCalendar = {}
         dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
@@ -691,6 +701,86 @@ final class SessionTransportTests: XCTestCase {
                 XCTAssertNil(intents.current)
                 XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
             }
+        }
+    }
+
+    func testAppleInitiationSupersedesOlderEmailLinkAndItsDelayedCleanup() async throws {
+        for fails in [false, true] {
+            let adapter = adapter()
+            let sdk = client()
+            let apple = AppleReplyGate()
+            let suite = "apple-email-correlation-\(UUID())"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let intents = AuthCallbackIntentStore(defaults: defaults)
+            let service = correlationService(
+                adapter: adapter, sdk: sdk, intents: intents, launchApple: { try await apple.launch() })
+            await service.initialize()
+            let old = Task { try await service.signInWithMagicLink(email: "old@example.invalid") }
+            await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1 }
+            let oldId = try XCTUnwrap(intents.current?.id)
+            let current = Task { try await service.signInWithApple() }
+            await settle { apple.replies.count == 1 }
+            XCTAssertNil(intents.current)
+            await service.handleDeepLink(url: callback(oldId))
+            XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+            LifecycleURLProtocol.reply(
+                path: "/auth/v1/otp", status: fails ? 400 : 200,
+                data: fails ? Data("{\"msg\":\"expired\"}".utf8) : Data("{}".utf8))
+            do {
+                try await old.value
+                XCTFail("Superseded email initiation must fail")
+            } catch {}
+            apple.replies.removeFirst().resume(
+                returning: .init(identityToken: "apple-test-token", nonce: "nonce", displayName: nil))
+            await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+            let account = UUID()
+            LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "current-apple"))
+            try await current.value
+            await settle { service.currentUserId == account }
+            XCTAssertEqual(adapter.auth.currentUser?.id, account)
+            service.dispose()
+        }
+    }
+
+    func testAppleIDTokenLateSuccessAndFailureCannotConsumeNewerEmailAttempt() async throws {
+        for fails in [false, true] {
+            let adapter = adapter()
+            let sdk = client()
+            let apple = AppleReplyGate()
+            let suite = "apple-token-correlation-\(UUID())"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let intents = AuthCallbackIntentStore(defaults: defaults)
+            let service = correlationService(
+                adapter: adapter, sdk: sdk, intents: intents, launchApple: { try await apple.launch() })
+            await service.initialize()
+            let old = Task { try await service.signInWithApple() }
+            await settle { apple.replies.count == 1 }
+            apple.replies.removeFirst().resume(
+                returning: .init(identityToken: "old-apple-token", nonce: "nonce", displayName: nil))
+            await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+            let current = Task { try await service.signInWithMagicLink(email: "current@example.invalid") }
+            await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1 }
+            let currentId = try XCTUnwrap(intents.current?.id)
+            LifecycleURLProtocol.reply(
+                path: "/auth/v1/token", status: fails ? 400 : 200,
+                data: fails ? Data("{\"msg\":\"expired\"}".utf8) : try wireSession(UUID(), token: "old-apple"))
+            do {
+                try await old.value
+                XCTFail("Superseded Apple token must fail")
+            } catch {}
+            XCTAssertNil(adapter.auth.currentSession)
+            XCTAssertEqual(intents.current?.id, currentId)
+            LifecycleURLProtocol.reply(path: "/auth/v1/otp", data: Data("{}".utf8))
+            try await current.value
+            let genuine = Task { await service.handleDeepLink(url: self.callback(currentId)) }
+            await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+            let account = UUID()
+            LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "current-email"))
+            await genuine.value
+            await settle { service.currentUserId == account }
+            service.dispose()
         }
     }
 

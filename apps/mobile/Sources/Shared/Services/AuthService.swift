@@ -35,7 +35,6 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     private var expiryTask: Task<Void, Never>?
     private var currentNonce: String?
     private var appleController: ASAuthorizationController?
-    private var appleAttemptRevision: UInt64?
     private var appleAttemptGeneration: UInt64?
     private let authBrowser = OAuthBrowserSession(errorMapper: { error in
         if case .cancelled = error { return CancellationError() }
@@ -44,7 +43,14 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     private var callbackAttemptId: UUID?
     private var observedAuthRevision: UInt64?
     private var initializationWaiters: [CheckedContinuation<Void, Never>] = []
-    private var appleSignInContinuation: CheckedContinuation<Void, Error>?
+    private var appleSignInContinuation: CheckedContinuation<AppleCredentials, Error>?
+    private var appleOperationId: UUID?
+
+    struct AppleCredentials: Sendable {
+        var identityToken: String
+        var nonce: String
+        var displayName: String?
+    }
 
     /// Inject the same boundaries used by the application, including observer disposal.
     struct Dependencies {
@@ -63,6 +69,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         var beginAuthAttempt: @MainActor (UUID) -> Void = { _ in }
         var endAuthAttempt: @MainActor (UUID) -> Void = { _ in }
         var launchOAuth: (@MainActor (URL) async throws -> URL)?
+        var launchApple: (@MainActor () async throws -> AppleCredentials)?
         var isStoredSession: @MainActor (Session?) -> Bool = { _ in true }
         var now: @MainActor () -> Date = { Date() }
         var waitForExpiry: @MainActor (TimeInterval) async throws -> Void = { seconds in
@@ -348,24 +355,51 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     public func signInWithApple() async throws {
-        guard appleSignInContinuation == nil else { throw AuthError.appleSignInFailed("Sign-in is already in progress") }
-        appleAttemptRevision = dependencies.authRevision()
-        appleAttemptGeneration = sessionGeneration
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            self.appleSignInContinuation = continuation
-
-            let nonce = randomNonceString()
-            currentNonce = nonce
-
-            let provider = ASAuthorizationAppleIDProvider()
-            let request = provider.createRequest()
-            request.requestedScopes = [.email, .fullName]
-            request.nonce = sha256(nonce)
-
-            let controller = ASAuthorizationController(authorizationRequests: [request])
-            controller.delegate = self
-            appleController = controller
-            controller.performRequests()
+        guard appleOperationId == nil else { throw AuthError.appleSignInFailed("Sign-in is already in progress") }
+        // Native sign-in supersedes pending browser/email attempts before its first await.
+        dependencies.callbackIntents?.clear()
+        callbackAttemptId = nil
+        authBrowser.cancel()
+        let intent = UUID()
+        appleOperationId = intent
+        dependencies.beginAuthAttempt(intent)
+        let revision = dependencies.authRevision()
+        let generation = sessionGeneration
+        defer {
+            if appleOperationId == intent { appleOperationId = nil }
+            dependencies.endAuthAttempt(intent)
+        }
+        let credentials: AppleCredentials
+        if let launch = dependencies.launchApple {
+            credentials = try await launch()
+        } else {
+            appleAttemptGeneration = generation
+            credentials = try await withCheckedThrowingContinuation { continuation in
+                appleSignInContinuation = continuation
+                let nonce = randomNonceString()
+                currentNonce = nonce
+                let request = ASAuthorizationAppleIDProvider().createRequest()
+                request.requestedScopes = [.email, .fullName]
+                request.nonce = sha256(nonce)
+                let controller = ASAuthorizationController(authorizationRequests: [request])
+                controller.delegate = self
+                appleController = controller
+                controller.performRequests()
+            }
+        }
+        guard sessionGeneration == generation else { throw CancellationError() }
+        let session = try await AuthAttemptContext.$intentId.withValue(intent) {
+            try await AuthAttemptContext.$revision.withValue(revision) {
+                try await auth.signInWithIdToken(
+                    credentials: .init(
+                        provider: .apple,
+                        idToken: credentials.identityToken, nonce: credentials.nonce))
+            }
+        }
+        guard auth.currentSession == session else { throw CancellationError() }
+        // Apple returns the name only on the first authorization.
+        if currentUserId == session.user.id, let displayName = credentials.displayName, !displayName.isEmpty {
+            try? await updateProfile(displayName: displayName, avatarUrl: nil, timezone: nil)
         }
     }
 
@@ -522,7 +556,6 @@ extension AuthService: ASAuthorizationControllerDelegate {
             defer {
                 appleController = nil
                 appleAttemptGeneration = nil
-                appleAttemptRevision = nil
             }
             guard appleAttemptGeneration == sessionGeneration else {
                 appleSignInContinuation?.resume(throwing: CancellationError())
@@ -540,29 +573,12 @@ extension AuthService: ASAuthorizationControllerDelegate {
                 return
             }
 
-            do {
-                let signedInSession = try await AuthAttemptContext.$revision.withValue(appleAttemptRevision) {
-                    try await auth.signInWithIdToken(credentials: .init(provider: .apple, idToken: identityToken, nonce: nonce))
-                }
-
-                guard auth.currentSession == signedInSession else { throw CancellationError() }
-                // Apple only provides full name on first sign-in, so capture it
-                if currentUserId == signedInSession.user.id, let fullName = appleIDCredential.fullName {
-                    let givenName = fullName.givenName ?? ""
-                    let familyName = fullName.familyName ?? ""
-                    let displayName = [givenName, familyName]
-                        .filter { !$0.isEmpty }
-                        .joined(separator: " ")
-
-                    if !displayName.isEmpty {
-                        try? await updateProfile(displayName: displayName, avatarUrl: nil, timezone: nil)
-                    }
-                }
-
-                appleSignInContinuation?.resume()
-            } catch {
-                appleSignInContinuation?.resume(throwing: error)
+            let displayName = appleIDCredential.fullName.map { name in
+                [name.givenName ?? "", name.familyName ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
             }
+            appleSignInContinuation?.resume(
+                returning: AppleCredentials(
+                    identityToken: identityToken, nonce: nonce, displayName: displayName))
             appleSignInContinuation = nil
             currentNonce = nil
         }
@@ -574,7 +590,6 @@ extension AuthService: ASAuthorizationControllerDelegate {
             guard appleController.map(ObjectIdentifier.init) == controllerId else { return }
             appleController = nil
             appleAttemptGeneration = nil
-            appleAttemptRevision = nil
             appleSignInContinuation?.resume(throwing: error)
             appleSignInContinuation = nil
             currentNonce = nil
