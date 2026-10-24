@@ -1,11 +1,14 @@
 <script lang="ts">
-	import { onDestroy } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user } from '$lib/stores/auth';
 	import { createPoll } from '$lib/stores/polls';
 	import { createPollCreation } from '$lib/poll-creation';
+	import { createSessionWork } from '$lib/session-scope';
+	const work = createSessionWork();
 	const creation = createPollCreation({ create: createPoll });
-	onDestroy(() => creation.invalidate());
+	onMount(() => user.subscribe(value => creation.setOwner(value?.id ?? null)));
+	onDestroy(() => { creation.invalidate(); work.dispose(); });
 	$effect(() => { creation.setOwner($user?.id ?? null); });
 
 	// Redirect if not authenticated
@@ -125,9 +128,10 @@
 	}
 
 	async function handleSubmit() {
+		const isCurrent = work.capture();
 		error = '';
 		const result = await creation.submit();
-		if (result) goto(`/polls/${result.poll.id}`);
+		if (isCurrent() && result) goto(`/polls/${result.poll.id}`);
 	}
 
 	// Generate next 14 days for date picker

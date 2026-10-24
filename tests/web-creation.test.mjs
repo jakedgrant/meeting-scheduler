@@ -29,9 +29,12 @@ async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'web-creation-'));
   const key = `__webCreation${++sequence}`;
   const state = { calls: [], supabase: {
-    async rpc(name, args) {
+    rpc(name, args) {
+      const response = (async () => {
       state.calls.push({ name, args: structuredClone(args) });
       return state.handler ? state.handler(name, args) : { data: result, error: null };
+      })();
+      return Object.assign(response, { abortSignal() { return this; } });
     },
     from(table) { throw Error(`Unexpected table write/read ${table}`); },
     removeChannel() {}

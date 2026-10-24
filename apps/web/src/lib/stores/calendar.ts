@@ -2,6 +2,7 @@ import { writable, get } from 'svelte/store'
 import { supabase, type PollTimeOption } from '$lib/supabase'
 import { session } from './auth'
 import { browser } from '$app/environment'
+import { captureSession, sessionIdentity } from '$lib/session-scope'
 
 export const calendarEnabled = writable(false)
 export const calendarLoading = writable(false)
@@ -15,6 +16,7 @@ let generation = 0
 let conflictRequest = 0
 let conflictOptions = ''
 let connectionMutation = false
+let statusRequest = 0
 
 interface ConnectionStatus {
   connected: boolean
@@ -26,6 +28,7 @@ interface ConnectionStatus {
 function reset(account: string | null) {
   accountId = account
   generation++
+  statusRequest++
   conflictRequest++
   conflictOptions = ''
   connectionMutation = false
@@ -37,6 +40,9 @@ function reset(account: string | null) {
   calendarRequiresReconnect.set(false)
   calendarRevocationPending.set(false)
 }
+
+// State clears synchronously on every auth boundary, even with no mounted watcher.
+sessionIdentity.subscribe(identity => reset(identity.accountId))
 
 function applyStatus(data: ConnectionStatus) {
   if (typeof data?.connected !== 'boolean' || typeof data.requiresReconnect !== 'boolean' ||
@@ -50,7 +56,9 @@ function applyStatus(data: ConnectionStatus) {
 }
 
 async function connection<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<T>('calendar-connection', { body })
+  const scope = captureSession()
+  const { data, error } = await supabase.functions.invoke<T>('calendar-connection', { body, signal: scope.signal })
+  if (!scope.isCurrent()) throw new Error('Session changed')
   if (error || !data) throw new Error('Google Calendar could not be updated. Try again.')
   return data
 }
@@ -62,11 +70,12 @@ export async function initCalendar() {
   if (!userId) return
   if (get(calendarLoading)) return
   const current = generation
+  const request = ++statusRequest
   try {
     const data = await connection<ConnectionStatus>({ action: 'status' })
-    if (generation === current) applyStatus(data)
+    if (generation === current && request === statusRequest) applyStatus(data)
   } catch {
-    if (generation === current) calendarStatusError.set('Google Calendar connection could not be checked.')
+    if (generation === current && request === statusRequest) calendarStatusError.set('Google Calendar connection could not be checked.')
   }
 }
 
@@ -74,6 +83,7 @@ export async function enableCalendarIntegration(): Promise<boolean> {
   if (!get(session)?.user) throw new Error('Sign in before connecting a calendar.')
   if (accountId !== get(session)?.user.id) reset(get(session)?.user.id ?? null)
   const current = ++generation
+  statusRequest++
   connectionMutation = true
   calendarLoading.set(true)
   calendarStatusError.set(null)
@@ -96,19 +106,30 @@ export async function enableCalendarIntegration(): Promise<boolean> {
 }
 
 /** Schedule outside the synchronous auth callback; clear state on account changes. */
+let calendarOwners = 0
+let stopCalendar: (() => void) | undefined
 export function watchCalendarConnection() {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  const unsubscribe = session.subscribe(currentSession => {
-    const userId = currentSession?.user.id ?? null
-    if (userId !== accountId) reset(userId)
-    if (timer) clearTimeout(timer)
-    if (userId) timer = setTimeout(() => { void initCalendar() }, 0)
-  })
-  return () => { if (timer) clearTimeout(timer); unsubscribe() }
+  if (!browser) return () => {}
+  if (++calendarOwners === 1) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const unsubscribe = sessionIdentity.subscribe(identity => {
+      if (timer) clearTimeout(timer)
+      if (identity.accountId) timer = setTimeout(() => { void initCalendar() }, 0)
+    })
+    stopCalendar = () => { if (timer) clearTimeout(timer); unsubscribe(); reset(null) }
+  }
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    if (--calendarOwners === 0) { stopCalendar?.(); stopCalendar = undefined }
+  }
 }
 
 export async function disableCalendarIntegration() {
+  if (!get(session)?.user) return
   const current = ++generation
+  statusRequest++
   connectionMutation = true
   conflictRequest++
   calendarConflicts.set(new Set())
@@ -129,6 +150,7 @@ export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
   if (connectionMutation) return
   if (!get(session)?.user) return
   const current = generation
+  const scope = captureSession()
   const request = ++conflictRequest
   const optionsKey = JSON.stringify(timeOptions.map(({ id, start_time, end_time }) =>
     ({ id, start_time, end_time })).sort((a, b) => a.id.localeCompare(b.id)))
@@ -139,7 +161,7 @@ export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
   calendarLoading.set(true)
   calendarStatusError.set(null)
   try {
-    const { data, error } = await supabase.functions.invoke('check-calendar-conflicts', { body: {
+    const { data, error } = await supabase.functions.invoke('check-calendar-conflicts', { signal: scope.signal, body: {
       timeOptions: timeOptions.map(({ id, start_time, end_time }) => ({ id, start_time, end_time }))
     } })
     if (generation !== current || request !== conflictRequest) return

@@ -7,9 +7,9 @@
 		currentPollTimeOptions,
 		currentPollParticipants,
 		currentPollResponses,
-		loadPoll,
-		cleanupPollRealtime
+		ownPollDetail
 	} from '$lib/stores/polls';
+	import { sessionIdentity } from '$lib/session-scope';
 	import type { AvailabilityStatus } from '$lib/supabase';
 
 	const pollId = $derived($page.params.id as string);
@@ -68,13 +68,14 @@
 		};
 	});
 
-	onMount(() => {
-		if (pollId) loadPoll(pollId);
+	let mounted = $state(false);
+	let detail: ReturnType<typeof ownPollDetail> | undefined;
+	onMount(() => { detail = ownPollDetail(); mounted = true; });
+	$effect(() => {
+		const identity = $sessionIdentity.generation;
+		if (mounted && pollId) void detail?.load(pollId);
 	});
-
-	onDestroy(() => {
-		cleanupPollRealtime();
-	});
+	onDestroy(() => detail?.dispose());
 
 	function formatDateTime(isoString: string) {
 		const date = new Date(isoString);

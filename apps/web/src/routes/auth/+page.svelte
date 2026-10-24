@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
+	import { createSessionWork } from '$lib/session-scope';
+	const work = createSessionWork();
+	onDestroy(() => work.dispose());
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { user, signInWithGoogle, signInWithApple, signInWithMagicLink } from '$lib/stores/auth';
@@ -24,26 +28,28 @@
 	});
 
 	async function handleGoogleSignIn() {
+		const isCurrent = work.capture();
 		loading = true;
 		errorMessage = '';
 		try {
 			await signInWithGoogle();
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Google';
+			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Google';
 		} finally {
-			loading = false;
+			if (isCurrent()) loading = false;
 		}
 	}
 
 	async function handleAppleSignIn() {
+		const isCurrent = work.capture();
 		loading = true;
 		errorMessage = '';
 		try {
 			await signInWithApple();
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Apple';
+			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Apple';
 		} finally {
-			loading = false;
+			if (isCurrent()) loading = false;
 		}
 	}
 
@@ -53,15 +59,16 @@
 			return;
 		}
 
+		const isCurrent = work.capture();
 		loading = true;
 		errorMessage = '';
 		try {
 			await signInWithMagicLink(email);
-			successMessage = 'Check your email for a sign-in link!';
+			if (isCurrent()) successMessage = 'Check your email for a sign-in link!';
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Failed to send magic link';
+			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to send magic link';
 		} finally {
-			loading = false;
+			if (isCurrent()) loading = false;
 		}
 	}
 </script>

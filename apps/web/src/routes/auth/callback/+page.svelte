@@ -3,24 +3,11 @@
 	import { goto } from '$app/navigation';
 	import { supabase } from '$lib/supabase';
 
-	onMount(async () => {
-		// Handle the OAuth callback
-		const { data: { session }, error } = await supabase.auth.getSession();
-
-		if (error) {
-			console.error('Auth callback error:', error);
-			goto('/auth?error=' + encodeURIComponent(error.message));
-			return;
-		}
-
-		if (!session?.user) {
-			console.error('No session user');
-			goto('/auth?error=No%20session');
-			return;
-		}
-
-		// Redirect to dashboard on success
-		goto('/polls');
+	import { createAuthCallback } from '$lib/auth-callback';
+	onMount(() => {
+		const callback = createAuthCallback({ getSession: () => supabase.auth.getSession(), navigate: goto });
+		void callback.run();
+		return callback.dispose;
 	});
 </script>
 

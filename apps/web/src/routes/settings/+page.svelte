@@ -1,8 +1,12 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user, profile, updateProfile } from '$lib/stores/auth';
 	import { calendarEnabled, calendarLoading, calendarStatusError, calendarAccountEmail, calendarRequiresReconnect, calendarRevocationPending, initCalendar, enableCalendarIntegration, disableCalendarIntegration } from '$lib/stores/calendar';
+
+	import { createSessionWork } from '$lib/session-scope';
+	const work = createSessionWork();
+	onDestroy(() => work.dispose());
 
 	let displayName = $state('');
 	let avatarUrl = $state('');
@@ -13,9 +17,18 @@
 	let calendarError = $state('');
 
 	onMount(() => {
+		let account: string | null | undefined;
+		const stop = user.subscribe(value => {
+			if (account === (value?.id ?? null)) return;
+			account = value?.id ?? null;
+			work.invalidate();
+			displayName = ''; avatarUrl = ''; timezone = 'UTC';
+			loading = false; errorMessage = ''; successMessage = ''; calendarError = '';
+		});
 		const result = new URLSearchParams(window.location.search).get('calendar');
 		if (result === 'failed') calendarError = 'Google Calendar connection failed. Please try again.';
 		if (result === 'cancelled') calendarError = 'Google Calendar connection was cancelled.';
+		return stop;
 	});
 
 	// Common timezones for the dropdown
@@ -61,6 +74,7 @@
 	});
 
 	async function handleSubmit() {
+		const isCurrent = work.capture();
 		loading = true;
 		errorMessage = '';
 		successMessage = '';
@@ -71,29 +85,32 @@
 				avatar_url: avatarUrl || null,
 				timezone: timezone || 'UTC',
 			});
-			successMessage = 'Profile updated successfully!';
+			if (isCurrent()) successMessage = 'Profile updated successfully!';
 		} catch (err) {
-			errorMessage = err instanceof Error ? err.message : 'Failed to update profile';
+			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to update profile';
 		} finally {
-			loading = false;
+			if (isCurrent()) loading = false;
 		}
 	}
 
 	async function handleCalendarToggle(enabled: boolean) {
+		const isCurrent = work.capture();
 		calendarError = '';
 		successMessage = '';
 
 		try {
 			if (enabled) {
 				await enableCalendarIntegration();
-				if ($calendarEnabled) successMessage = 'Google Calendar connected.';
+				if (isCurrent() && $calendarEnabled) successMessage = 'Google Calendar connected.';
 			} else {
 				await disableCalendarIntegration();
-				successMessage = 'Calendar integration disabled';
+				if (isCurrent()) successMessage = 'Calendar integration disabled';
 			}
 		} catch (err) {
-			calendarError = err instanceof Error ? err.message : 'Failed to update calendar settings';
-			await initCalendar();
+			if (isCurrent()) {
+				calendarError = err instanceof Error ? err.message : 'Failed to update calendar settings';
+				await initCalendar();
+			}
 		}
 	}
 </script>
