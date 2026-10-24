@@ -470,7 +470,7 @@ async function sdkTransport(t, state) {
         if (options.signal?.aborted) { control.aborted++; throw new DOMException("Session cancelled", "AbortError"); }
         const headers = new Headers(options.headers);
         const authorization = headers.get('Authorization');
-        requests.push({ path: url.pathname, authorization, locked });
+        requests.push({ path: url.pathname, authorization, locked, body: options.body });
         const payload = authorization?.split('.')[1];
         const account = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString()).sub : null;
         if (url.pathname.endsWith('/user')) {
@@ -755,5 +755,28 @@ test('real SDK queued creation cannot resolve B credentials for an operation cap
   assert.ok(storage.getItem(`meeting-scheduler:create-poll:${accountA}`));
   assert.equal(storage.getItem(`meeting-scheduler:create-poll:${accountB}`), null);
   assert.equal(control.requests.filter(request => request.path.endsWith('/rpc/create_poll')).length, 0);
+  assert.equal(control.aborted, 1);
+});
+
+
+test('real SDK queued calendar disconnect cannot resolve B credentials for an A action', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, control } = await sdkTransport(t, state);
+  mount();
+  await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
+  await flush();
+  control.user = { account: accountB, started: deferred(), finish: deferred() };
+  const replacement = client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'refresh-B' });
+  await control.user.started.promise;
+  const disconnect = actual.calendar.disableCalendarIntegration().catch(error => error);
+  await Promise.resolve();
+  control.user.finish.resolve();
+  await replacement;
+  await disconnect;
+  await flush();
+  assert.equal(actual.get(actual.auth.user).id, accountB);
+  assert.equal(actual.get(actual.calendar.calendarEnabled), true);
+  assert.equal(actual.get(actual.calendar.calendarAccountEmail), accountB);
+  assert.equal(control.requests.filter(request => request.path.endsWith('/calendar-connection') && JSON.parse(request.body ?? '{}').action === 'disconnect').length, 0);
   assert.equal(control.aborted, 1);
 });
