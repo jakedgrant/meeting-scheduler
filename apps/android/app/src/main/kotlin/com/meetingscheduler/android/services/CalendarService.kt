@@ -21,6 +21,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.meetingscheduler.android.models.PollTimeOption
 import io.github.jan.supabase.functions.functions
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.request.setBody
+import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -54,8 +56,9 @@ class CalendarService(
     private val readDevicePreference: (suspend (String) -> Boolean)? = null,
     private val writeDevicePreference: (suspend (String, Boolean) -> Unit)? = null,
     private val readPermission: (() -> Boolean)? = null,
+    private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
 ) {
-    private val supabase by lazy { SupabaseService.client }
+    private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val json = Json { ignoreUnknownKeys = true }
     private var connectionGeneration = 0
     var calendarError by mutableStateOf<String?>(null)
@@ -138,12 +141,22 @@ class CalendarService(
         googleCalendarAccountEmail = null
     }
 
+    private suspend fun invokeOwned(function: String, body: kotlinx.serialization.json.JsonObject, credential: String): io.ktor.client.statement.HttpResponse =
+        supabase.functions.invoke(function) {
+            // The SDK's body+Headers overload appends Authorization; use assignment
+            // after its default auth header to guarantee exactly one captured token.
+            headers[io.ktor.http.HttpHeaders.Authorization] = "Bearer $credential"
+            contentType(io.ktor.http.ContentType.Application.Json)
+            setBody(body.toString())
+        }
+
     private suspend fun connection(action: String, target: String? = null): String {
         connectionTransport?.let { return it(action, target) }
-        val response = supabase.functions.invoke("calendar-connection", body = buildJsonObject {
+        val credential = authService.currentSession?.accessToken ?: throw IllegalStateException("Account changed before calendar dispatch")
+        val response = invokeOwned("calendar-connection", buildJsonObject {
             put("action", action)
             target?.let { put("target", it) }
-        })
+        }, credential)
         if (!response.status.isSuccess()) throw IllegalStateException("Calendar request failed")
         return response.bodyAsText()
     }
@@ -235,7 +248,8 @@ class CalendarService(
         }
         if (googleCalendarEnabled) {
             try {
-                val response = supabase.functions.invoke("check-calendar-conflicts", body = buildJsonObject {
+                val credential = authService.currentSession?.accessToken ?: throw IllegalStateException("Sign in before checking calendars")
+                val response = invokeOwned("check-calendar-conflicts", buildJsonObject {
                     put("timeOptions", kotlinx.serialization.json.buildJsonArray {
                         options.forEach { option ->
                             add(buildJsonObject {
@@ -245,7 +259,7 @@ class CalendarService(
                             })
                         }
                     })
-                })
+                }, credential)
                 if (!response.status.isSuccess()) throw IllegalStateException("Calendar coverage unknown")
                 val result = json.decodeFromString<ConflictResponse>(response.bodyAsText())
                 if (!result.success) throw IllegalStateException("Calendar coverage unknown")

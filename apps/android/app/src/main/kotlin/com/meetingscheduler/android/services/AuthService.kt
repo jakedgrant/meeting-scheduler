@@ -45,6 +45,7 @@ class AuthService(
         private set
     var isLoading by mutableStateOf(true)
         private set
+    override val pollAccessToken: String? get() = currentSession?.accessToken
     override val pollUserId: String? get() = currentUser?.id
     val isAuthenticated: Boolean get() = currentUser != null
     private var expiryJob: kotlinx.coroutines.Job? = null

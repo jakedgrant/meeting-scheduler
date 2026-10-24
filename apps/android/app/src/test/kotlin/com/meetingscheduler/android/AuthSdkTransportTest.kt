@@ -1,6 +1,7 @@
 package com.meetingscheduler.android
 
 import com.meetingscheduler.android.services.*
+import com.meetingscheduler.android.models.*
 import com.russhwolf.settings.Settings
 import io.github.jan.supabase.auth.*
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -180,5 +181,104 @@ class AuthSdkTransportTest {
         assertTrue(requests.last().contains("google-id-token")); assertTrue(requests.last().contains("original-nonce"))
         assertNull(client.auth.currentSessionOrNull())
         client.close()
+    }
+
+    @Test(timeout = 15000) fun commandDispatchKeepsTheOriginatingCredentialWhenSdkTokenResolutionWaitsAcrossAccountChanges() = runBlocking {
+        for (command in listOf("create_poll", "join_poll", "save_availability")) for (returnToA in listOf(false, true)) {
+            var transported = 0; var bMutations = 0
+            lateinit var client: io.github.jan.supabase.SupabaseClient
+            val stamp = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z")
+            val payload = PollCreationPayload("A envelope", timezone = "UTC", useEventPass = true,
+                timeOptions = listOf(CreationTimeOption(stamp, stamp + kotlin.time.Duration.parse("1h"))))
+            val result = PollCreationResult(Poll("poll-A", "A", "A envelope", status = PollStatus.ACTIVE,
+                isPremium = true, maxParticipants = 50, createdAt = stamp, updatedAt = stamp, shareCode = "ABC123"),
+                listOf(PollTimeOption("option", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)), "pass-A", "event_pass")
+            client = createSupabaseClient("https://unit.invalid", "unit-key") {
+                httpEngine = MockEngine { request ->
+                    transported++
+                    if (request.headers[HttpHeaders.Authorization] == "Bearer token-B") bMutations++
+                    assertEquals(listOf("Bearer original-A"), request.headers.getAll(HttpHeaders.Authorization))
+                    val response = when (command) {
+                        "create_poll" -> Json.encodeToString(PollCreationResult.serializer(), result)
+                        "join_poll" -> "{\"participant\":" + Json.encodeToString(PollParticipant.serializer(), PollParticipant("member-A", "poll-A", "A", accessToken = "", createdAt = stamp, updatedAt = stamp)) + ",\"created\":true}"
+                        else -> Json.encodeToString(AvailabilitySnapshot.serializer(), AvailabilitySnapshot("member-A", "poll-A", 1, "A draft", emptyList()))
+                    }
+                    respond(response, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                }
+                install(Auth) {
+                    autoLoadFromStorage = false; autoSaveToStorage = false; alwaysAutoRefresh = false
+                    autoSetupPlatform = false; enableLifecycleCallbacks = false
+                    sessionManager = MemorySessionManager(); codeVerifierCache = MemoryCodeVerifierCache()
+                }
+                install(io.github.jan.supabase.postgrest.Postgrest)
+            }
+            // Keep the real SDK in Initializing so its authenticated request must
+            // suspend before resolving credentials. The service already owns A.
+            val owner = object : PollSessionIdentity {
+                override var pollUserId: String? = "A"
+                override var identityGeneration = 1L
+                override var pollAccessToken: String? = "original-A"
+            }
+            val polls = PollService(owner, injectedClient = client)
+            val pending = async(start = CoroutineStart.UNDISPATCHED) { runCatching {
+                when (command) {
+                    "create_poll" -> polls.createPoll(PollCreationRequest("operation-A", payload))
+                    "join_poll" -> polls.joinPoll("poll-A")
+                    else -> polls.saveAvailability("poll-A", AvailabilitySaveRequest("request-A", AvailabilityDraft(emptyMap(), "A draft"), 0))
+                }
+            } }
+            assertEquals(0, transported)
+            owner.pollUserId = if (returnToA) "A" else "B"; owner.identityGeneration = if (returnToA) 3 else 2
+            owner.pollAccessToken = if (returnToA) "new-A" else "token-B"
+            client.auth.importSession(session(owner.pollUserId!!, token = owner.pollAccessToken!!), autoRefresh = false)
+            assertTrue(withTimeout(1000) { pending.await() }.isFailure)
+            assertEquals(1, transported); assertEquals(0, bMutations); assertTrue(polls.myPolls.isEmpty())
+            client.close()
+        }
+    }
+
+    @Test(timeout = 15000) fun calendarDisconnectUsesOnlyCapturedCredentialEvenWhenSdkAlreadyHasB() = runBlocking {
+        var transported = 0
+        val sent = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
+        val client = createSupabaseClient("https://unit.invalid", "unit-key") {
+            httpEngine = MockEngine { request ->
+                transported++
+                assertEquals(listOf("Bearer token-A"), request.headers.getAll(HttpHeaders.Authorization))
+                assertTrue(request.body.toByteArray().decodeToString().contains("disconnect"))
+                sent.complete(Unit); reply.await()
+                respond("""{"connected":false,"accountEmail":null,"requiresReconnect":false,"revocationPending":false}""", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            }
+            install(Auth) {
+                autoLoadFromStorage = false; autoSaveToStorage = false; alwaysAutoRefresh = false
+                autoSetupPlatform = false; enableLifecycleCallbacks = false
+                sessionManager = MemorySessionManager(); codeVerifierCache = MemoryCodeVerifierCache()
+            }
+            install(io.github.jan.supabase.functions.Functions)
+        }
+        val events = kotlinx.coroutines.flow.MutableSharedFlow<SessionStatus>()
+        val stamp = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z")
+        val gateway = object : AuthGateway {
+            override val status = events
+            override suspend fun loadProfile(userId: String) = Profile(userId, "$userId@example.test", createdAt = stamp, updatedAt = stamp)
+            override suspend fun awaitInitialization() {}
+            override suspend fun exchangeCode(code: String): UserSession = error("unused")
+            override suspend fun googleSession(idToken: String, nonce: String?): UserSession = error("unused")
+            override suspend fun startMagicLink(email: String) {}
+            override suspend fun startBrowserGoogle() {}
+            override suspend fun signOut() {}
+            override suspend fun importSession(session: UserSession, isCurrent: () -> Boolean) {}
+        }
+        val scope = createApplicationScope(Dispatchers.Unconfined)
+        val auth = AuthService(scope, null, gateway)
+        events.emit(SessionStatus.Authenticated(session("A")))
+        val calendar = CalendarService(null, auth, scope, injectedClient = client)
+        client.auth.importSession(session("B"), autoRefresh = false)
+        val old = async(start = CoroutineStart.UNDISPATCHED) { calendar.setGoogleCalendarEnabled(false) }
+        withTimeout(1000) { sent.await() }
+        events.emit(SessionStatus.Authenticated(session("B"))); calendar.resetGoogleCalendarState()
+        reply.complete(Unit)
+        withTimeout(1000) { old.await() }
+        assertEquals(1, transported); assertFalse(calendar.googleCalendarLoading); assertNull(calendar.calendarError)
+        auth.dispose(); scope.cancel(); client.close()
     }
 }

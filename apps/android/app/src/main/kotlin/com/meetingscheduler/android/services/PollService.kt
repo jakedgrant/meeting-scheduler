@@ -32,15 +32,23 @@ private data class JoinPollResult(val participant: PollParticipant, val created:
 interface PollSessionIdentity {
     val pollUserId: String?
     val identityGeneration: Long
+    val pollAccessToken: String? get() = null
+}
+
+private class AccountRequestIdentity(val accountKey: String, val token: String?) :
+    kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<AccountRequestIdentity>
 }
 
 /** Process-lifetime poll state (F13); callers own the coroutine that runs each request. */
+@OptIn(io.github.jan.supabase.annotations.SupabaseInternal::class, io.github.jan.supabase.annotations.SupabaseExperimental::class)
 class PollService(
     private val authService: PollSessionIdentity,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
+    private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
 ) {
-    private val supabase by lazy { SupabaseService.client }
+    private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())
@@ -71,13 +79,27 @@ class PollService(
         val key = creationAccountKey
         if (creationAccountId == null) throw PollError.NotAuthenticated
         try {
-            val result = action()
+            val identity = AccountRequestIdentity(key, authService.pollAccessToken)
+            val result = kotlinx.coroutines.withContext(identity) { action() }
             kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             return result
         } catch (error: Exception) {
             if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             throw error
+        }
+    }
+
+    private suspend fun requestCredential(): String {
+        val identity = checkNotNull(kotlinx.coroutines.currentCoroutineContext()[AccountRequestIdentity])
+        if (identity.accountKey != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed before dispatch")
+        return identity.token ?: throw PollError.NotAuthenticated
+    }
+
+    private suspend inline fun <reified T : Any> accountRpc(function: String, parameters: T): io.github.jan.supabase.postgrest.result.PostgrestResult {
+        val credential = requestCredential()
+        return supabase.postgrest.rpc(function, parameters) {
+            headers[io.ktor.http.HttpHeaders.Authorization] = "Bearer $credential"
         }
     }
 
@@ -101,11 +123,13 @@ class PollService(
 
         val accountKey = creationAccountKey
         val revision = ++creationRevision
+        val requestIdentity = AccountRequestIdentity(accountKey, authService.pollAccessToken)
         isLoading = true
         try {
-            val response = listTransport?.invoke()?.let { ParticipatedPollsResponse(it.first, it.second) }
-                ?: supabase.postgrest.rpc("get_user_participated_polls", buildJsonObject { })
-                    .decodeAs<ParticipatedPollsResponse>()
+            val response = kotlinx.coroutines.withContext(requestIdentity) {
+                listTransport?.invoke()?.let { ParticipatedPollsResponse(it.first, it.second) }
+                    ?: accountRpc("get_user_participated_polls", buildJsonObject { }).decodeAs<ParticipatedPollsResponse>()
+            }
 
             if (creationAccountKey != accountKey || creationRevision != revision) return
             createdPolls = response.createdPolls
@@ -144,8 +168,7 @@ class PollService(
             val params = buildJsonObject {
                 put("code", code.uppercase())
             }
-            val response = supabase.postgrest
-                .rpc("get_poll_by_code", params)
+            val response = accountRpc("get_poll_by_code", params)
                 .decodeList<PollLookupResponse>()
 
             response.firstOrNull()
@@ -160,12 +183,12 @@ class PollService(
     val creationAccountId: String? get() = authService.pollUserId
     val creationAccountKey: String get() = "${creationAccountId}:${authService.identityGeneration}"
 
-    suspend fun createPoll(request: PollCreationRequest): PollCreationResult {
+    suspend fun createPoll(request: PollCreationRequest): PollCreationResult = withSession {
         selectPollAccount()
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         val response = try {
-            createTransport?.invoke(request) ?: supabase.postgrest.rpc("create_poll", request).decodeAs<PollCreationResult>()
+            createTransport?.invoke(request) ?: accountRpc("create_poll", request).decodeAs<PollCreationResult>()
         } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
             if (error.code in setOf("42501", "22023", "P0001", "P0002", "22000", "54000")) {
                 throw CreationRejected(requireNotNull(error.code))
@@ -180,7 +203,7 @@ class PollService(
         isLoading = false
         createdPolls = listOf(response.poll) + createdPolls.filterNot { it.id == response.poll.id }
         myPolls = listOf(response.poll) + myPolls.filterNot { it.id == response.poll.id }
-        return response
+        return@withSession response
     }
 
     // MARK: - Time Options
@@ -206,6 +229,7 @@ class PollService(
 
     suspend fun updatePollStatus(pollId: String, status: PollStatus) = withSession {
         val key = creationAccountKey
+        val credential = requestCredential()
         val update = buildJsonObject {
             put("status", status.name.lowercase())
         }
@@ -213,6 +237,7 @@ class PollService(
         supabase
             .from("polls")
             .update(update) {
+                headers[io.ktor.http.HttpHeaders.Authorization] = "Bearer $credential"
                 filter {
                     eq("id", pollId)
                 }
@@ -228,7 +253,7 @@ class PollService(
 
     suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = withSession {
         val key = creationAccountKey
-        val saved = supabase.postgrest.rpc("finalize_poll", buildJsonObject {
+        val saved = accountRpc("finalize_poll", buildJsonObject {
             put("poll_uuid", pollId)
             put("time_option_uuid", timeOptionId)
         }).decodeAs<Poll>()
@@ -259,7 +284,7 @@ class PollService(
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         try {
-            val participant = supabase.postgrest.rpc("join_poll", buildJsonObject { put("poll_uuid", pollId) })
+            val participant = accountRpc("join_poll", buildJsonObject { put("poll_uuid", pollId) })
                 .decodeAs<JoinPollResult>().participant
             if (creationAccountKey != accountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             check(participant.pollId == pollId && participant.userId == userId) { "Join returned a different membership." }
@@ -294,7 +319,7 @@ class PollService(
     }
 
     suspend fun getAvailability(pollId: String): AvailabilitySnapshot = withSession {
-        supabase.postgrest.rpc("get_availability", buildJsonObject {
+        accountRpc("get_availability", buildJsonObject {
             put("poll_uuid", pollId)
         }).decodeAs<AvailabilitySnapshot>()
     }
@@ -316,7 +341,7 @@ class PollService(
             }
         }
         return@withSession try {
-            supabase.postgrest.rpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
+            accountRpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
         } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
             if (error.code == "PT409") throw AvailabilityVersionConflict()
             throw error
