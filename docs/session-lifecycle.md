@@ -1,6 +1,6 @@
 # Client session lifecycle contract (F12/F14/F22)
 
-All three clients use an account identity plus a monotonically increasing in-process generation. This contract supplements the existing command, cache and billing contracts; it does not change server authorization.
+All three clients use account identity, server session lineage and a monotonically increasing in-process generation. Supabase JWT `session_id` distinguishes fresh authentication from ordinary token rotation within the same session; repeating the account UUID alone does not establish continuity. This contract supplements the existing command, cache and billing contracts; it does not change server authorization.
 
 ## Boundaries and observation
 
@@ -12,7 +12,7 @@ At each account boundary, advance the generation and synchronously clear account
 
 Retain the already-tested iOS account cache design. Account-owned preferences and recovery records use an account key; signed-out state cannot read an account's records. Preserve legitimate current-account drafts. In particular, switching away never deletes an unresolved creation envelope: returning to that account restores its exact operation UUID and payload, including the ambiguous-result edit lock. Availability drafts/retry identities remain owned by their original account and cannot appear in another account's screen. Every authenticated request captures its initiating session credentials before its first suspension. Cancellation or explicit credential binding must prevent queued work from dispatching under a later account after SDK initialization or token lookup. Completion checks alone do not protect dispatch. Server commands remain authoritative and idempotent; local premium flags grant no authority.
 
-Explicit client sign-out revokes the captured current session with local/device scope. An old remote logout must not revoke a newly authenticated session of the same account. Global account/session administration is a separate operation. SDK credential cleanup must be isolated or ordered so delayed success/failure cannot clear a newer session.
+Explicit client sign-out revokes the captured current session with local/device scope. An old remote logout must not revoke a newly authenticated session of the same account. Global account/session administration is a separate operation. Capture that session before resetting visible state or awaiting any dispatcher, SDK initialization or mutation lock. Local removal must compare current ownership atomically, and screen cancellation must not abandon the owned local cleanup. SDK credential cleanup must be isolated or ordered so delayed success/failure cannot clear a newer session.
 
 ## Provider reconciliation
 
@@ -20,7 +20,7 @@ RevenueCat identity changes must serialize and reconcile toward the latest desir
 
 ## Callback and listener ownership
 
-Authentication callbacks retain the intent that initiated them, including across process/browser startup. Verify that intent against current persisted session ownership before the SDK can save callback credentials; navigation or UI guards after SDK URL initialization are insufficient. Consume an accepted attempt once, reject obsolete attempts, and retain SDK PKCE/state/server validation.
+Authentication callbacks retain the intent that initiated them, including across process/browser startup. Verify that intent against current persisted account and session-lineage ownership before the SDK can save callback credentials; navigation or UI guards after SDK URL initialization are insufficient. Consume an accepted attempt once, reject obsolete attempts, and retain SDK PKCE/state/server validation.
 
 Android cold and warm intents enter the same application-owned auth callback router, which waits for SDK initialization. Only the exact configured auth URI route is accepted. Calendar callback routing remains separate. Use the pinned SDK's supported PKCE/state/session APIs; validate malformed, expired, error, duplicate and obsolete callbacks. Preserve native Google ID-token sign-in. Document hosted allowlist/provider actions separately from deterministic source tests.
 
