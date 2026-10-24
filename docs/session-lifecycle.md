@@ -12,6 +12,8 @@ At each account boundary, advance the generation and synchronously clear account
 
 Retain the already-tested iOS account cache design. Account-owned preferences and recovery records use an account key; signed-out state cannot read an account's records. Preserve legitimate current-account drafts. In particular, switching away never deletes an unresolved creation envelope: returning to that account restores its exact operation UUID and payload, including the ambiguous-result edit lock. Availability drafts/retry identities remain owned by their original account and cannot appear in another account's screen. Server commands remain authoritative and idempotent; local premium flags grant no authority.
 
+Explicit client sign-out revokes the captured current session with local/device scope. An old remote logout must not revoke a newly authenticated session of the same account. Global account/session administration is a separate operation. SDK credential cleanup must be isolated or ordered so delayed success/failure cannot clear a newer session.
+
 ## Provider reconciliation
 
 RevenueCat identity changes must serialize and reconcile toward the latest desired account independently of profile loading. Clear local entitlement/pass visibility immediately at a boundary. If an old provider call cannot be cancelled, let it finish in its ordered worker and then apply the latest desired identity; never run a stale logout concurrently with a new login. Fence provider reads, callbacks and errors by generation, and ensure delayed cleanup cannot undo the current identity. Calendar requests/callbacks carry equivalent ownership and cancellation checks; device preferences are partitioned by account. Slow/failing provider operations must not stop observation of auth events.

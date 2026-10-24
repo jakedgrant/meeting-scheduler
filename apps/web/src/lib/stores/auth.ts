@@ -203,7 +203,7 @@ export async function signInWithMagicLink(email: string) {
 
 export async function signOut() {
   const scope = captureSession()
-  const { error } = await supabase.auth.signOut()
+  const { error } = await supabase.auth.signOut({ scope: 'local' })
   // SDK serializes session mutation with its auth lock; app completions must
   // additionally ignore a later account that won after that SDK operation.
   if (!scope.isCurrent() && get(user)) return false

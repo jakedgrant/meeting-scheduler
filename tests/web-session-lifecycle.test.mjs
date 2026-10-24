@@ -470,7 +470,7 @@ async function sdkTransport(t, state) {
         if (options.signal?.aborted) { control.aborted++; throw new DOMException("Session cancelled", "AbortError"); }
         const headers = new Headers(options.headers);
         const authorization = headers.get('Authorization');
-        requests.push({ path: url.pathname, authorization, locked, body: options.body });
+        requests.push({ path: url.pathname, authorization, locked, search: url.search, body: options.body });
         const payload = authorization?.split('.')[1];
         const account = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString()).sub : null;
         if (url.pathname.endsWith('/user')) {
@@ -516,6 +516,7 @@ test('real pinned Supabase transport defers dependent reads past auth lock and s
   control.logout = { started: deferred(), finish: deferred() };
   const logout = actual.auth.signOut();
   await control.logout.started.promise;
+  assert.ok(control.requests.some(request => request.path.endsWith('/logout') && request.search === '?scope=local'));
   const replacement = client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'refresh-B' });
   await flush();
   assert.equal(actual.get(actual.auth.user).id, accountA, 'B installation waits on the pinned SDK session lock');
