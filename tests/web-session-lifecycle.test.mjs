@@ -9,7 +9,8 @@ import { createRequire } from 'node:module';
 const requireWeb = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { build } = requireWeb('esbuild');
 const { compile } = requireWeb('svelte/compiler');
-const { createClient } = requireWeb('@supabase/supabase-js');
+const realSDK = requireWeb('@supabase/supabase-js');
+const { createClient } = realSDK;
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const web = join(root, 'apps/web');
 const lib = join(web, 'src/lib');
@@ -95,19 +96,32 @@ async function fixture(t, { browser = true } = {}) {
       return instance;
     }
   };
+  state.realSDK = realSDK;
+  state.ownedListeners = new Set();
+  state.ownedAuth = {
+    subscribe(listener) { state.ownedListeners.add(listener); return () => state.ownedListeners.delete(listener); },
+    syncRealtime(session) { return state.supabase.realtime.setAuth(session?.access_token ?? 'test-anon-key'); },
+    signOut() {
+      const local = Promise.resolve().then(() => { state.storedSession = null; state.account = null; for (const listener of state.ownedListeners) listener(null); return true; });
+      const remote = local.then(() => state.signOut?.());
+      return { local, remote };
+    }
+  };
   globalThis[key] = state;
   const output = join(directory, 'bundle.mjs');
   await build({
-    stdin: { contents: `import * as auth from '${lib}/stores/auth.ts'; import * as polls from '${lib}/stores/polls.ts'; import * as calendar from '${lib}/stores/calendar.ts'; import * as billing from '${lib}/stores/subscription.ts'; import * as rc from '${lib}/revenuecat.ts'; import * as scope from '${lib}/session-scope.ts'; export {auth,polls,calendar,billing,rc,scope}; export {mountClientSession} from '${lib}/client-session.ts'; export {createSessionExpiry} from '${lib}/session-expiry.ts'; export {createAuthCallback} from '${lib}/auth-callback.ts'; export {createAvailabilityEditor} from '${lib}/availability-editor.ts'; export {createPollCreation} from '${lib}/poll-creation.ts'; export {get} from 'svelte/store'; export {render} from 'svelte/server'; export {default as Layout} from '${web}/src/routes/+layout.svelte';`, resolveDir: web },
+    stdin: { contents: `import * as auth from '${lib}/stores/auth.ts'; import * as polls from '${lib}/stores/polls.ts'; import * as calendar from '${lib}/stores/calendar.ts'; import * as billing from '${lib}/stores/subscription.ts'; import * as rc from '${lib}/revenuecat.ts'; import * as scope from '${lib}/session-scope.ts'; export {auth,polls,calendar,billing,rc,scope}; export {createOwnedAuth,memoryAuthStorage} from '${lib}/owned-auth.ts'; export {mountClientSession} from '${lib}/client-session.ts'; export {createSessionExpiry} from '${lib}/session-expiry.ts'; export {createAuthCallback} from '${lib}/auth-callback.ts'; export {createAvailabilityEditor} from '${lib}/availability-editor.ts'; export {createPollCreation} from '${lib}/poll-creation.ts'; export {get} from 'svelte/store'; export {render} from 'svelte/server'; export {default as Layout} from '${web}/src/routes/+layout.svelte';`, resolveDir: web },
     outfile: output, bundle: true, platform: 'node', format: 'esm', tsconfigRaw: {},
     define: { 'import.meta.env.VITE_REVENUECAT_WEB_KEY': '"test-key"' },
     plugins: [{ name: 'offline-session', setup(b) {
       b.onResolve({ filter: /^\$lib\// }, args => args.path.endsWith('favicon.svg') ? { path: 'favicon', namespace: 'fixture' } : args.path === '$lib/supabase' ? { path: 'supabase', namespace: 'fixture' } : { path: join(lib, `${args.path.slice(5)}.ts`) });
       b.onResolve({ filter: /^\$app\/environment$/ }, () => ({ path: 'environment', namespace: 'fixture' }));
+      b.onResolve({ filter: /^@supabase\/supabase-js$/ }, () => ({ path: 'real-sdk', namespace: 'fixture' }));
       b.onResolve({ filter: /^@revenuecat\/purchases-js$/ }, () => ({ path: 'provider', namespace: 'fixture' }));
       b.onResolve({ filter: /favicon\.svg$/ }, () => ({ path: 'favicon', namespace: 'fixture' }));
       b.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents: {
-        supabase: `export const supabase=globalThis.${key}.supabase;`,
+        supabase: `export const supabase=globalThis.${key}.supabase; export const ownedAuth=new Proxy({}, {get:(_,name)=>globalThis.${key}.ownedAuth[name]});`,
+        'real-sdk': `export const {AuthClient,createClient,navigatorLock,processLock}=globalThis.${key}.realSDK;`,
         environment: `export const browser=${browser};`,
         provider: `export const Purchases=globalThis.${key}.Purchases;`,
         favicon: 'export default "";'
@@ -444,27 +458,24 @@ test('creation retry survives A→logout→B→A and recovers original poll with
   assert.equal(actual.get(actual.polls.createdPolls).length, 1);
 });
 
-const jwt = account => {
+const tokenIssuedAt = Math.floor(Date.now() / 1000);
+const jwt = (account, lineage = 'session-1') => {
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
-  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: account, aud: 'authenticated', exp: Math.floor(Date.now() / 1000) + 3600, iat: Math.floor(Date.now() / 1000) })}.${Buffer.from('signature').toString('base64url')}`;
+  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode({ sub: account, session_id: `${account}:${lineage}`, aud: 'authenticated', exp: tokenIssuedAt + 3600, iat: tokenIssuedAt })}.${Buffer.from('signature').toString('base64url')}`;
 };
-async function sdkTransport(t, state) {
+async function sdkTransport(t, state, actual) {
   let locked = false;
   let tail = Promise.resolve();
   const requests = [];
   const control = { requests, logout: null, refresh: null, user: null, aborted: 0 };
-  const client = createClient('https://session.test.invalid', 'test-anon-key', {
-    auth: {
-      persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+  const runtime = actual.createOwnedAuth({ url: 'https://session.test.invalid', key: 'test-anon-key', storage: state.authStorage ?? actual.memoryAuthStorage(),
       async lock(_name, _timeout, operation) {
         const previous = tail, release = deferred();
         tail = release.promise;
         await previous;
         locked = true;
         try { return await operation(); } finally { locked = false; release.resolve(); }
-      }
-    },
-    global: {
+      },
       async fetch(input, options = {}) {
         const url = new URL(typeof input === 'string' ? input : input.url);
         if (options.signal?.aborted) { control.aborted++; throw new DOMException("Session cancelled", "AbortError"); }
@@ -479,10 +490,18 @@ async function sdkTransport(t, state) {
         }
         if (url.pathname.endsWith('/logout')) {
           control.logout?.started.resolve();
-          if (control.logout) await control.logout.finish.promise;
+          if (control.logout && (!control.logout.account || control.logout.account === account)) await control.logout.finish.promise;
+          if (control.logout?.failure && (!control.logout.account || control.logout.account === account)) return Response.json({ message: 'Revocation unavailable' }, { status: 500 });
           return new Response(null, { status: 204 });
         }
+        if (url.pathname.endsWith('/otp')) return Response.json({});
         if (url.pathname.endsWith('/token')) {
+          if (url.searchParams.get('grant_type') === 'pkce') {
+            control.callback?.started.resolve();
+            if (control.callback) await control.callback.finish.promise;
+            if (control.callback?.failure) return Response.json({ error: 'invalid_grant', error_description: 'Expired code' }, { status: 400 });
+            return Response.json({ access_token: jwt(accountA, 'callback-session'), refresh_token: 'callback-refresh', token_type: 'bearer', expires_in: 3600, user: { id: accountA } });
+          }
           control.refresh?.started.resolve();
           if (control.refresh) await control.refresh.finish.promise;
           return Response.json({ access_token: jwt(accountA), refresh_token: 'refreshed-A', token_type: 'bearer', expires_in: 3600, user: { id: accountA } });
@@ -493,20 +512,21 @@ async function sdkTransport(t, state) {
         if (url.pathname.endsWith('/calendar-connection')) return Response.json(status(account));
         throw Error(`Unexpected SDK request ${url}`);
       }
-    }
   });
+  const client = runtime.client;
+  state.ownedAuth = runtime;
   await client.auth.initialize();
   state.supabase.auth = client.auth;
   state.supabase.realtime = client.realtime;
   state.supabase.from = (...args) => client.from(...args);
   state.supabase.functions = client.functions;
   t.after(() => { client.auth.stopAutoRefresh(); client.removeAllChannels(); });
-  return { client, control };
+  return { client, control, runtime };
 }
 
 test('real pinned Supabase transport defers dependent reads past auth lock and serializes logout before B installation', async t => {
   const { actual, state, mount } = await fixture(t);
-  const { client, control } = await sdkTransport(t, state);
+  const { client, control } = await sdkTransport(t, state, actual);
   mount();
   const installed = await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
   assert.equal(installed.error, null);
@@ -515,11 +535,13 @@ test('real pinned Supabase transport defers dependent reads past auth lock and s
   assert.equal(actual.get(actual.auth.user).id, accountA);
   control.logout = { started: deferred(), finish: deferred() };
   const logout = actual.auth.signOut();
+  assert.equal(actual.get(actual.auth.user), null, 'explicit sign-out hides A before slow cleanup');
   await control.logout.started.promise;
   assert.ok(control.requests.some(request => request.path.endsWith('/logout') && request.search === '?scope=local'));
   const replacement = client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'refresh-B' });
+  await replacement;
   await flush();
-  assert.equal(actual.get(actual.auth.user).id, accountA, 'B installation waits on the pinned SDK session lock');
+  assert.equal(actual.get(actual.auth.user).id, accountB, 'remote A revocation does not block B installation');
   control.logout.finish.resolve();
   await Promise.all([logout, replacement]);
   await flush();
@@ -533,7 +555,7 @@ test('real pinned Supabase transport defers dependent reads past auth lock and s
 
 test('real pinned Supabase transport serializes delayed A refresh before B; SDK credentials and app state agree', async t => {
   const { actual, state, mount } = await fixture(t);
-  const { client, control } = await sdkTransport(t, state);
+  const { client, control } = await sdkTransport(t, state, actual);
   mount();
   const installed = await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
   assert.equal(installed.error, null);
@@ -579,7 +601,7 @@ test('offline session expiry clears visible account promptly, reauthentication c
 
 for (const event of ['SIGNED_IN', 'TOKEN_REFRESHED', 'SIGNED_OUT']) test(`real SDK stale ${event} broadcast cannot expose A recovery or authorize its creation under SDK B`, async t => {
   const { actual, state, mount } = await fixture(t);
-  const { client } = await sdkTransport(t, state);
+  const { client } = await sdkTransport(t, state, actual);
   mount();
   await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
   await flush();
@@ -615,7 +637,7 @@ for (const event of ['SIGNED_IN', 'TOKEN_REFRESHED', 'SIGNED_OUT']) test(`real S
 
 for (const event of ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED']) test(`real SDK obsolete same-account ${event} hint cannot expire or replace current B credentials/metadata`, async t => {
   const { actual, state, mount } = await fixture(t);
-  const { client } = await sdkTransport(t, state);
+  const { client } = await sdkTransport(t, state, actual);
   mount();
   await client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'refresh-B' });
   await flush();
@@ -729,7 +751,7 @@ for (const path of ['A-B', 'A-logout-A', 'A-B-A']) for (const outcome of ['succe
 
 test('real SDK queued creation cannot resolve B credentials for an operation captured by A', async t => {
   const { actual, state, mount } = await fixture(t);
-  const { client, control } = await sdkTransport(t, state);
+  const { client, control } = await sdkTransport(t, state, actual);
   state.supabase.rpc = (...args) => client.rpc(...args);
   mount();
   await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
@@ -762,7 +784,7 @@ test('real SDK queued creation cannot resolve B credentials for an operation cap
 
 test('real SDK queued calendar disconnect cannot resolve B credentials for an A action', async t => {
   const { actual, state, mount } = await fixture(t);
-  const { client, control } = await sdkTransport(t, state);
+  const { client, control } = await sdkTransport(t, state, actual);
   mount();
   await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
   await flush();
@@ -780,4 +802,305 @@ test('real SDK queued calendar disconnect cannot resolve B credentials for an A 
   assert.equal(actual.get(actual.calendar.calendarAccountEmail), accountB);
   assert.equal(control.requests.filter(request => request.path.endsWith('/calendar-connection') && JSON.parse(request.body ?? '{}').action === 'disconnect').length, 0);
   assert.equal(control.aborted, 1);
+});
+
+for (const replacement of ['B', 'new-A']) for (const outcome of ['success', 'failure']) test(`queued original-A logout ${outcome} preserves installed ${replacement} SDK credentials and UI`, async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, control } = await sdkTransport(t, state, actual);
+  mount();
+  await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  const next = replacement === 'B' ? accountB : accountA;
+  control.user = { account: next, started: deferred(), finish: deferred() };
+  const nextToken = jwt(next, 'new-session');
+  const installing = client.auth.setSession({ access_token: nextToken, refresh_token: 'new-refresh' });
+  await control.user.started.promise;
+  control.logout = { started: deferred(), finish: deferred(), failure: outcome === 'failure' };
+  const logout = actual.auth.signOut();
+  assert.equal(actual.get(actual.auth.user), null);
+  assert.equal(actual.get(actual.auth.profile), null);
+  assert.equal(actual.get(actual.billing.customerInfo), null);
+  assert.equal(actual.get(actual.calendar.calendarEnabled), false);
+  control.user.finish.resolve(); await installing;
+  await control.logout.started.promise; await flush();
+  assert.equal(actual.get(actual.auth.user).id, next);
+  assert.equal((await client.auth.getSession()).data.session.access_token, nextToken);
+  assert.equal(client.realtime.accessTokenValue, nextToken);
+  control.logout.finish.resolve();
+  assert.equal(await logout, false);
+  await flush();
+  assert.equal((await client.auth.getSession()).data.session.access_token, nextToken);
+  assert.equal(actual.get(actual.auth.user).id, next);
+  const revocations = control.requests.filter(request => request.path.endsWith('/logout'));
+  assert.equal(revocations.length, 1);
+  assert.equal(revocations[0].authorization, `Bearer ${jwt(accountA)}`);
+  assert.equal(revocations[0].search, '?scope=local');
+  assert.equal(revocations[0].locked, false, 'remote revocation runs outside SDK storage lock');
+});
+
+for (const outcome of ['success', 'failure']) test(`explicit logout clears local SDK session before slow remote ${outcome}`, async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, control } = await sdkTransport(t, state, actual);
+  mount(); await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  control.logout = { started: deferred(), finish: deferred(), failure: outcome === 'failure' };
+  const logout = actual.auth.signOut();
+  const done = outcome === 'failure' ? assert.rejects(logout) : logout;
+  assert.equal(actual.get(actual.auth.user), null);
+  await control.logout.started.promise;
+  assert.equal((await client.auth.getSession()).data.session, null);
+  assert.equal(client.realtime.accessTokenValue, 'test-anon-key');
+  // A stale refresh/broadcast cannot restore the explicitly ended lineage.
+  await client.auth._notifyAllSubscribers('TOKEN_REFRESHED', { ...sessionFor(accountA), access_token: jwt(accountA) }, false);
+  await flush(); assert.equal(actual.get(actual.auth.user), null);
+  control.logout.finish.resolve(); await done;
+  assert.equal((await client.auth.getSession()).data.session, null);
+  assert.equal(actual.get(actual.auth.user), null);
+});
+
+test('queued original logout accepts ordinary same-session refresh but never a new A lineage', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, control } = await sdkTransport(t, state, actual);
+  mount(); await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  control.refresh = { started: deferred(), finish: deferred() };
+  const refresh = client.auth.refreshSession(); await control.refresh.started.promise;
+  const logout = actual.auth.signOut();
+  control.refresh.finish.resolve(); await refresh; await logout; await flush();
+  assert.equal((await client.auth.getSession()).data.session, null);
+  assert.equal(actual.get(actual.auth.user), null);
+});
+
+function callbackURL(authorizationURL) {
+  const redirect = new URL(authorizationURL).searchParams.get('redirect_to');
+  assert.ok(redirect);
+  const url = new URL(redirect); url.searchParams.set('code', 'valid-code'); return url;
+}
+
+test('production PKCE initiation/exchange persists exact intent, installs once, and preserves original storage key', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, runtime, control } = await sdkTransport(t, state, actual);
+  mount(); await flush();
+  assert.equal(runtime.storageKey, 'sb-session-auth-token');
+  const url = callbackURL(await runtime.start({ provider: 'google' }, null, 'https://web.test.invalid'));
+  assert.ok(new URLSearchParams(new URL(await runtime.start({ provider: 'apple' }, null, 'https://web.test.invalid')).search).get('code_challenge'));
+  await assert.rejects(runtime.complete(url), /expired|another session/);
+  const latest = callbackURL(await runtime.start({ provider: 'google' }, null, 'https://web.test.invalid'));
+  const result = await runtime.complete(latest); await flush();
+  assert.equal(result.user.id, accountA);
+  assert.equal((await client.auth.getSession()).data.session.access_token, jwt(accountA, 'callback-session'));
+  assert.equal(actual.get(actual.auth.user).id, accountA);
+  await assert.rejects(runtime.complete(latest), /already used/);
+  assert.equal(control.requests.filter(request => request.search === '?grant_type=pkce').length, 1);
+});
+
+for (const replacement of ['B', 'new-A']) test(`queued PKCE callback cannot install obsolete A over ${replacement}`, async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, runtime, control } = await sdkTransport(t, state, actual);
+  mount(); await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  const original = (await client.auth.getSession()).data.session;
+  const url = callbackURL(await runtime.start({ provider: 'google' }, original, 'https://web.test.invalid'));
+  const next = replacement === 'B' ? accountB : accountA;
+  control.user = { account: next, started: deferred(), finish: deferred() };
+  const token = jwt(next, 'new-session');
+  const installing = client.auth.setSession({ access_token: token, refresh_token: 'new-refresh' });
+  await control.user.started.promise;
+  const callback = runtime.complete(url); const rejected = assert.rejects(callback, /another session/);
+  control.user.finish.resolve(); await installing; await rejected; await flush();
+  assert.equal((await client.auth.getSession()).data.session.access_token, token);
+  assert.equal(actual.get(actual.auth.user).id, next);
+  assert.equal(control.requests.filter(request => request.search === '?grant_type=pkce').length, 0);
+});
+
+for (const outcome of ['success', 'failure']) test(`PKCE ${outcome} while B installation waits cannot later clear B`, async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, runtime, control } = await sdkTransport(t, state, actual);
+  mount(); await flush();
+  const url = callbackURL(await runtime.start({ provider: 'google' }, null, 'https://web.test.invalid'));
+  control.callback = { started: deferred(), finish: deferred(), failure: outcome === 'failure' };
+  const callback = runtime.complete(url);
+  const callbackDone = outcome === 'failure' ? assert.rejects(callback) : callback;
+  await control.callback.started.promise;
+  const replacement = client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'B-1' });
+  control.callback.finish.resolve(); await callbackDone; await replacement; await flush();
+  assert.equal((await client.auth.getSession()).data.session.user.id, accountB);
+  assert.equal(actual.get(actual.auth.user).id, accountB);
+});
+
+function browserFixture(t, url) {
+  const originals = new Map(['window', 'document', 'BroadcastChannel'].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const listeners = new Map(), channels = [];
+  const window = {
+    location: new URL(url),
+    addEventListener(name, listener) { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name).add(listener); },
+    removeEventListener(name, listener) { listeners.get(name)?.delete(listener); },
+    history: { replaceState() {} }
+  };
+  const restore = () => { for (const [key, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } };
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: window });
+  Object.defineProperty(globalThis, 'document', { configurable: true, value: { visibilityState: 'visible' } });
+  Object.defineProperty(globalThis, 'BroadcastChannel', { configurable: true, value: class {
+    constructor(name) { this.name = name; this.listeners = []; channels.push(this); }
+    addEventListener(_name, listener) { this.listeners.push(listener); }
+    postMessage() {}
+    close() { this.listeners = []; }
+  } });
+  t.after(restore);
+  return { window, listeners, channels, restore };
+}
+
+test('cold root callback completes owned PKCE before mounting production callback navigator; helper leaves no extra listener/channel', async t => {
+  const { actual, state, mount } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const first = await sdkTransport(t, state, actual);
+  const url = callbackURL(await first.runtime.start({ provider: 'google' }, null, 'https://web.test.invalid'));
+  const browser = browserFixture(t, url);
+  const { client } = await sdkTransport(t, state, actual);
+  assert.equal((await client.auth.getSession()).data.session, null, 'main SDK does not auto-install callback URL');
+  const stop = mount();
+  assert.equal(actual.get(actual.auth.authLoading), true);
+  await flush();
+  assert.equal(actual.get(actual.auth.authLoading), false);
+  assert.equal(actual.get(actual.auth.authCallbackError), null);
+  assert.equal(actual.get(actual.auth.user).id, accountA);
+  const navigation = [];
+  const navigator = actual.createAuthCallback({ getSession: () => client.auth.getSession(), navigate: path => navigation.push(path) });
+  await navigator.run();
+  assert.deepEqual(navigation, ['/polls']);
+  assert.equal(browser.channels.length, 1, 'only main SDK owns BroadcastChannel; helper has virtual empty namespace');
+  assert.equal(browser.listeners.get('visibilitychange').size, 1, 'only main SDK retains visibility observer');
+  assert.equal(browser.listeners.get('storage').size, 1);
+  navigator.dispose(); stop(); await client.auth.stopAutoRefresh();
+  assert.equal(browser.listeners.get('storage').size, 0);
+  assert.equal(browser.listeners.get('visibilitychange').size, 0);
+  browser.restore();
+});
+
+for (const artifact of ['implicit', 'unowned-code', 'obsolete-owned-code']) test(`cold SDK URL initialization preserves persisted B against ${artifact}`, async t => {
+  const { actual, state, mount } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const first = await sdkTransport(t, state, actual);
+  await first.client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' });
+  let url = new URL('https://web.test.invalid/auth/callback?code=unowned');
+  if (artifact === 'obsolete-owned-code') url = callbackURL(await first.runtime.start({ provider: 'google' }, (await first.client.auth.getSession()).data.session, 'https://web.test.invalid'));
+  if (artifact === 'implicit') url = new URL(`https://web.test.invalid/auth/callback#access_token=${jwt(accountA)}&refresh_token=old-A&expires_in=3600&token_type=bearer`);
+  await first.client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'B-1' });
+  const browser = browserFixture(t, url);
+  const { client, control } = await sdkTransport(t, state, actual);
+  assert.equal((await client.auth.getSession()).data.session.user.id, accountB);
+  const stop = mount(); await flush();
+  assert.equal((await client.auth.getSession()).data.session.user.id, accountB);
+  assert.equal(actual.get(actual.auth.user).id, accountB);
+  assert.ok(actual.get(actual.auth.authCallbackError));
+  assert.equal(control.requests.filter(request => request.search === '?grant_type=pkce').length, 0);
+  stop(); await client.auth.stopAutoRefresh(); browser.restore();
+});
+
+test('external storage replacement/refresh is observed once and disposal removes cross-tab listener/deferred work', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const browser = browserFixture(t, 'https://web.test.invalid/polls');
+  state.authStorage = actual.memoryAuthStorage();
+  const { client, runtime } = await sdkTransport(t, state, actual);
+  const old = mount(), current = mount();
+  await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  assert.equal(browser.listeners.get('storage').size, 1);
+  const generation = actual.get(actual.scope.sessionIdentity).generation;
+  const refreshed = { ...sessionFor(accountA), access_token: jwt(accountA), refresh_token: 'A-refresh' };
+  await state.authStorage.setItem(runtime.storageKey, JSON.stringify(refreshed));
+  for (const listener of browser.listeners.get('storage')) listener({ key: runtime.storageKey, newValue: JSON.stringify(refreshed) });
+  await flush();
+  assert.equal(actual.get(actual.scope.sessionIdentity).generation, generation);
+  const replacement = { ...sessionFor(accountB), access_token: jwt(accountB), refresh_token: 'B-1' };
+  await state.authStorage.setItem(runtime.storageKey, JSON.stringify(replacement));
+  for (const listener of browser.listeners.get('storage')) listener({ key: runtime.storageKey, newValue: JSON.stringify(replacement) });
+  assert.equal(actual.get(actual.auth.user), null);
+  old(); await flush(); assert.equal(actual.get(actual.auth.user).id, accountB);
+  current(); assert.equal(browser.listeners.get('storage').size, 0);
+  await flush(); assert.equal(actual.get(actual.auth.user), null);
+  await client.auth.stopAutoRefresh(); browser.restore();
+});
+
+for (const request of [{ email: 'test@example.invalid' }, { provider: 'apple' }]) test(`owned ${'email' in request ? 'OTP' : 'Apple OAuth'} initiation retains PKCE intent and rejects malformed/expired/cancelled routes`, async t => {
+  const { actual, state } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const { runtime, control, client } = await sdkTransport(t, state, actual);
+  const authorization = await runtime.start(request, null, 'https://web.test.invalid');
+  const raw = JSON.parse(await state.authStorage.getItem(`${runtime.storageKey}:sign-in-attempt`));
+  assert.ok(raw.verifier);
+  const url = authorization ? callbackURL(authorization) : new URL(`https://web.test.invalid/auth/callback?attempt=${raw.id}&code=valid`);
+  const calendar = new URL(url); calendar.pathname = '/settings';
+  await assert.rejects(runtime.complete(calendar), /expired|another session/);
+  const cancelled = new URL(url); cancelled.searchParams.set('error', 'access_denied');
+  await assert.rejects(runtime.complete(cancelled), /cancelled/);
+  raw.expires = 1; await state.authStorage.setItem(`${runtime.storageKey}:sign-in-attempt`, JSON.stringify(raw));
+  await assert.rejects(runtime.complete(url), /expired/);
+  assert.equal((await client.auth.getSession()).data.session, null);
+  assert.equal(control.requests.filter(request => request.search === '?grant_type=pkce').length, 0);
+});
+
+test('original A logout queued behind real SDK initialization reads ownership inside the SDK lock and preserves B', async t => {
+  const { actual, state } = await fixture(t);
+  const ready = deferred(), began = deferred(), disk = actual.memoryAuthStorage();
+  const key = 'sb-initialize-auth-token';
+  const persistedB = { ...sessionFor(accountB), access_token: jwt(accountB), refresh_token: 'B-1' };
+  await disk.setItem(key, JSON.stringify(persistedB));
+  let first = true, tail = Promise.resolve();
+  const requests = [];
+  const runtime = actual.createOwnedAuth({ url: 'https://initialize.test.invalid', key: 'anon',
+    storage: { async getItem(name) { if (name === key && first) { first = false; began.resolve(); await ready.promise; } return disk.getItem(name); }, setItem: disk.setItem, removeItem: disk.removeItem },
+    async lock(_name, _timeout, operation) { const previous = tail, release = deferred(); tail = release.promise; await previous; try { return await operation(); } finally { release.resolve(); } },
+    async fetch(_input, options) { requests.push(new Headers(options.headers).get('Authorization')); return new Response(null, { status: 204 }); }
+  });
+  await began.promise;
+  const original = { ...sessionFor(accountA), access_token: jwt(accountA), refresh_token: 'A-1' };
+  const logout = runtime.signOut(original);
+  ready.resolve();
+  assert.equal(await logout.local, false);
+  await logout.remote;
+  assert.equal((await runtime.client.auth.getSession()).data.session.user.id, accountB);
+  assert.deepEqual(requests, [`Bearer ${original.access_token}`]);
+  await runtime.client.auth.stopAutoRefresh();
+});
+
+test('fresh login to same account advances generation while ordinary token refresh retains it', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client } = await sdkTransport(t, state, actual);
+  mount(); await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  const before = actual.get(actual.scope.sessionIdentity).generation;
+  const originalScope = actual.scope.captureSession();
+  await client.auth.refreshSession(); await flush();
+  assert.equal(actual.get(actual.scope.sessionIdentity).generation, before);
+  assert.equal(originalScope.isCurrent(), true);
+  await client.auth.setSession({ access_token: jwt(accountA, 'fresh-login'), refresh_token: 'new-A' }); await flush();
+  assert.ok(actual.get(actual.scope.sessionIdentity).generation > before);
+  assert.equal(originalScope.isCurrent(), false);
+  assert.equal(actual.get(actual.auth.user).id, accountA);
+});
+
+test('old logout failure cannot report into a later signed-out generation after B logs out', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, control } = await sdkTransport(t, state, actual);
+  mount(); await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'A-1' }); await flush();
+  control.logout = { account: accountA, started: deferred(), finish: deferred(), failure: true };
+  const old = actual.auth.signOut(); await control.logout.started.promise;
+  await client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'B-1' }); await flush();
+  assert.equal(await actual.auth.signOut(), true); await flush();
+  control.logout.finish.resolve();
+  assert.equal(await old, false);
+  assert.equal(actual.get(actual.auth.user), null);
+  assert.equal((await client.auth.getSession()).data.session, null);
+});
+
+for (const outcome of ['success', 'failure']) test(`disposed cold callback ${outcome} cannot install SDK credentials or resurrect root state`, async t => {
+  const { actual, state, mount } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const first = await sdkTransport(t, state, actual);
+  const url = callbackURL(await first.runtime.start({ provider: 'google' }, null, 'https://web.test.invalid'));
+  const browser = browserFixture(t, url);
+  const { client, control } = await sdkTransport(t, state, actual);
+  control.callback = { started: deferred(), finish: deferred(), failure: outcome === 'failure' };
+  const stop = mount(); await control.callback.started.promise;
+  stop(); control.callback.finish.resolve(); await flush();
+  assert.equal((await client.auth.getSession()).data.session, null);
+  assert.equal(actual.get(actual.auth.user), null);
+  assert.equal(actual.get(actual.auth.authCallbackError), null);
+  assert.equal(browser.listeners.get('storage').size, 0);
+  await client.auth.stopAutoRefresh(); browser.restore();
 });

@@ -5,8 +5,8 @@ export const sessionIdentity = writable<SessionIdentity>({ accountId: null, gene
 let cancellation = new AbortController()
 
 /** Only auth composition advances this scope. Token refresh is not a boundary. */
-export function transitionSession(accountId: string | null) {
-  if (get(sessionIdentity).accountId === accountId) return
+export function transitionSession(accountId: string | null, renewed = false) {
+  if (!renewed && get(sessionIdentity).accountId === accountId) return
   cancellation.abort()
   cancellation = new AbortController()
   sessionIdentity.update(value => ({ accountId, generation: value.generation + 1 }))

@@ -1,9 +1,10 @@
 import { writable, derived, get } from 'svelte/store'
 import type { User, Session } from '@supabase/supabase-js'
-import { supabase, type Profile } from '$lib/supabase'
+import { supabase, ownedAuth, type Profile } from '$lib/supabase'
 import { initRevenueCat, setRevenueCatIdentity } from '$lib/revenuecat'
 import { browser } from '$app/environment'
 import { captureSession, transitionSession } from '$lib/session-scope'
+import { sessionOwner } from '$lib/owned-auth'
 import { createSessionExpiry } from '$lib/session-expiry'
 
 // Core auth stores
@@ -11,6 +12,9 @@ export const user = writable<User | null>(null)
 export const session = writable<Session | null>(null)
 export const profile = writable<Profile | null>(null)
 export const authLoading = writable(browser)
+export const authCallbackError = writable<string | null>(null)
+const signedOutOwners = new Set<string>()
+let callbackPending = false
 
 // Derived store for authentication status
 export const isAuthenticated = derived(user, ($user) => $user !== null)
@@ -43,25 +47,28 @@ function deferDependentWork(load = false) {
 }
 
 function acceptSession(next: Session | null, event = 'RESTORED') {
-  if (next && expiry.isExpired(next.expires_at)) next = null
+  if (next && (expiry.isExpired(next.expires_at) || signedOutOwners.has(sessionOwner(next)!))) next = null
+  const previousSession = get(session)
   const previous = get(user)?.id ?? null
   const account = next?.user.id ?? null
-  if (previous !== account) {
+  const renewed = !!previousSession && !!next && sessionOwner(previousSession) !== sessionOwner(next)
+  const boundary = previous !== account || renewed
+  if (boundary) {
     needsProfile = false
     profileRevision++
     profileRequest?.abort()
     profile.set(null)
   }
-  transitionSession(account)
+  transitionSession(account, renewed)
   setRevenueCatIdentity(account)
   session.set(next)
   user.set(next?.user ?? null)
-  authLoading.set(false)
+  authLoading.set(callbackPending)
   expiry.watch(next?.expires_at, () => {
     authRevision++
     acceptSession(null, 'EXPIRED')
   })
-  deferDependentWork(previous !== account || event === 'USER_UPDATED' || event === 'RESTORED')
+  deferDependentWork(boundary || event === 'USER_UPDATED' || event === 'RESTORED')
 }
 
 function observeSession(event: string, hinted: Session | null, mounted: number) {
@@ -93,8 +100,9 @@ function observeSession(event: string, hinted: Session | null, mounted: number) 
       const verified = error ? null : data.session
       // Supabase's internal listener also consumes broadcast hints. Reconcile
       // Realtime's credential to verified storage before new channels are made.
-      if (verified) void supabase.realtime.setAuth(verified.access_token).catch(() => {})
-      acceptSession(verified, event)
+      const visible = verified && !signedOutOwners.has(sessionOwner(verified)!) ? verified : null
+      void ownedAuth.syncRealtime(visible).catch(() => {})
+      acceptSession(visible, event)
     }).catch(() => {
       if (owners && mounted === lifetime && revision === authRevision) acceptSession(null, event)
     })
@@ -113,13 +121,33 @@ export function initAuth() {
       if (mounted !== lifetime || !owners) return
       observeSession(event, next, mounted)
     })
-    stopObserver = () => subscription.unsubscribe()
-    void supabase.auth.getSession().then(({ data, error }) => {
-      if (mounted !== lifetime || !owners || authRevision !== revision) return
-      acceptSession(error ? null : data.session)
-    }).catch(() => {
-      if (mounted === lifetime && owners && authRevision === revision) acceptSession(null)
+    const stopStorage = ownedAuth.subscribe((hint, external) => {
+      // Our queued cleanup/publication is only a request to re-read current
+      // SDK storage. Its old snapshot cannot synchronously clear newer UI.
+      if (mounted === lifetime && owners) observeSession('STORAGE_CHANGED', external ? hint : get(session), mounted)
     })
+    stopObserver = () => { subscription.unsubscribe(); stopStorage() }
+    const callbackURL = typeof window !== 'undefined' && window.location.pathname === '/auth/callback'
+      ? new URL(window.location.href) : null
+    callbackPending = !!callbackURL
+    authCallbackError.set(null)
+    const restoration = async () => {
+      if (callbackURL) {
+        try { await ownedAuth.complete(callbackURL, () => mounted === lifetime && owners > 0) }
+        catch (error) { if (mounted === lifetime && owners) authCallbackError.set(error instanceof Error ? error.message : 'Sign-in could not be verified') }
+        if (mounted !== lifetime || !owners) return
+        callbackPending = false
+        observeSession('CALLBACK_FINISHED', null, mounted)
+        return
+      }
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (mounted === lifetime && owners && authRevision === revision) acceptSession(error ? null : data.session)
+      } catch {
+        if (mounted === lifetime && owners && authRevision === revision) acceptSession(null)
+      }
+    }
+    void restoration()
   }
   let disposed = false
   return () => {
@@ -127,6 +155,7 @@ export function initAuth() {
     disposed = true
     if (--owners) return
     lifetime++
+    callbackPending = false
     stopObserver?.()
     stopObserver = undefined
     if (deferred) clearTimeout(deferred)
@@ -163,52 +192,39 @@ async function loadProfile(userId: string) {
 }
 
 // Auth actions
-export async function signInWithGoogle() {
+export async function signInWithGoogle() { return signInWithProvider('google') }
+export async function signInWithApple() { return signInWithProvider('apple') }
+async function signInWithProvider(provider: 'google' | 'apple') {
   const scope = captureSession()
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      skipBrowserRedirect: true
-    }
-  })
-  if (!scope.isCurrent()) return
-  if (error) throw error
-  if (data.url) window.location.assign(data.url)
+  const url = await ownedAuth.start({ provider }, get(session), window.location.origin)
+  if (scope.isCurrent() && url) window.location.assign(url)
 }
-
-export async function signInWithApple() {
-  const scope = captureSession()
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'apple',
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-      skipBrowserRedirect: true
-    }
-  })
-  if (!scope.isCurrent()) return
-  if (error) throw error
-  if (data.url) window.location.assign(data.url)
-}
-
 export async function signInWithMagicLink(email: string) {
-  const { error } = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: `${window.location.origin}/auth/callback`
-    }
-  })
-  if (error) throw error
+  await ownedAuth.start({ email }, get(session), window.location.origin)
 }
 
 export async function signOut() {
-  const scope = captureSession()
-  const { error } = await supabase.auth.signOut({ scope: 'local' })
-  // SDK serializes session mutation with its auth lock; app completions must
-  // additionally ignore a later account that won after that SDK operation.
-  if (!scope.isCurrent() && get(user)) return false
-  if (error) throw error
-  return true
+  const original = get(session)
+  if (!original) return false
+  signedOutOwners.add(sessionOwner(original)!)
+  authRevision++
+  if (validation) clearTimeout(validation)
+  validation = undefined
+  // Visible state and command ownership end before SDK initialization, a
+  // queued credential installation or remote revocation can delay cleanup.
+  acceptSession(null, 'EXPLICIT_SIGN_OUT')
+  const endedScope = captureSession()
+  void ownedAuth.syncRealtime(null).catch(() => {})
+  const { local, remote } = ownedAuth.signOut(original)
+  void remote.catch(() => {})
+  try {
+    await local
+    await remote
+  } catch (error) {
+    if (!endedScope.isCurrent() || get(user)) return false
+    throw error
+  }
+  return endedScope.isCurrent() && get(user) === null
 }
 
 export async function updateProfile(updates: Partial<Profile>) {

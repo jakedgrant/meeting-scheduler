@@ -1,5 +1,6 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { type SupabaseClient } from '@supabase/supabase-js'
 import { browser } from '$app/environment'
+import { createOwnedAuth, browserAuthStorage, memoryAuthStorage } from './owned-auth'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -8,13 +9,9 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables')
 }
 
-export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: browser,
-    autoRefreshToken: browser,
-    detectSessionInUrl: browser
-  }
-})
+export const ownedAuth = createOwnedAuth({ url: supabaseUrl, key: supabaseAnonKey,
+  storage: browser ? browserAuthStorage() : memoryAuthStorage(), autoRefresh: browser })
+export const supabase: SupabaseClient = ownedAuth.client
 
 // Database types - will be generated from Supabase
 export type PollStatus = 'draft' | 'active' | 'closed' | 'archived'
