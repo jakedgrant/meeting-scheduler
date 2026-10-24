@@ -10,7 +10,7 @@ Local main was fast-forwarded after a complete backup of its ignored iOS app wra
 
 ## Ownership and validation
 
-Web owns auth/profile, subscription, RevenueCat, calendar, poll and screen integration plus F22 production regression tests. Android owns application auth/session integration and F14 SDK/manifest/cold/warm routing. iOS audits and fixes remaining auth/provider/preference boundaries while preserving its merged cache and command systems. Coordinator owns shared scripts/workflows, integration and this index. An independent final combined-tree review follows platform completion.
+Web owns auth/profile, subscription, RevenueCat, calendar, poll and screen integration plus F22 production regression tests. Android owns application auth/session integration and F14 SDK/manifest/cold/warm routing. iOS audits and fixes remaining auth/provider/preference boundaries while preserving its merged cache and command systems. Coordinator owns shared scripts/workflows, integration and this index. An independent final combined-tree review follows platform completion. After an account usage interruption, the owner directed the remaining agents to run one at a time: web, Android, then iOS. No implementation agents run concurrently during this continuation.
 
 The preserved backend at contract commit `483ca17` passed `npm run test:database` (142 checks), `npm run test:billing:edge` (15), `npm run test:calendar:edge` (23), frozen checks for seven entry points and billing lint (eight files). No backend or migration changes are planned. These are deterministic in-process/offline regressions and did not contact a hosted project or provider.
 
@@ -18,11 +18,11 @@ The preserved backend at contract commit `483ca17` passed `npm run test:database
 
 | Runtime | Approval | Cleanup |
 | --- | --- | --- |
-| iOS | Fresh iPhone 17 Pro / iOS 27.0, `0EC9E5B6-47CE-4D21-A938-3C00075E1D02`; create/boot/install/test, 40 minutes from creation; package tests and brief wrapper lifecycle smoke only | Platform owner reports shutdown/delete after final run |
-| Android | New isolated SDK `/private/tmp/session-android-sdk`, AVD `session-f12-f14` under `/private/tmp/session-android-avd`, ports 5580/5581 after unused-port check; headless deterministic callback/recreation checks; 45 minutes from start | Platform owner kills named emulator and deletes named AVD |
+| iOS | Fresh iPhone 17 Pro / iOS 27.0, `0EC9E5B6-47CE-4D21-A938-3C00075E1D02`; create/boot/install/test, 40 minutes from creation; package tests and brief wrapper lifecycle smoke only | Coordinator shut down and deleted this device after the interruption; a fresh reservation/device is required for subsequent tests |
+| Android | New isolated SDK `/private/tmp/session-android-sdk`, AVD `session-f12-f14` under `/private/tmp/session-android-avd`, ports 5580/5581 after unused-port check; headless deterministic callback/recreation checks; 45 minutes from start | Coordinator stopped `emulator-5580` after the interruption (`emu kill`: OK). Downloaded image and named AVD remain as stopped test artifacts; future checks require a fresh reservation/device |
 | Web | In-process fixtures, type check and production build; no listening server | No server to stop |
 
-Earlier runtime reservations and device IDs were not reused. Workers must request coordinator approval before any further simulator/emulator/local server/Supabase/Docker/existing-service use.
+The first reservations expired during the interruption. At approximately 07:54 UTC October 24 the coordinator stopped the stalled task-owned Gradle jobs and named emulator, and shut down/deleted the named simulator. Existing user runtimes were left intact. Earlier runtime reservations and device IDs were not reused. Workers must request coordinator approval before any further simulator/emulator/local server/Supabase/Docker/existing-service use.
 
 ## Provider and hosted boundary
 
