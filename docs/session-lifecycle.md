@@ -20,6 +20,8 @@ RevenueCat identity changes must serialize and reconcile toward the latest desir
 
 ## Callback and listener ownership
 
+Authentication callbacks retain the intent that initiated them, including across process/browser startup. Verify that intent against current persisted session ownership before the SDK can save callback credentials; navigation or UI guards after SDK URL initialization are insufficient. Consume an accepted attempt once, reject obsolete attempts, and retain SDK PKCE/state/server validation.
+
 Android cold and warm intents enter the same application-owned auth callback router, which waits for SDK initialization. Only the exact configured auth URI route is accepted. Calendar callback routing remains separate. Use the pinned SDK's supported PKCE/state/session APIs; validate malformed, expired, error, duplicate and obsolete callbacks. Preserve native Google ID-token sign-in. Document hosted allowlist/provider actions separately from deterministic source tests.
 
 Web auth callbacks stay synchronous; dependent SDK work is deferred until the SDK releases its auth lock. Mount/unmount owns listener and deferred-work disposal; SSR creates no browser listeners. Repeated initialization cannot leak listeners or resurrect disposed work.
