@@ -1,6 +1,6 @@
 # F12/F14/F22 account/session lifecycle evidence
 
-This tranche starts from verified main `d51f45a366cbd4a9ecd30e774d8b50441a938894`. It completes remaining account/session isolation, Android auth callback routing and production web auth lifecycle regression coverage. The [session contract](../../../session-lifecycle.md) was recorded in `483ca17a14107d38ce0608ea33f315b776d3b552` before the three platform owners began concurrent implementation.
+This tranche starts from verified main `d51f45a366cbd4a9ecd30e774d8b50441a938894`. It completes remaining account/session isolation, Android auth callback routing and production web auth lifecycle regression coverage. The [session contract](../../session-lifecycle.md) was recorded in `483ca17a14107d38ce0608ea33f315b776d3b552` before the three platform owners began concurrent implementation.
 
 ## Baseline verification
 

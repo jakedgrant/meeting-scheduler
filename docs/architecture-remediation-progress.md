@@ -22,7 +22,7 @@ The owner confirmed these rules during this delivery: pass-funded polls leave th
 
 Ownership: one backend agent owns the additive CLI migration and database/race tests; platform agents own web/iOS adapters; the coordinator owns Android, shared configuration, workflows, integration and this tracker. Independent source reviews cover the combined tree after fixes. [Evidence and exact source identities](architecture-remediation-evidence-2026-10-23/f05-f09/README.md).
 
-No merge or hosted deployment is authorized by this delivery. Hosted/provider validation and distribution credentials remain prelaunch work. Remaining F12/F14/F22 lifecycle, F21/F16 date/calendar and F19 → F18 → F20 reads/realtime work stay queued.
+No merge or hosted deployment is authorized by this delivery. Hosted/provider validation and distribution credentials remain prelaunch work. At this delivery, F12/F14/F22 lifecycle work was queued; it is now active above. F21/F16 date/calendar and F19 → F18 → F20 reads/realtime stay queued.
 
 ## Historical merged baseline, October 22
 
@@ -120,11 +120,11 @@ Merging code does not change hosted state. The following are prelaunch checks or
 - [x] Publish the finding PRs; the October 23 remediation pushes update those existing branches without rewriting history.
 - [x] Account deletion: the owner chose anonymization, with comments and response notes replaced by `[user deleted]`. Implemented in #66.
 - [x] F06/F10: guest capability saves implemented in #69.
-- [x] F05/F09: implemented across backend/web/iOS/Android, combined replay and independent review complete. Main-targeted PR delivery and CI are recorded in the linked evidence; merging and hosted rollout remain separate.
+- [x] F05/F09: implemented across backend/web/iOS/Android, combined replay and independent review complete. Main-targeted #71 merged as `d51f45a`; all six workflows passed for exact head `6148a12`. Hosted rollout remains separate.
 - [x] Accept final F10 integration in #69. Backend, web, Android and iOS are integrated; independent review found no remaining blockers among the seven review gaps. The [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md) records checks, source identities, merge dependencies and prelaunch limits.
 - [ ] Complete broader F12 lifecycle work on web/Android and verify live auth/provider transitions; the reviewed iOS cache/session gaps are fixed in #56. F14 Android callbacks remain separate.
 - [ ] Optional F13 emulator check. The worker asked for one API 36 emulator for about 30 minutes (install the debug build, rotate, background, sign in and out, uninstall). An agent must request a new coordinator reservation before using an emulator; none was used in this remediation.
-- [ ] Next architecture work: F05/F09 limits/creation/pass redemption, remaining F12/F14 lifecycle, F19/F18 bounded reads, and broader F24 launch checks. Do not close these from the current PR evidence.
+- [ ] Current architecture work: remaining F12/F14 lifecycle and F22 regression coverage. Keep F21/F16 dates/calendar and F19 → F18 → F20 bounded reads/realtime queued; broader F24 launch checks remain. F05/F09 is merged, with hosted validation separate.
 
 ## Progress log
 
