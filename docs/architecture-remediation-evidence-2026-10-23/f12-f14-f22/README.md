@@ -34,6 +34,12 @@ The exact source passed **109 tests, zero failures**, package build-for-testing 
 
 The Android callback receipt path still needs a focused correlation audit before final F14 closure: it binds to the pending attempt at receipt rather than an attempt carried by the URI. The agent remains stopped. No web restart is currently needed; its committed follow-up has 137 passing tests. Final combined independent review, push/PR publication and CI remain pending; no PR or hosted change is claimed by this iOS-only checkpoint.
 
+## Combined source checkpoint, after Android follow-up
+
+Android source `a025ca5f80bee73ee26b7b762023325186a34495` and instrumentation `d60192c9cd11728b254d7fabe28aa7bbcd5454f5` integrate as `53d3e2d` and `5d1f73e`; evidence `04e99e3` integrates as `9eb4081`. Its tested/integrated subtree is identical: `b98a5925631adeeb4bba902637afcbc3825a12ad`. **64 JVM tests, both debug/instrumentation APK builds and two emulator instrumentation tests pass.** The callback receipt-correlation audit queued in the earlier iOS-only checkpoint is now implemented, including actual callers, PKCE verifier ordering, native result ownership and sign-out/disposal fencing. [Android follow-up evidence](android.md) records cold/warm stale/current routes and intermediate harness corrections. The coordinator inspected the cold-callback screenshot; it contains the expected cancellation message and no account data.
+
+The complete web follow-up `f82b7e21119f375aa63bc10f809aff91636459f3` integrates as `9926a43`: **137 tests pass**, type checking has zero errors/five existing warnings, and client/SSR build passes. [Web evidence](web.md) includes original-session logout, cold PKCE publication, cross-tab/disposal and current callback navigation. Native iOS remains at **109 passing tests** with wrapper compilation, as recorded above. All three platform sources match their exact tested commits; backend and shared product configuration remain byte-identical to verified main. The [source manifest](source-manifest.md) records hashes and comparison commands. Independent combined review and publication/CI follow this checkpoint; no merge or hosted change is authorized.
+
 ## Runtime reservations
 
 | Runtime | Approval | Cleanup |
@@ -43,6 +49,7 @@ The Android callback receipt path still needs a focused correlation audit before
 | Android continuation | Fresh AVD `session-f12-f14-resume` under `/private/tmp/session-android-avd-resume`, ports 5582/5583 after unused-port check; 45 minutes from creation; headless/offline deterministic checks | Stopped at 08:48 UTC; both task AVDs deleted and ports released. No emulator remains |
 | iOS continuation | Fresh iPhone 17 Pro / iOS 27.0, `91F67496-18FE-4FE4-B657-EA32376E131C`; package/SDK tests only, 40 minutes from creation at approximately 13:27 UTC; generic wrapper compile | Shut down/deleted at approximately 13:54 UTC; both commands exited zero and inventory confirmed absence |
 | iOS callback follow-up | Fresh iPhone 17 Pro / iOS 27.0, `4AB7E492-E478-4B73-855B-3A1349DF677A`; created 18:27:22 UTC under a 30-minute reservation, deterministic package/SDK tests and generic wrapper compile only | Shut down/deleted at 18:31:49 UTC; both commands exited zero and inventory confirmed absence |
+| Android callback follow-up | Fresh `session-android-attempt` AVD under `/private/tmp/session-android-attempt-avd`, ports 5584/5585 verified unused; created 18:43:07 UTC, 30-minute offline deterministic reservation | `emulator-5584` stopped and AVD deleted at 18:50:32 UTC; ports clear and task Gradle daemons stopped |
 | Web | In-process fixtures, type check and production build; no listening server | No server to stop |
 
 The first reservations expired during the interruption. At approximately 07:54 UTC October 24 the coordinator stopped the stalled task-owned Gradle jobs and named emulator, and shut down/deleted the named simulator. Existing user runtimes were left intact. Earlier runtime reservations and device IDs were not reused. Workers must request coordinator approval before any further simulator/emulator/local server/Supabase/Docker/existing-service use.
