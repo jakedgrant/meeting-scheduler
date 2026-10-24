@@ -64,15 +64,15 @@ Existing active polls retain their saved settings. Reopening a subscription-fund
 
 ## Retry and error behavior
 
-The first successful `(creator_id, operation_id)` stores the exact JSONB payload and result in `private.poll_creation_requests`. A matching retry returns the original snapshot with `replayed: true`, including after a lost reply, closure, entitlement expiry or poll deletion. Another account cannot replay it. JSON object key order does not matter; omitted/null/default fields and array order remain part of the payload. A changed payload under the same ID fails. Failed transactions save no receipt, so a corrected request can reuse its ID.
+The first successful `(creator_id, operation_id)` stores the exact JSONB payload and result in `private.poll_creation_requests`. A matching retry returns the original snapshot with `replayed: true`, including after a lost reply, closure, entitlement expiry or poll deletion. Another account cannot replay it. JSON object key order does not matter; omitted/null/default fields and array order remain part of the payload. A changed payload under the same ID fails. A failed first attempt saves no receipt, so a corrected request can reuse its ID. A payload-mismatch rejection means that ID already has a successful receipt; restore and retry the original envelope to recover that poll.
 
-Preserve the ID and the exact submitted payload after a transport failure. Keep the draft after every failure. Once the server definitively rejects a request, a user edit can start a new logical operation. Retrying unchanged content keeps its ID. A late response from another account must not enter the current account's cache, list, draft or navigation state.
+Preserve the ID and the exact submitted payload after a transport failure. Keep the draft after every failure. After an explicit rollback rejection of a first attempt, a user edit can start a new logical operation; retrying unchanged content may reuse its ID. A payload-mismatch rejection preserves the original pending envelope and ID, because that operation already committed. A late response from another account must not enter the current account's cache, list, draft or navigation state.
 
 | SQLSTATE | Meaning | Client action |
 | --- | --- | --- |
 | `42501` | Missing authentication, unsupported premium reopening/current subscription, or denied table mutation | Sign in, refresh access, or choose a supported action; show the specific server message |
 | `22023` | Invalid fields/options/deadline, or option bound exceeded | Retain draft and let the user correct it |
-| `22000` | Same operation ID with a different payload | Retain draft and start a new operation for changed content |
+| `22000` | Same operation ID with a different payload; the original operation already succeeded | Retain the edited draft separately, restore the original pending envelope and retry it to recover/check the existing poll |
 | `P0001` | Ordinary active-poll quota reached | Close an ordinary poll, subscribe, or explicitly opt into a pass |
 | `P0002` | No eligible event pass after locking/recheck | Refresh purchases, choose another funding option, or turn off pass use if a free slot exists |
 | `P0003` | Participant capacity reached | Explain that the poll is full; an existing membership/capability retry still succeeds |
