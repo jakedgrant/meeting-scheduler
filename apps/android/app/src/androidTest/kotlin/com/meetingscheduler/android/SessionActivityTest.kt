@@ -19,25 +19,26 @@ class SessionActivityTest {
         val context = instrumentation.targetContext
         lateinit var auth: AuthService
         lateinit var attempt: String
+        lateinit var obsolete: String
         val launchIntent = Intent(context, MainActivity::class.java)
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 auth = (activity.application as MeetingSchedulerApplication).container.authService
                 assertFalse(auth.isAuthenticated)
-                val obsolete = auth.callbackRouter.beginFlow()
+                obsolete = auth.callbackRouter.beginFlow()
                 attempt = auth.callbackRouter.beginFlow()
-                activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse(authRedirectUrl(obsolete) + "&error=access_denied")))
-            }
-            instrumentation.waitForIdleSync()
-            scenario.onActivity {
-                assertNull(auth.callbackError)
-                assertEquals(attempt, auth.callbackRouter.pendingAttemptId)
-                auth.callbackRouter.route(authRedirectUrl(attempt) + "&code=")
             }
             scenario.recreate()
             scenario.onActivity { activity ->
                 assertSame(auth, (activity.application as MeetingSchedulerApplication).container.authService)
+                activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse(authRedirectUrl(obsolete) + "&error=access_denied")))
+            }
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                assertNull(auth.callbackError)
+                assertEquals(attempt, auth.callbackRouter.pendingAttemptId)
+                auth.callbackRouter.route(authRedirectUrl(attempt) + "&code=")
                 activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse("meetingscheduler://calendar/callback?error=access_denied")))
                 assertTrue(auth.callbackError!!.contains("could not be completed"))
                 activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse("meetingscheduler://auth/other?error=access_denied")))
