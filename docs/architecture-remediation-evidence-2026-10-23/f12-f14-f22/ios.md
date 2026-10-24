@@ -1,6 +1,8 @@
 # iOS account/session isolation evidence
 
-Source: `8cf58a12c516d5816dbc2872fe4a46a7a66ea2f3`, after `2f2bf8200e8b088875f361b94be0e04f8e1121a9` and `1385e1afb1b2cc92dc0c844f6fd6e3f4848ddaba`. Tests finished October 24, 2026 at 13:53:56 UTC. This tranche preserves the merged SwiftData/account-cache, availability command, creation envelope, and backend billing contracts. It changes no database schema, hosted configuration, or dependency lockfile.
+Latest verified source: `ed8c8a4af92cdff40c6c7fd615b390a9a96452d9`: **109 tests passed**, package and tracked-wrapper builds passed. The callback follow-up below records exact commands, results and cleanup. Earlier evidence remains historical.
+
+Initial verified source: `8cf58a12c516d5816dbc2872fe4a46a7a66ea2f3`, after `2f2bf8200e8b088875f361b94be0e04f8e1121a9` and `1385e1afb1b2cc92dc0c844f6fd6e3f4848ddaba`. Tests finished October 24, 2026 at 13:53:56 UTC. This tranche preserves the merged SwiftData/account-cache, availability command, creation envelope, and backend billing contracts. It changes no database schema, hosted configuration, or dependency lockfile.
 
 ## What changed
 
@@ -18,7 +20,7 @@ RevenueCat identity changes use one ordered worker and reconcile to the latest c
 
 Apple Calendar preference keys now include the account UUID. Signed-out state reads no account preference, and an old permission completion cannot enable B's calendar. Google connection, conflict, error, and loading results retain generation checks. Availability recovery is held in an account-and-poll registry across screen recreation and account changes during the process; a lost reply restores the exact request UUID, payload, and expected version. The original file-backed creation envelope remains unchanged and survives process restart. No cache provider or creation persistence system was replaced.
 
-## Final verification
+## Initial verification (8cf58a1)
 
 Xcode 27.1 (`27A9269`), Swift 6.4, Supabase Swift 2.39.0, RevenueCat 5.97.0. Dependencies were copied into this stream's isolated package directory. Both committed lockfiles are unchanged, and generated-workspace package revisions match `apps/mobile/Package.resolved`.
 
@@ -68,3 +70,55 @@ The initial reserved simulator `0EC9E5B6-47CE-4D21-A938-3C00075E1D02` was releas
 These are simulator service/editor tests, production SDK transport tests using ephemeral URLSession/URLProtocol with `.invalid` hosts, and wrapper compilation. The wrapper was not launched with real provider configuration. No hosted allowlist, Apple/Google sign-in, RevenueCat dashboard identity, sandbox purchase, physical-device EventKit prompt, or signed-in UI journey was verified. Availability's new registry preserves recovery during the process; it does not add disk-backed availability drafts. Creation retains its existing durable recovery behavior.
 
 Before beta release, an owner with an approved environment/account should verify Apple and Google sign-in plus magic links on cold/warm iOS launches, logout/reauthentication during offline and slow provider work, account-owned calendar choices, and unresolved creation recovery without another pass. The RevenueCat customer page should show the confirmed Supabase UUID for each account, and sandbox purchase/restore should remain attached to the account that began it. Existing redirect/provider settings are documented in the calendar and platform configuration sources; this work did not change or verify hosted configuration. The coordinator owns the separate independent review and final combined-tree/CI evidence.
+
+
+## Callback correlation follow-up: final verification
+
+Source commits `5c65fc2f42b2233fb1254513286c7362089b7b65` and `ed8c8a4af92cdff40c6c7fd615b390a9a96452d9` close an additional callback receipt gap found during coordinator review. A link received after a newer sign-in began previously lacked a correlation value, so it could consume the newer intent before SDK validation. OTP and Google browser redirects now carry `?attempt=<UUID>`. Exact URI/attempt validation happens before consuming the persisted intent or calling the SDK. A mismatched URL returned to the current browser also preserves that browser's intent so its genuine link can recover through app routing.
+
+The adapter tracks the active originating attempt in its atomic storage fence. Obsolete SDK initiation cannot rotate or remove a newer PKCE verifier during an executor hop, even when both attempts are signed out or belong to the same account. Old transport successes, failures and cleanup cannot finish another attempt. Browser OAuth uses the pinned SDK's supported custom `launchFlow` closure with an application-owned, cancellable `ASWebAuthenticationSession`. Calendar uses the same browser ownership utility with its existing route/error behavior. PKCE exchange and server validation remain in the SDK.
+
+Starting native Apple sign-in also supersedes older email/browser intents before suspension. Its controller and generation checks remain, while credential exchange carries the captured revision and attempt UUID. The native authorization boundary is injectable, allowing production-service tests to exercise actual SDK ID-token requests without opening Apple UI. Disposing an already-signed-out auth service now invalidates pending attempts and cancels its browser unconditionally; it does not rely on an account change to trigger cancellation.
+
+Tests on exact source `ed8c8a4af92cdff40c6c7fd615b390a9a96452d9` finished October 24, 2026 at 18:31:23 UTC:
+
+- Package `build-for-testing`: passed, 10.681 seconds.
+- Package `test-without-building`: **109 tests passed, zero failures**, 9.232 seconds including Xcode orchestration.
+- Tracked app wrapper, generic simulator destination, signing disabled: passed, 11.032 seconds.
+- `git diff --check`: passed. Both tracked lockfiles remain unchanged from `48f48b4`; generated-workspace dependency identity/revision maps match the committed package lock.
+
+The final count is 23 persistence-provider, nine poll-service lifecycle, twelve availability-editor, ten availability transport, eleven creation-editor, six creation transport, fifteen auth/provider lifecycle, twenty-two session/SDK transport, and one existing placeholder test. All 102 previous tests remain. The seven added transport tests cover: old links after a newer account/signed-out OTP initiation, before and after delayed initiation success/failure; an obsolete initiation paused before SDK verifier rotation; superseded browser completion; an old URL delivered into the current browser followed by its genuine callback; signed-out disposal during OTP/browser/PKCE work with delayed success/failure; Apple initiation superseding old email work; and late Apple ID-token success/failure after a newer email intent. The cold-restoration test additionally rejects missing, malformed, duplicate and implicit callback parameters before a genuine callback succeeds. An intermediate exact `5c65fc2` run passed all 107 tests and wrapper compilation; the 109-test result supersedes it after the Apple coverage/fix.
+
+Commands (`repo=/private/tmp/meeting-scheduler-session-ios`):
+
+```bash
+xcodebuild -workspace "$repo/apps/mobile/.swiftpm/xcode/package.xcworkspace" \
+  -scheme MeetingScheduler-Package -configuration Debug \
+  -derivedDataPath /private/tmp/meeting-scheduler-session-ios-derived \
+  -clonedSourcePackagesDirPath /private/tmp/meeting-scheduler-session-ios-packages \
+  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO \
+  -parallel-testing-enabled NO build-for-testing
+
+xcodebuild -workspace "$repo/apps/mobile/.swiftpm/xcode/package.xcworkspace" \
+  -scheme MeetingScheduler-Package -configuration Debug \
+  -derivedDataPath /private/tmp/meeting-scheduler-session-ios-derived \
+  -clonedSourcePackagesDirPath /private/tmp/meeting-scheduler-session-ios-packages \
+  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+  -destination 'platform=iOS Simulator,id=4AB7E492-E478-4B73-855B-3A1349DF677A' \
+  CODE_SIGNING_ALLOWED=NO -parallel-testing-enabled NO -only-testing:MeetingSchedulerTests \
+  -resultBundlePath /private/tmp/session-ios-ed8c8a4-tests.xcresult test-without-building
+
+xcodebuild -project "$repo/apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj" \
+  -scheme MeetingScheduler -configuration Debug \
+  -derivedDataPath /private/tmp/meeting-scheduler-session-ios-wrapper-derived \
+  -clonedSourcePackagesDirPath /private/tmp/meeting-scheduler-session-ios-packages \
+  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
+```
+
+Logs: `/private/tmp/session-ios-final-correlation-build.log`, `/private/tmp/session-ios-ed8c8a4-tests.log`, `/private/tmp/session-ios-ed8c8a4-wrapper.log`; result bundle: `/private/tmp/session-ios-ed8c8a4-tests.xcresult`.
+
+The fresh dedicated iPhone 17 Pro / iOS 27.0 simulator `4AB7E492-E478-4B73-855B-3A1349DF677A` was created at 18:27:22 UTC under a new 30-minute reservation. Shutdown and deletion completed at 18:31:49 UTC, both exited zero, and the subsequent inventory confirmed absence. Only deterministic package tests ran on it. The tracked wrapper was compiled without launch. No existing device, live provider account, local server or hosted service was used.
+
+[Native redirect configuration](../../../apps/mobile/README.md) documents the exact Supabase allowlist pattern `meetingscheduler://auth/callback\?attempt=*`, normal emitted URL, Google upstream redirect, and email-template query preservation. An approved owner must configure/verify these external settings and test real cold/warm Google/email/Apple delivery. Query preservation and hosted allowlist acceptance remain unverified. This follow-up changes no hosted configuration, schema, billing/command contract or durable creation persistence. The coordinator owns final combined-tree independent review and CI.
