@@ -20,7 +20,9 @@ struct CreatePollView: View {
     @State var isAllDay = false
     @State var useDateRange = false
     @State var timeOptions: [TimeOption] = [TimeOption()]
-    @State var isLoading = false
+    @State private var editor = PollCreationEditor()
+    @State private var useEventPass = false
+    private var isLoading: Bool { editor.isSubmitting }
     @State var errorMessage: String?
 
     // Date range fields
@@ -36,7 +38,11 @@ struct CreatePollView: View {
         NavigationStack {
             Form {
                 pollDetailsSection
+                    .disabled(isLoading || editor.mustResolvePending)
                 timeOptionsSection
+                    .disabled(isLoading || editor.mustResolvePending)
+                eventPassSection
+                    .disabled(isLoading || editor.mustResolvePending)
                 errorSection
                 createPollButtonSection
             }
@@ -53,6 +59,10 @@ struct CreatePollView: View {
                 }
             }
             .interactiveDismissDisabled(isLoading)
+        }
+        .task(id: AuthService.shared.currentUserId) {
+            editor.selectAccount(AuthService.shared.currentUserId)
+            restoreDraft(editor.pending?.payload)
         }
         .onAppear {
             UIDatePicker.appearance().minuteInterval = 15
@@ -119,7 +129,7 @@ struct CreatePollView: View {
 
     @ViewBuilder
     private var errorSection: some View {
-        if let error = errorMessage {
+        if let error = errorMessage ?? editor.errorMessage {
             Section {
                 Text(error)
                     .foregroundStyle(.red)
@@ -135,13 +145,21 @@ struct CreatePollView: View {
                     if isLoading {
                         ProgressView()
                     } else {
-                        Text("Create Poll")
+                        Text(editor.mustResolvePending ? "Retry Creation" : "Create Poll")
                             .fontWeight(.semibold)
                     }
                     Spacer()
                 }
             }
             .disabled(title.isEmpty || isLoading)
+        }
+    }
+
+    private var eventPassSection: some View {
+        Section {
+            Toggle("Use Event Pass", isOn: $useEventPass)
+        } footer: {
+            Text("Use the oldest available event pass for this poll. An active Pro or Team subscription takes priority and keeps your pass. Your plan and participant limit are checked when the poll is created.")
         }
     }
 
@@ -276,44 +294,34 @@ struct CreatePollView: View {
     // MARK: - Actions
 
     private func createPoll() {
-        isLoading = true
         errorMessage = nil
-
+        let payload = editor.mustResolvePending ? editor.pending?.payload : PollCreationPayload(
+            title: title, description: description.isEmpty ? nil : description,
+            location: location.isEmpty ? nil : location, timezone: TimeZone.current.identifier,
+            closesAt: hasDueDate ? dueDate : nil,
+            timeOptions: buildTimeOptions().map { PollCreationOption(startTime: $0.start, endTime: $0.end, isAllDay: $0.isAllDay) },
+            useEventPass: useEventPass
+        )
+        guard let payload else { return }
+        let identity = AuthService.shared.currentUserId
         Task {
-            do {
-                let poll = try await pollService.createPoll(
-                    title: title,
-                    description: description.isEmpty ? nil : description,
-                    location: location.isEmpty ? nil : location,
-                    timezone: TimeZone.current.identifier,
-                    closesAt: hasDueDate ? dueDate : nil
-                )
-
-                let options = buildTimeOptions()
-
-                if !isAllDay {
-                    for option in options {
-                        if option.end <= option.start {
-                            await MainActor.run {
-                                errorMessage = "End time must be after start time for all time options"
-                                isLoading = false
-                            }
-                            return
-                        }
-                    }
-                }
-
-                _ = try await pollService.addTimeOptions(pollId: poll.id, options: options)
-
-                await MainActor.run {
-                    dismiss()
-                }
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-
-            isLoading = false
+            guard AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
+            await editor.submit(payload, using: pollService)
+            guard AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
+            if editor.result != nil { dismiss() }
         }
+    }
+
+    private func restoreDraft(_ payload: PollCreationPayload?) {
+        title = payload?.title ?? ""
+        description = payload?.description ?? ""
+        location = payload?.location ?? ""
+        dueDate = payload?.closesAt
+        hasDueDate = dueDate != nil
+        useEventPass = payload?.useEventPass ?? false
+        isAllDay = payload?.timeOptions.first?.isAllDay ?? false
+        timeOptions = payload?.timeOptions.map { TimeOption(date: $0.startTime, startTime: $0.startTime, endTime: $0.endTime) } ?? [TimeOption()]
+        errorMessage = nil
     }
 
     private func buildTimeOptions() -> [(start: Date, end: Date, isAllDay: Bool)] {

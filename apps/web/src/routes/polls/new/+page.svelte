@@ -1,7 +1,12 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user } from '$lib/stores/auth';
-	import { createPoll, addTimeOptions } from '$lib/stores/polls';
+	import { createPoll } from '$lib/stores/polls';
+	import { createPollCreation } from '$lib/poll-creation';
+	const creation = createPollCreation({ create: createPoll });
+	onDestroy(() => creation.invalidate());
+	$effect(() => { creation.setOwner($user?.id ?? null); });
 
 	// Redirect if not authenticated
 	$effect(() => {
@@ -10,26 +15,17 @@
 		}
 	});
 
-	let title = $state('');
-	let description = $state('');
-	let location = $state('');
-	let dueDate = $state('');
-	let isAllDay = $state(false);
+	let title = $derived($creation.draft.title);
+	let description = $derived($creation.draft.description);
+	let location = $derived($creation.draft.location);
+	let dueDate = $derived($creation.draft.dueDate);
+	let isAllDay = $derived($creation.draft.isAllDay);
+	let timeOptions = $derived($creation.draft.timeOptions);
 	let useDateRange = $state(false);
-	let loading = $state(false);
+	let loading = $derived($creation.saving);
+	let locked = $derived(loading || $creation.uncertain || $creation.recoveryRequired);
 	let error = $state('');
-
-	// Time options
-	interface TimeOption {
-		id: string;
-		date: string;
-		startTime: string;
-		endTime: string;
-	}
-
-	let timeOptions = $state<TimeOption[]>([
-		{ id: crypto.randomUUID(), date: '', startTime: '09:00', endTime: '10:00' }
-	]);
+	type TimeOption = typeof timeOptions[number];
 
 	// Date range fields
 	let rangeStartDate = $state('');
@@ -38,15 +34,15 @@
 	let rangeEndTime = $state('10:00');
 
 	function addTimeOption() {
-		timeOptions = [
+		creation.edit({ timeOptions: [
 			...timeOptions,
 			{ id: crypto.randomUUID(), date: '', startTime: '09:00', endTime: '10:00' }
-		];
+		] });
 	}
 
 	function removeTimeOption(id: string) {
 		if (timeOptions.length > 1) {
-			timeOptions = timeOptions.filter((opt) => opt.id !== id);
+			creation.edit({ timeOptions: timeOptions.filter((opt) => opt.id !== id) });
 		}
 	}
 
@@ -85,11 +81,11 @@
 		}
 
 		// Add all new options to the list and sort chronologically
-		timeOptions = [...timeOptions, ...newOptions].sort((a, b) => {
+		creation.edit({ timeOptions: [...timeOptions.filter(option => option.date), ...newOptions].sort((a, b) => {
 			const dateA = new Date(`${a.date}T${a.startTime}`);
 			const dateB = new Date(`${b.date}T${b.startTime}`);
 			return dateA.getTime() - dateB.getTime();
-		});
+		}) });
 
 		// Reset the range fields
 		rangeStartDate = '';
@@ -100,7 +96,7 @@
 	}
 
 	function updateTimeOption(id: string, field: keyof TimeOption, value: string) {
-		timeOptions = timeOptions.map((opt) => {
+		creation.edit({ timeOptions: timeOptions.map((opt) => {
 			if (opt.id !== id) return opt;
 
 			const updated = { ...opt, [field]: value };
@@ -111,7 +107,7 @@
 			}
 
 			return updated;
-		});
+		}) });
 	}
 
 	// Helper function to check if end time is before or equal to start time
@@ -129,59 +125,9 @@
 	}
 
 	async function handleSubmit() {
-		if (!title.trim()) {
-			error = 'Please enter a poll title';
-			return;
-		}
-
-		const validTimeOptions = timeOptions.filter((opt) => opt.date && opt.startTime && opt.endTime);
-		if (validTimeOptions.length === 0) {
-			error = 'Please add at least one time option';
-			return;
-		}
-
-		// Check for invalid time ranges
-		const invalidOption = validTimeOptions.find((opt) =>
-			isInvalidTimeRange(opt.startTime, opt.endTime)
-		);
-		if (invalidOption) {
-			error = 'End time must be after start time for all time options';
-			return;
-		}
-
-		loading = true;
 		error = '';
-
-		try {
-			// Create the poll
-			const poll = await createPoll({
-				title: title.trim(),
-				description: description.trim() || undefined,
-				location: location.trim() || undefined,
-				closesAt: dueDate ? new Date(dueDate).toISOString() : undefined
-			});
-
-			if (!poll) {
-				throw new Error('Failed to create poll');
-			}
-
-			// Add time options
-			const formattedOptions = validTimeOptions.map((opt) => ({
-				start_time: new Date(`${opt.date}T${isAllDay ? '00:00' : opt.startTime}`).toISOString(),
-				end_time: new Date(`${opt.date}T${isAllDay ? '23:59' : opt.endTime}`).toISOString(),
-				is_all_day: isAllDay
-			}));
-
-			await addTimeOptions(poll.id, formattedOptions);
-
-			// Redirect to the poll detail page
-			goto(`/polls/${poll.id}`);
-		} catch (err) {
-			console.error('Failed to create poll:', err);
-			error = err instanceof Error ? err.message : 'Failed to create poll';
-		} finally {
-			loading = false;
-		}
+		const result = await creation.submit();
+		if (result) goto(`/polls/${result.poll.id}`);
 	}
 
 	// Generate next 14 days for date picker
@@ -253,8 +199,8 @@
 	</header>
 
 	<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-		{#if error}
-			<div class="error">{error}</div>
+		{#if error || $creation.error}
+			<div class="error" role="alert">{error || $creation.error}</div>
 		{/if}
 
 		<div class="form-section">
@@ -265,9 +211,10 @@
 				<input
 					id="title"
 					type="text"
-					bind:value={title}
+					value={title}
+					oninput={(event) => creation.edit({ title: event.currentTarget.value })}
 					placeholder="e.g., Team Sync Meeting"
-					disabled={loading}
+					disabled={locked}
 				/>
 			</div>
 
@@ -275,10 +222,11 @@
 				<label for="description">Description</label>
 				<textarea
 					id="description"
-					bind:value={description}
+					value={description}
+					oninput={(event) => creation.edit({ description: event.currentTarget.value })}
 					placeholder="What's this meeting about?"
 					rows="3"
-					disabled={loading}
+					disabled={locked}
 				></textarea>
 			</div>
 
@@ -287,9 +235,10 @@
 				<input
 					id="location"
 					type="text"
-					bind:value={location}
+					value={location}
+					oninput={(event) => creation.edit({ location: event.currentTarget.value })}
 					placeholder="e.g., Zoom, Conference Room A"
-					disabled={loading}
+					disabled={locked}
 				/>
 			</div>
 
@@ -298,9 +247,10 @@
 				<input
 					id="due-date"
 					type="date"
-					bind:value={dueDate}
+					value={dueDate}
+					oninput={(event) => creation.edit({ dueDate: event.currentTarget.value })}
 					min={new Date().toISOString().split('T')[0]}
-					disabled={loading}
+					disabled={locked}
 				/>
 				<p class="help-text">Set a deadline for participants to respond by</p>
 			</div>
@@ -309,8 +259,22 @@
 				<label>
 					<input
 						type="checkbox"
-						bind:checked={isAllDay}
-						disabled={loading}
+						checked={$creation.draft.useEventPass}
+						onchange={(event) => creation.edit({ useEventPass: event.currentTarget.checked })}
+						disabled={locked}
+					/>
+					Use an event pass for this poll
+				</label>
+				<p class="help-text">Use your oldest available pass for this poll. If your subscription covers the poll, your pass is kept.</p>
+			</div>
+
+			<div class="form-group checkbox-group">
+				<label>
+					<input
+						type="checkbox"
+						checked={isAllDay}
+						onchange={(event) => creation.edit({ isAllDay: event.currentTarget.checked })}
+						disabled={locked}
 					/>
 					All-day events
 				</label>
@@ -327,7 +291,7 @@
 					<input
 						type="checkbox"
 						bind:checked={useDateRange}
-						disabled={loading}
+						disabled={locked}
 					/>
 					Use date range selector
 				</label>
@@ -344,7 +308,7 @@
 								<select
 									id="range-start-date"
 									bind:value={rangeStartDate}
-									disabled={loading}
+									disabled={locked}
 								>
 									<option value="">Select start date</option>
 									{#each dateOptions as dateOpt}
@@ -357,7 +321,7 @@
 								<select
 									id="range-end-date"
 									bind:value={rangeEndDate}
-									disabled={loading}
+									disabled={locked}
 								>
 									<option value="">Select end date</option>
 									{#each dateOptions as dateOpt}
@@ -376,7 +340,7 @@
 											type="button"
 											class="spinner-btn"
 											onclick={() => { rangeStartTime = incrementTime(rangeStartTime, 15); }}
-											disabled={loading}
+											disabled={locked}
 											title="Increase start time"
 										>
 											&#9650;
@@ -384,7 +348,7 @@
 										<select
 											id="range-start-time"
 											bind:value={rangeStartTime}
-											disabled={loading}
+											disabled={locked}
 											class="time-select"
 										>
 											{#each timePickerOptions as timeOpt}
@@ -395,7 +359,7 @@
 											type="button"
 											class="spinner-btn"
 											onclick={() => { rangeStartTime = incrementTime(rangeStartTime, -15); }}
-											disabled={loading}
+											disabled={locked}
 											title="Decrease start time"
 										>
 											&#9660;
@@ -409,7 +373,7 @@
 											type="button"
 											class="spinner-btn"
 											onclick={() => { rangeEndTime = incrementTime(rangeEndTime, 15); }}
-											disabled={loading}
+											disabled={locked}
 											title="Increase end time"
 										>
 											&#9650;
@@ -417,7 +381,7 @@
 										<select
 											id="range-end-time"
 											bind:value={rangeEndTime}
-											disabled={loading}
+											disabled={locked}
 											class="time-select"
 										>
 											{#each getValidEndTimeOptions(rangeStartTime) as timeOpt}
@@ -428,7 +392,7 @@
 											type="button"
 											class="spinner-btn"
 											onclick={() => { rangeEndTime = incrementTime(rangeEndTime, -15); }}
-											disabled={loading}
+											disabled={locked}
 											title="Decrease end time"
 										>
 											&#9660;
@@ -438,7 +402,7 @@
 							</div>
 						{/if}
 
-						<button type="button" class="btn primary add-range-btn" onclick={addDateRange} disabled={loading}>
+						<button type="button" class="btn primary add-range-btn" onclick={addDateRange} disabled={locked}>
 							Add Date Range
 						</button>
 					</div>
@@ -451,7 +415,7 @@
 						<select
 							value={option.date}
 							onchange={(e) => updateTimeOption(option.id, 'date', e.currentTarget.value)}
-							disabled={loading}
+							disabled={locked}
 						>
 							<option value="">Select date</option>
 							{#each dateOptions as dateOpt}
@@ -465,7 +429,7 @@
 									type="button"
 									class="spinner-btn"
 									onclick={() => adjustTime(option.id, 'startTime', 'up')}
-									disabled={loading}
+									disabled={locked}
 									title="Increase start time"
 								>
 									&#9650;
@@ -473,7 +437,7 @@
 								<select
 									value={option.startTime}
 									onchange={(e) => updateTimeOption(option.id, 'startTime', e.currentTarget.value)}
-									disabled={loading}
+									disabled={locked}
 									class="time-select"
 								>
 									{#each timePickerOptions as timeOpt}
@@ -484,7 +448,7 @@
 									type="button"
 									class="spinner-btn"
 									onclick={() => adjustTime(option.id, 'startTime', 'down')}
-									disabled={loading}
+									disabled={locked}
 									title="Decrease start time"
 								>
 									&#9660;
@@ -498,7 +462,7 @@
 									type="button"
 									class="spinner-btn"
 									onclick={() => adjustTime(option.id, 'endTime', 'up')}
-									disabled={loading}
+									disabled={locked}
 									title="Increase end time"
 								>
 									&#9650;
@@ -506,7 +470,7 @@
 								<select
 									value={option.endTime}
 									onchange={(e) => updateTimeOption(option.id, 'endTime', e.currentTarget.value)}
-									disabled={loading}
+									disabled={locked}
 									class="time-select"
 								>
 									{#each getValidEndTimeOptions(option.startTime) as timeOpt}
@@ -517,7 +481,7 @@
 									type="button"
 									class="spinner-btn"
 									onclick={() => adjustTime(option.id, 'endTime', 'down')}
-									disabled={loading}
+									disabled={locked}
 									title="Decrease end time"
 								>
 									&#9660;
@@ -529,7 +493,7 @@
 							type="button"
 							class="remove-btn"
 							onclick={() => removeTimeOption(option.id)}
-							disabled={loading || timeOptions.length <= 1}
+							disabled={locked || timeOptions.length <= 1}
 							title="Remove time option"
 						>
 							&times;
@@ -538,15 +502,15 @@
 				{/each}
 			</div>
 
-			<button type="button" class="add-time-btn" onclick={addTimeOption} disabled={loading}>
+			<button type="button" class="add-time-btn" onclick={addTimeOption} disabled={locked}>
 				+ Add another time
 			</button>
 		</div>
 
 		<div class="form-actions">
 			<a href="/polls" class="btn secondary">Cancel</a>
-			<button type="submit" class="btn primary" disabled={loading}>
-				{loading ? 'Creating...' : 'Create Poll'}
+			<button type="submit" class="btn primary" disabled={loading || !$creation.ownerId || $creation.recoveryRequired}>
+				{loading ? 'Creating...' : $creation.error ? 'Retry Create Poll' : 'Create Poll'}
 			</button>
 		</div>
 	</form>

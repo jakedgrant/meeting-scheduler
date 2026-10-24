@@ -85,6 +85,11 @@ test('F06/F10 response invariants, transactional saves and finalization on Postg
     await db.exec(await readFile(new URL(name, directory), 'utf8'));
   }
   assert.ok(replayed, 'F06/F10 migration must be replayed');
+  // F05 serializes/reactivation limits. This owner deliberately has several
+  // open fixture polls, so give the fixture the canonical paid entitlement.
+  await db.query(`INSERT INTO private.billing_entitlements
+    (user_id,resource_id,entitlement,store,purchased_at,valid_until)
+    VALUES($1,'response-fixture','pro_access','PROMOTIONAL',now(),now()+interval '1 day')`, [owner]);
 
   const asRole = async (role, userId, action) => {
     await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)", [userId ?? '']);

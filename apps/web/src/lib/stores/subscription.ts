@@ -96,18 +96,3 @@ export async function purchase(pkg: Package): Promise<boolean> {
     throw err
   }
 }
-
-// Check limits based on subscription
-export function getMaxActivePolls(sub: Subscription | null): number {
-  if (!sub?.is_active) return 1
-  if (sub.entitlement === 'team_access') return Infinity
-  if (sub.entitlement === 'pro_access') return Infinity
-  return 1
-}
-
-export function getMaxParticipants(sub: Subscription | null): number {
-  if (!sub?.is_active) return 10
-  if (sub.entitlement === 'team_access') return 100
-  if (sub.entitlement === 'pro_access') return 50
-  return 10
-}

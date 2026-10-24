@@ -431,43 +431,44 @@ public final class PollService: PollServiceProtocol {
 
     // MARK: - Create Poll
 
-    public func createPoll(
-        title: String,
-        description: String?,
-        location: String?,
-        timezone: String = TimeZone.current.identifier,
-        closesAt: Date? = nil
-    ) async throws -> Poll {
+    public func createPoll(_ request: CreatePollRequest) async throws -> PollCreationResult {
         let generation = beginRequest()
-        guard let userId = accountId else {
-            throw PollError.notAuthenticated
+        guard let accountId else { throw PollCreationError.authentication }
+        do {
+            let result: PollCreationResult = try await supabase.rpc("create_poll", params: request).execute().value
+            guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
+            guard result.poll.creatorId == accountId,
+                  result.timeOptions.allSatisfy({ $0.pollId == result.poll.id }) else { throw PollCreationError.transport }
+            // Invalidate older reads so an empty/pre-creation list cannot erase the returned result.
+            listGeneration &+= 1
+            isLoading = false
+            invalidateDetail(result.poll.id)
+            try? persistence.saveListedPolls([result.poll])
+            try? persistence.saveTimeOptions(result.timeOptions, for: result.poll.id)
+            myPolls.removeAll { $0.id == result.poll.id }
+            createdPolls.removeAll { $0.id == result.poll.id }
+            myPolls.insert(result.poll, at: 0)
+            createdPolls.insert(result.poll, at: 0)
+            if let earliest = result.timeOptions.map(\.startTime).min(),
+               let latest = result.timeOptions.map(\.startTime).max() {
+                pollTimeRanges[result.poll.id] = (earliest, latest)
+                try? persistence.savePollTimeRange(earliest: earliest, latest: latest, for: result.poll.id)
+            }
+            return result
+        } catch {
+            guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
+            if let failure = error as? PollCreationError { throw failure }
+            guard let error = error as? PostgrestError else { throw PollCreationError.transport }
+            switch error.code {
+            case "42501": throw PollCreationError.authentication
+            case "P0001": throw PollCreationError.quota
+            case "P0002": throw PollCreationError.passUnavailable
+            case "22023", "23514": throw PollCreationError.invalidPayload
+            case "22000": throw PollCreationError.changedOperation
+            case "54000": throw PollCreationError.shareCodeUnavailable
+            default: throw PollCreationError.transport
+            }
         }
-
-        var newPoll: [String: AnyJSON] = [
-            "creator_id": .string(userId.uuidString),
-            "title": .string(title),
-            "description": description.map { .string($0) } ?? .null,
-            "location": location.map { .string($0) } ?? .null,
-            "timezone": .string(timezone),
-            "status": .string(PollStatus.active.rawValue)
-        ]
-
-        if let closesAt = closesAt {
-            newPoll["closes_at"] = .string(closesAt.ISO8601Format())
-        }
-
-        let response: Poll = try await supabase
-            .from("polls")
-            .insert(newPoll)
-            .select()
-            .single()
-            .execute()
-            .value
-
-        guard isCurrent(generation) else { throw CancellationError() }
-        try? persistence.saveListedPolls([response])
-        myPolls.insert(response, at: 0)
-        return response
     }
 
     // MARK: - Time Options
@@ -491,31 +492,6 @@ public final class PollService: PollServiceProtocol {
             print("Failed to load time options: \(error)")
             return (try? persistence.fetchTimeOptions(for: pollId)) ?? []
         }
-    }
-
-    public func addTimeOptions(pollId: UUID, options: [(start: Date, end: Date, isAllDay: Bool)]) async throws -> [PollTimeOption] {
-        let generation = beginRequest()
-        let formatter = ISO8601DateFormatter()
-
-        let insertData: [[String: AnyJSON]] = options.map { option in
-            [
-                "poll_id": .string(pollId.uuidString),
-                "start_time": .string(formatter.string(from: option.start)),
-                "end_time": .string(formatter.string(from: option.end)),
-                "is_all_day": .bool(option.isAllDay)
-            ]
-        }
-
-        let response: [PollTimeOption] = try await supabase
-            .from("poll_time_options")
-            .insert(insertData)
-            .select()
-            .execute()
-            .value
-
-        guard isCurrent(generation) else { throw CancellationError() }
-        invalidateDetail(pollId)
-        return response
     }
 
     // MARK: - Poll Status
@@ -565,12 +541,18 @@ public final class PollService: PollServiceProtocol {
     public func joinPoll(pollId: UUID, anonymousName: String? = nil) async throws -> PollParticipant {
         let generation = beginRequest()
         struct JoinResult: Decodable { let participant: PollParticipant; let created: Bool }
-        let result: JoinResult = try await supabase
-            .rpc("join_poll", params: ["poll_uuid": AnyJSON.string(pollId.uuidString)])
-            .execute().value
-        guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
-        invalidateDetail(pollId)
-        return result.participant
+        do {
+            let result: JoinResult = try await supabase
+                .rpc("join_poll", params: ["poll_uuid": AnyJSON.string(pollId.uuidString)])
+                .execute().value
+            guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
+            invalidateDetail(pollId)
+            return result.participant
+        } catch {
+            guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
+            if let error = error as? PostgrestError, error.code == "P0003" { throw PollError.capacityReached }
+            throw error
+        }
     }
 
     // MARK: - Availability Responses
@@ -598,42 +580,18 @@ public final class PollService: PollServiceProtocol {
         }
     }
 
-    // MARK: - Subscription Checks
 
-    public func canCreatePoll() async -> Bool {
-        let generation = beginRequest()
-        do {
-            let result: Bool = try await supabase
-                .rpc("can_create_poll")
-                .execute()
-                .value
-
-            guard isCurrent(generation) else { return false }
-            return result
-        } catch {
-            print("Failed to check can_create_poll: \(error)")
-            return false
-        }
-    }
-
-    public func countActivePolls() async -> Int {
-        let generation = beginRequest()
-        do {
-            let result: Int = try await supabase
-                .rpc("count_active_polls")
-                .execute()
-                .value
-
-            guard isCurrent(generation) else { return 0 }
-            return result
-        } catch {
-            print("Failed to count active polls: \(error)")
-            return 0
-        }
-    }
 }
 
-public enum PollError: Error {
+public enum PollError: Error, LocalizedError {
     case notAuthenticated
     case pollNotFound
+    case capacityReached
+    public var errorDescription: String? {
+        switch self {
+        case .notAuthenticated: "Sign in to continue."
+        case .pollNotFound: "This poll could not be found. Reload your polls and try again."
+        case .capacityReached: "This poll has reached its participant limit. Ask the organizer for help."
+        }
+    }
 }

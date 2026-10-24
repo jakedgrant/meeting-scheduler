@@ -1,0 +1,42 @@
+{
+  "entitlements": {
+    "pro_access": {
+      "features": [
+        "unlimited_polls",
+        "calendar_sync",
+        "increased_participants"
+      ],
+      "limits": {
+        "max_active_polls": -1,
+        "max_participants_per_poll": 50
+      }
+    },
+    "team_access": {
+      "features": [
+        "unlimited_polls",
+        "calendar_sync",
+        "increased_participants",
+        "team_workspace",
+        "analytics"
+      ],
+      "limits": {
+        "max_active_polls": -1,
+        "max_participants_per_poll": 100
+      }
+    }
+  },
+  "free_tier": {
+    "limits": {
+      "max_active_polls": 1,
+      "max_participants_per_poll": 10
+    }
+  },
+  "event_pass": {
+    "features": [
+      "single_premium_poll"
+    ],
+    "limits": {
+      "max_participants_per_poll": 50
+    }
+  }
+}

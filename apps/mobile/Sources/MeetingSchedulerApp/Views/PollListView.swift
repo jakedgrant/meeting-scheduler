@@ -25,7 +25,6 @@ struct PollListView: View {
     @Environment(\.pollService) var pollService
     @State var selectedFilter: PollFilter = .active
     @State var showCreatePoll = false
-    @State var showPaywall = false
     @State var showJoinByCode = false
     @State var joinCode = ""
     @State var joinError: String?
@@ -79,9 +78,6 @@ struct PollListView: View {
             }
             .sheet(isPresented: $showCreatePoll) {
                 CreatePollView()
-            }
-            .sheet(isPresented: $showPaywall) {
-                PaywallView()
             }
             .sheet(isPresented: $showJoinByCode) {
                 JoinByCodeSheet(
@@ -220,14 +216,9 @@ struct PollListView: View {
     }
 
     private func handleCreatePoll() {
-        Task {
-            let canCreate = await pollService.canCreatePoll()
-            if canCreate {
-                showCreatePoll = true
-            } else {
-                showPaywall = true
-            }
-        }
+        // The creation transaction authorizes quota and passes; a preflight can
+        // become stale or prevent a retained operation from being replayed.
+        showCreatePoll = true
     }
 
 }
