@@ -124,7 +124,7 @@ apps/android/gradlew -p apps/android --no-daemon --offline \
   :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
 ```
 
-Build succeeded in 19 seconds (73 tasks). XML results contain **64 tests, zero failures/errors/skips**. Log: `/private/tmp/session-final-android-build.log`. No emulator, server or provider was started. The earlier two emulator tests remain tied to the identical tested Android subtree in the source manifest.
+Build succeeded in 19 seconds (73 tasks). XML results contain **64 tests, zero failures/errors/skips**. Log: `/private/tmp/session-final-android-build.log`. No emulator, server or provider was started. The earlier two emulator tests belong to source `d60192c` and Android subtree `b98a5925631adeeb4bba902637afcbc3825a12ad`; the subsequent correction below supersedes that checkpoint.
 ## Independent-review corrections: logout ownership, dispatch and server lineage
 
 Final source **`c0bd8126d7ae9e59c2ebcc0055e20162688d26ed`** fixes all three Android findings from the independent review of the coordinator's combined `f3df14f` tree. The preceding evidence remains historical. The coordinator owns final combined-tree re-review and CI.
@@ -167,3 +167,5 @@ Result: **OK (3 tests)** in **2.034 seconds**, `/private/tmp/android-review-fina
 A separate correctly quoted process-cold script rejected an obsolete UUID without consuming the current marker (**COLD 959 ms**), then accepted the matching cancellation warm. A matching error-fragment callback restored after force-stop (**COLD 962 ms**) and consumed its persisted marker. Calendar routing stayed warm/separate; `/auth/other` failed OS resolution. Pending storage ended as `<map />`. Script and log: `/private/tmp/android-review-runtime-check.py`, `/private/tmp/android-review-final-cold-check.log`; UI/persistence captures use `/private/tmp/android-review-final-{stale-cold,current-warm,current-cold}-{ui,pending}.xml`.
 
 At **2026-10-24 19:19:06 UTC**, `adb -s emulator-5586 emu kill` returned OK and avdmanager deleted `session-android-review`. Subsequent checks found no listener on 5586/5587 and an empty AVD directory. The task-owned image/cache and evidence logs remain. No emulator, server, database or provider session remains reserved. Hosted redirect acceptance/query preservation and real Google/OTP/RevenueCat validation remain the documented owner actions; no hosted changes were made.
+
+The coordinator also replayed the integrated correction at `7ec897ad451980d15333e59752dd3d300c76fed0` with the isolated command above: **75 JVM tests, zero failures/errors/skips; both APK builds passed in 22 seconds** (73 tasks). Log: `/private/tmp/session-reviewed-android-build.log`. This run started no emulator or provider; the Android subtree matches `c0bd812` exactly.

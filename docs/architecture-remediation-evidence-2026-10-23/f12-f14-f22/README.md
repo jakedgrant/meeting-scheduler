@@ -40,6 +40,10 @@ Android source `a025ca5f80bee73ee26b7b762023325186a34495` and instrumentation `d
 
 The complete web follow-up `f82b7e21119f375aa63bc10f809aff91636459f3` integrates as `9926a43`: **137 tests pass**, type checking has zero errors/five existing warnings, and client/SSR build passes. [Web evidence](web.md) includes original-session logout, cold PKCE publication, cross-tab/disposal and current callback navigation. Native iOS remains at **109 passing tests** with wrapper compilation, as recorded above. All three platform sources match their exact tested commits; backend and shared product configuration remain byte-identical to verified main. The [source manifest](source-manifest.md) records hashes and comparison commands. Independent combined review and publication/CI follow this checkpoint; no merge or hosted change is authorized.
 
+## Independent-review correction checkpoint
+
+The independent review of `f3df14f` demonstrated three Android gaps: queued logout selected the replacement SDK credential, some direct table/device-calendar paths omitted their initiating credential, and fresh same-account authentication retained the old generation/callback ownership. Source `c0bd8126d7ae9e59c2ebcc0055e20162688d26ed` integrates as `6f57c00`, with evidence `5413ca9` integrated as `71555cd`. The source manifest now identifies its exact tested subtree. **75 JVM tests, both APK builds and three fresh offline emulator tests pass.** The fresh device was stopped/deleted at 19:19:06 UTC; all reservations are released. The [independent review record](review.md) clears combined source `7ec897a` with no remaining actionable findings and independently replays all 75 JVM tests. The coordinator also passes all 75 tests and both APK builds on that integrated source (22 seconds). Web remains at 137 tests/check/build and iOS at 109 tests/package/wrapper build; neither platform's source changed for these corrections.
+
 ## Runtime reservations
 
 | Runtime | Approval | Cleanup |
@@ -50,6 +54,7 @@ The complete web follow-up `f82b7e21119f375aa63bc10f809aff91636459f3` integrates
 | iOS continuation | Fresh iPhone 17 Pro / iOS 27.0, `91F67496-18FE-4FE4-B657-EA32376E131C`; package/SDK tests only, 40 minutes from creation at approximately 13:27 UTC; generic wrapper compile | Shut down/deleted at approximately 13:54 UTC; both commands exited zero and inventory confirmed absence |
 | iOS callback follow-up | Fresh iPhone 17 Pro / iOS 27.0, `4AB7E492-E478-4B73-855B-3A1349DF677A`; created 18:27:22 UTC under a 30-minute reservation, deterministic package/SDK tests and generic wrapper compile only | Shut down/deleted at 18:31:49 UTC; both commands exited zero and inventory confirmed absence |
 | Android callback follow-up | Fresh `session-android-attempt` AVD under `/private/tmp/session-android-attempt-avd`, ports 5584/5585 verified unused; created 18:43:07 UTC, 30-minute offline deterministic reservation | `emulator-5584` stopped and AVD deleted at 18:50:32 UTC; ports clear and task Gradle daemons stopped |
+| Android independent-review corrections | Fresh `session-android-review` AVD under `/private/tmp/session-android-review-avd`, unused ports 5586/5587; 30-minute offline reservation from 19:10:46 UTC | Stopped/deleted at 19:19:06 UTC; ports clear, AVD directory empty and task Gradle daemons stopped |
 | Web | In-process fixtures, type check and production build; no listening server | No server to stop |
 
 The first reservations expired during the interruption. At approximately 07:54 UTC October 24 the coordinator stopped the stalled task-owned Gradle jobs and named emulator, and shut down/deleted the named simulator. Existing user runtimes were left intact. Earlier runtime reservations and device IDs were not reused. Workers must request coordinator approval before any further simulator/emulator/local server/Supabase/Docker/existing-service use.
@@ -57,3 +62,7 @@ The first reservations expired during the interruption. At approximately 07:54 U
 ## Provider and hosted boundary
 
 No approved provider account/environment was supplied at implementation start. Source and deterministic validation proceed independently. Exact redirect/provider configuration and live owner actions are recorded in platform evidence. No merge, deployment, hosted allowlist change or real development/beta data mutation is authorized. F21/F16 dates/calendar and F19 → F18 → F20 reads/realtime remain queued.
+
+## Publication checkpoint
+
+Independent review is complete for combined source `7ec897ad451980d15333e59752dd3d300c76fed0`. Final local evidence is **137 web tests plus check/build, 109 iOS tests plus package/wrapper builds, 75 Android JVM tests plus both APK builds and three offline emulator tests**, 142 database checks, 38 offline Edge tests and seven entry-point checks. The [source manifest](source-manifest.md) maps those results to the final implementation. Current main was fetched again after the interruption at 23:57 UTC October 24 and remained `d51f45a`; #71's exact head ancestry still passes. All task-owned devices are deleted and no runtime reservation remains. PR publication/final CI follow; no merge or hosted action is included.

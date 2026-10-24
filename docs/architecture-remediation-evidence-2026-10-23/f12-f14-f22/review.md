@@ -13,3 +13,19 @@ A fresh reviewer inspected `f3df14f3328bfd051b51de61465e6d8c4b3ec78f` against ve
 The reviewer independently passed **137 web tests and 142 database checks**. Native path hashes and retained validation matched the tested sources. No additional actionable web/iOS or CI finding was identified. Backend/shared configuration and dependency locks were unchanged. No repository source was modified during review, and no shared runtime or provider was used.
 
 Probe artifacts are `/private/tmp/ReviewSessionProbe.java`, `/private/tmp/ReviewDispatchProbe.kt` and `/private/tmp/review-dispatch-probe.log`. They ran production Android code and the pinned SDK with in-process injected dependencies. These initial findings were sent to the Android owner for correction before publication. Final remediation and re-review are recorded below when complete.
+
+## Final independent re-review
+
+The reviewer cleared combined source **`7ec897ad451980d15333e59752dd3d300c76fed0`**: **no actionable findings remain**, and all three original findings are resolved. Android correction `c0bd812` integrates as `6f57c00`; its subtree is `198637e3840b3d9fa02493cf4a9161e5c58ace48`.
+
+Independent production-code probes now report:
+
+- Queued A logout retains B and revokes only A: `remaining=token-B; revoked=[Bearer token-A]`.
+- Direct poll reads retain A's captured credential with SDK B installed: `Authorization=[Bearer token-A]`.
+- Fresh same-account authentication advances generation `1 → 2` and invalidates the old callback. Same-lineage refresh and cold callback ownership pass the production SDK regressions.
+
+The reviewer independently replayed **75 JVM tests, all passing**. Log: `/private/tmp/independent-android-review-rerun-final.log`; corrected probes: `/private/tmp/review-dispatch-probe-final.log`. Initial manual classpath/working-directory errors were harness issues and are excluded from passing evidence. A disposal probe also passed: owned logout completed its original credential cleanup, and `jobs.toList().forEach` prevented completion callbacks from mutating the disposal iteration.
+
+`AccountPostgrest` supplies one captured Authorization value through the pinned SDK query implementation, shares existing transport/configuration, and creates no client, engine or listener. Its internal SDK boundary and upgrade check are documented. Web/iOS source and backend contracts did not change after the full review; those conclusions stand. The native build and three offline instrumentation results match the final evidence. No source edits or shared resources were used by the reviewer.
+
+Documentation-only publication commits may follow this source checkpoint. The source manifest identifies the exact reviewed/tested path trees. Hosted redirect acceptance/query preservation and real auth/calendar/RevenueCat journeys remain the documented owner checks. PR publication and final CI are separate delivery gates.
