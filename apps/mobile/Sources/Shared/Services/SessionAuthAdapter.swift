@@ -7,6 +7,10 @@ import Synchronization
 final class SessionAuthAdapter: Sendable {
     let auth: AuthClient
     private let storage: RevisionedAuthStorage
+    private let sessionKey: String
+    private let url: URL
+    private let key: String
+    private let fetch: AuthClient.FetchHandler
 
     init(
         url: URL, key: String, storage: any AuthLocalStorage = AuthClient.Configuration.defaultLocalStorage,
@@ -15,7 +19,11 @@ final class SessionAuthAdapter: Sendable {
     ) {
         let revisioned = RevisionedAuthStorage(storage)
         self.storage = revisioned
+        self.url = url
+        self.key = key
+        self.fetch = fetch
         let project = url.host?.split(separator: ".").first.map(String.init) ?? "scheduler"
+        self.sessionKey = "sb-\(project)-auth-token"
         auth = AuthClient(
             configuration: .init(
                 url: url.appendingPathComponent("auth/v1"),
@@ -38,6 +46,29 @@ final class SessionAuthAdapter: Sendable {
                     }
                     return result
                 }, autoRefreshToken: autoRefreshToken))
+    }
+
+    /// Revoke only the captured device session. Local cleanup is atomic and a
+    /// delayed remote completion has no authority over any newer SDK credentials.
+    func signOut(session: Session?, revision: UInt64) async throws {
+        do {
+            try AuthAttemptContext.$revision.withValue(revision) { try storage.remove(key: sessionKey) }
+        } catch is CancellationError {
+            // Another session already owns storage. Still revoke the original JWT.
+        }
+        guard let session else { return }
+        var components = URLComponents(url: url.appendingPathComponent("auth/v1/logout"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "scope", value: "local")]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "POST"
+        request.setValue(key, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer " + session.accessToken, forHTTPHeaderField: "Authorization")
+        let (_, response) = try await fetch(request)
+        guard let status = (response as? HTTPURLResponse)?.statusCode,
+            (200..<300).contains(status) || [401, 403, 404].contains(status)
+        else {
+            throw URLError(.badServerResponse)
+        }
     }
 
     /// Also reject refreshes suspended across app-owned expiry boundaries, which

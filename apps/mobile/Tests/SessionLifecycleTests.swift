@@ -137,6 +137,29 @@ final class SessionLifecycleTests: XCTestCase {
         service.dispose()
     }
 
+    func testBufferedAuthEventIsValidatedAgainAtControllerConsumption() async {
+        let a = UUID()
+        let b = UUID()
+        let initial = session(a)
+        var stored: Session? = initial
+        let (events, emit) = AsyncStream<(event: AuthChangeEvent, session: Session?)>.makeStream()
+        let service = AuthService(
+            persistence: InMemoryPersistenceProvider(),
+            dependencies: .init(
+                events: { events }, restore: { initial }, loadProfile: { self.profile($0) }, signOut: {},
+                accountChanged: { _ in }, refreshCalendar: {}, isStoredSession: { $0 == stored }), client: client())
+        await service.initialize()
+        XCTAssertEqual(service.currentUserId, a)
+        // Events passed the producer's validation earlier, then storage advanced.
+        stored = session(b)
+        emit.yield((.signedOut, nil))
+        emit.yield((.signedIn, session(a)))
+        emit.yield((.signedIn, stored))
+        await settle { service.currentUserId == b }
+        XCTAssertEqual(service.profile?.id == a, false)
+        service.dispose()
+    }
+
     func testSlowProfileDoesNotBlockProviderOrLaterAccountAndLateFailureCannotReturnA() async {
         let a = UUID()
         let b = UUID()

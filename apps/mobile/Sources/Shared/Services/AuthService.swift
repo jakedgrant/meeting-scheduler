@@ -54,7 +54,9 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         var sessionAccepted: @MainActor (Session?) -> Void = { _ in }
         var authRevision: @MainActor () -> UInt64? = { nil }
         var invalidateAuthAttempts: @MainActor () -> Void = {}
+        var signOutSession: (@MainActor (Session?, UInt64?) async throws -> Void)?
         var callbackIntents: AuthCallbackIntentStore?
+        var isStoredSession: @MainActor (Session?) -> Bool = { _ in true }
         var now: @MainActor () -> Date = { Date() }
         var waitForExpiry: @MainActor (TimeInterval) async throws -> Void = { seconds in
             try await Task.sleep(for: .seconds(seconds))
@@ -72,7 +74,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                                 // Rejected refresh storage can still cause the pinned
                                 // SDK to emit its old response. Only stored credentials
                                 // may become the application's current refresh session.
-                                if session != nil, session != auth.currentSession { continue }
+                                if session != auth.currentSession { continue }
                                 continuation.yield((event, session))
                             }
                             continuation.finish()
@@ -95,7 +97,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                     CalendarService.shared.accountDidChange(to: id)
                     PurchaseService.shared.resetAccountState(userId: id?.uuidString)
                 }, refreshCalendar: { await CalendarService.shared.refreshGoogleCalendarConnection() },
-                refreshProviderIdentity: { PurchaseService.shared.retryAccountIdentity() })
+                refreshProviderIdentity: { PurchaseService.shared.retryAccountIdentity() },
+                isStoredSession: { $0 == auth.currentSession })
         }
     }
 
@@ -107,6 +110,10 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         dependencies.sessionAccepted = { SupabaseService.shared.acceptSession($0) }
         dependencies.authRevision = { SupabaseService.shared.sessionAdapter.revision }
         dependencies.invalidateAuthAttempts = { SupabaseService.shared.sessionAdapter.accountDidChange() }
+        dependencies.signOutSession = { session, revision in
+            let adapter = SupabaseService.shared.sessionAdapter
+            try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
+        }
         dependencies.callbackIntents = AuthCallbackIntentStore(defaults: .standard)
         self.dependencies = dependencies
         self.persistence = AccountPersistence.shared
@@ -122,6 +129,10 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         dependencies.sessionAccepted = { SupabaseService.shared.acceptSession($0) }
         dependencies.authRevision = { SupabaseService.shared.sessionAdapter.revision }
         dependencies.invalidateAuthAttempts = { SupabaseService.shared.sessionAdapter.accountDidChange() }
+        dependencies.signOutSession = { session, revision in
+            let adapter = SupabaseService.shared.sessionAdapter
+            try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
+        }
         dependencies.callbackIntents = AuthCallbackIntentStore(defaults: .standard)
         self.dependencies = dependencies
         self.persistence = persistence
@@ -192,6 +203,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     private func handleAuthChange(event: AuthChangeEvent, session: Session?) {
+        guard dependencies.isStoredSession(session) else { return }
         if currentUserId != nil, currentUserId == session?.user.id,
             let previous = observedAuthRevision, let revision = dependencies.authRevision(), previous != revision
         {
@@ -340,12 +352,20 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     public func signOut() async throws {
+        let originalSession = currentSession
         dependencies.callbackIntents?.clear()
         callbackAttemptId = nil
         dependencies.invalidateAuthAttempts()
         applySession(nil)
         let generation = sessionGeneration
-        do { try await dependencies.signOut() } catch {
+        let revision = dependencies.authRevision()
+        do {
+            if let signOutSession = dependencies.signOutSession {
+                try await signOutSession(originalSession, revision)
+            } else {
+                try await AuthAttemptContext.$revision.withValue(revision) { try await dependencies.signOut() }
+            }
+        } catch {
             guard generation == sessionGeneration else { throw CancellationError() }
             throw error
         }

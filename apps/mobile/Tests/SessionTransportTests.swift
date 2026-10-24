@@ -31,9 +31,13 @@ private final class LifecycleURLProtocol: URLProtocol, @unchecked Sendable {
 
 final class LifecycleAuthStorage: AuthLocalStorage, Sendable {
     let values = Mutex<[String: Data]>([:])
+    let rejectRemoval = Mutex(false)
     func store(key: String, value: Data) throws { values.withLock { $0[key] = value } }
     func retrieve(key: String) throws -> Data? { values.withLock { $0[key] } }
-    func remove(key: String) throws { values.withLock { $0.removeValue(forKey: key) } }
+    func remove(key: String) throws {
+        if rejectRemoval.withLock({ $0 }) { throw URLError(.cannotRemoveFile) }
+        values.withLock { $0.removeValue(forKey: key) }
+    }
 }
 
 @MainActor
@@ -461,6 +465,58 @@ final class SessionTransportTests: XCTestCase {
         LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(b, token: "current-B"))
         await current.value
         XCTAssertEqual(adapter.auth.currentUser?.id, b)
+        service.dispose()
+    }
+
+    func testOwnedLogoutPreservesNewStorageAtRemoveGapAndRevokesOnlyCapturedLocalSession() async throws {
+        for fails in [false, true] {
+            let adapter = adapter()
+            let a = UUID()
+            let b = UUID()
+            try await signIn(a, auth: adapter.auth)
+            let original = adapter.auth.currentSession!
+            let revision = adapter.revision
+            try await signIn(b, auth: adapter.auth)  // new SDK write wins before old remove enters
+            let pending = Task { try await adapter.signOut(session: original, revision: revision) }
+            await settle { LifecycleURLProtocol.count(path: "/auth/v1/logout") == 1 }
+            let request = LifecycleURLProtocol.waiting.withLock { $0.first!.request }
+            XCTAssertEqual(request.url?.query, "scope=local")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer " + original.accessToken)
+            XCTAssertEqual(adapter.auth.currentUser?.id, b)
+            LifecycleURLProtocol.reply(path: "/auth/v1/logout", status: fails ? 400 : 204, data: Data())
+            _ = try? await pending.value
+            XCTAssertEqual(adapter.auth.currentUser?.id, b)
+        }
+    }
+
+    func testProductionSDKObserverRejectsSignedOutWhenSDKStorageStillBelongsToB() async throws {
+        LifecycleURLProtocol.waiting.withLock { $0 = [] }
+        let storage = LifecycleAuthStorage()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [LifecycleURLProtocol.self]
+        let sdk = SupabaseClient(
+            supabaseURL: URL(string: "https://session-transport.invalid")!, supabaseKey: "test-only",
+            options: .init(
+                auth: .init(storage: storage, autoRefreshToken: false),
+                global: .init(session: URLSession(configuration: configuration))))
+        let b = UUID()
+        try await signIn(b, client: sdk)
+        var dependencies = AuthService.Dependencies.live(client: sdk)
+        dependencies.accountChanged = { _ in }
+        dependencies.refreshCalendar = {}
+        dependencies.refreshProviderIdentity = {}
+        dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
+        let service = AuthService(persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk)
+        await service.initialize()
+        XCTAssertEqual(service.currentUserId, b)
+        storage.rejectRemoval.withLock { $0 = true }
+        let pending = Task { try await sdk.auth.signOut(scope: .local) }  // pinned SDK swallows remove error and emits nil
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/logout") == 1 }
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertEqual(service.currentUserId, b)
+        LifecycleURLProtocol.reply(path: "/auth/v1/logout", status: 204, data: Data())
+        try await pending.value
+        XCTAssertEqual(service.currentUserId, b)
         service.dispose()
     }
 

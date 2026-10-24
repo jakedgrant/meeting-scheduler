@@ -164,7 +164,7 @@ public final class PollService: PollServiceProtocol {
         requestCredentials: (@MainActor () -> AccountRequestCredentials?)? = nil
     ) {
         self.injectedClient = client
-        self.requestCredentials = requestCredentials ?? { client == nil ? SupabaseService.shared.requestCredentials : nil }
+        self.requestCredentials = requestCredentials ?? { nil }
         self.persistence = persistence
         self.currentUserId = currentUserId
         self.listLoader = listLoader
