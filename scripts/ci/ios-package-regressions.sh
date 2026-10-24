@@ -41,7 +41,8 @@ XML
 # package workspace as well. No wrapper project or dependency update is needed.
 cp "$package_dir/Package.resolved" "$workspace/xcshareddata/swiftpm/Package.resolved"
 verify_lockfile() {
-  git diff --exit-code -- apps/mobile/Package.resolved
+  git diff --exit-code -- apps/mobile/Package.resolved \
+    apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
   python3 - "$package_dir/Package.resolved" "$workspace/xcshareddata/swiftpm/Package.resolved" <<'PY'
 import json, pathlib, sys
 def revisions(path):
