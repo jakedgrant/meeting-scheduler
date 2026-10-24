@@ -16,7 +16,7 @@ The preserved backend at contract commit `483ca17` passed `npm run test:database
 
 ## Web integration checkpoint
 
-Web source/test commit `c5b6538e26f066515e2cdaf95db9ddc700181238` was integrated as `d15fad2`; evidence-only `00b6d59` was integrated as `c1d83fb`. The coordinator reran all 111 web tests on the integration tree (55 lifecycle/SDK plus 56 existing regressions), type checking (zero errors/five existing warnings) and production client/SSR build. [Platform evidence](web.md) records covered races and live-provider limits. [Integrated test output](web-results.txt).
+Web source/test commit `c5b6538e26f066515e2cdaf95db9ddc700181238` was integrated as `d15fad2`; evidence-only `00b6d59` was integrated as `c1d83fb`. The coordinator reran all 111 web tests on the integration tree (55 lifecycle/SDK plus 56 existing regressions), type checking (zero errors/five existing warnings) and production client/SSR build. [Platform evidence](web.md) records covered races and live-provider limits. [Integrated test output](web-results.txt). A subsequent coordinator dispatch follow-up (`b1e311a`, test follow-up `d0a7e82`) brings the current integrated count to **113** (57 lifecycle/SDK plus 56 existing). It prevents a command owned by A from waiting for SDK credentials and accidentally dispatching under B. Real SDK regressions cover both creation and calendar disconnect; the original creation path fails the new test. Type check and production build also pass.
 
 ## Runtime reservations
 
