@@ -74,7 +74,7 @@ The backend created those databases through a Node `pg` admin connection to `pos
 
 ## Resources, cleanup and prelaunch limits
 
-All implementation took place in isolated clones. The original checkout and untracked `.claude/worktrees/` were preserved. The initially created unused managed worktree was archived without changing the original checkout.
+All implementation took place in isolated clones. The original checkout and untracked `.claude/worktrees/` were preserved. Archive was requested for the initially created unused managed worktree; the app returned a queued cleanup operation. No implementation was written there, and the original checkout was not changed.
 
 The backend used only its reserved new PostgreSQL data/socket directory `/private/tmp/f05-f09-backend-pg`, Unix socket port 56519 with TCP disabled. It stayed idle during an account-usage interruption; on resumption `pg_ctl -m fast stop` reported `server stopped`, and that new directory alone was removed. The coordinator verified the directory no longer exists. Existing PostgreSQL binaries and services were not changed.
 
