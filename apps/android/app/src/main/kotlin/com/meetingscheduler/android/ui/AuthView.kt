@@ -226,6 +226,13 @@ fun AuthView(authService: AuthService) {
                 }
             }
 
+            TextButton(onClick = {
+                scope.launch {
+                    try { authService.signInWithGoogleBrowser() }
+                    catch (error: Exception) { if (error !is kotlinx.coroutines.CancellationException) errorMessage = "Browser sign-in could not be started." }
+                }
+            }, enabled = !isLoading) { Text("Sign in with Google in browser") }
+
             // Divider
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -271,7 +278,7 @@ fun AuthView(authService: AuthService) {
             }
 
             // Error Message
-            errorMessage?.let { error ->
+            (errorMessage ?: authService.callbackError)?.let { error ->
                 Text(
                     text = error,
                     color = MaterialTheme.colorScheme.error,

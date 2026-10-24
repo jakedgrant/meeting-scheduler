@@ -27,11 +27,13 @@ data class AvailabilitySnapshot(
     }
 }
 
+@Serializable
 data class AvailabilityDraft(
     val responses: Map<String, AvailabilityStatus>,
     val comment: String?,
 )
 
+@Serializable
 data class AvailabilitySaveRequest(
     val requestId: String,
     val draft: AvailabilityDraft,
@@ -39,14 +41,24 @@ data class AvailabilitySaveRequest(
 )
 
 /** Retains one logical save across transport failures. Only server results become saved state. */
-class AvailabilitySaveSession(private val newRequestId: () -> String = { UUID.randomUUID().toString() }) {
-    var snapshot: AvailabilitySnapshot? = null
+@Serializable
+data class AvailabilityRecovery(val snapshot: AvailabilitySnapshot?, val pending: AvailabilitySaveRequest?)
+
+class AvailabilitySaveSession(
+    initial: AvailabilityRecovery? = null,
+    private val persist: (AvailabilityRecovery) -> Unit = {},
+    private val newRequestId: () -> String = { UUID.randomUUID().toString() },
+) {
+    var snapshot: AvailabilitySnapshot? = initial?.snapshot
         private set
-    private var pending: AvailabilitySaveRequest? = null
+    private var pending: AvailabilitySaveRequest? = initial?.pending
+    val pendingDraft get() = pending?.draft
+    private fun saveRecovery() = persist(AvailabilityRecovery(snapshot, pending))
 
     fun acceptLoaded(value: AvailabilitySnapshot) {
         snapshot = value
         pending = null
+        saveRecovery()
     }
 
     suspend fun loadIfCurrent(
@@ -55,24 +67,27 @@ class AvailabilitySaveSession(private val newRequestId: () -> String = { UUID.ra
     ): AvailabilitySnapshot? {
         val value = load()
         if (!isCurrent()) return null
-        acceptLoaded(value)
-        return value
+        if (pending == null) acceptLoaded(value) // A restored retry retains its original expected version.
+        return snapshot
     }
 
     suspend fun save(
         draft: AvailabilityDraft,
+        isCurrent: () -> Boolean = { true },
         send: suspend (AvailabilitySaveRequest) -> AvailabilitySnapshot,
     ): AvailabilitySnapshot {
         val current = checkNotNull(snapshot) { "Load your saved availability before saving." }
         val request = pending?.takeIf { it.draft == draft }
             ?: AvailabilitySaveRequest(newRequestId(), draft.copy(responses = draft.responses.toMap()), current.version)
-                .also { pending = it }
+                .also { pending = it; saveRecovery() }
         val saved = send(request) // A thrown error keeps both the original snapshot and pending request.
+        if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Account changed")
         check(saved.participantId == current.participantId && saved.pollId == current.pollId) {
             "The save returned availability for a different participant."
         }
         snapshot = saved
         pending = null
+        saveRecovery()
         return saved
     }
 }

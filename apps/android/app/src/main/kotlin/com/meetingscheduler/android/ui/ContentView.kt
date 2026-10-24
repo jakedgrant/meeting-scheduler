@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.meetingscheduler.android.services.AuthService
@@ -20,19 +20,16 @@ fun ContentView(
     calendarService: CalendarService,
     purchaseService: PurchaseService?
 ) {
-    LaunchedEffect(authService.currentUser?.id) {
-        calendarService.resetGoogleCalendarState()
-        calendarService.refreshGoogleCalendarConnection()
-    }
-
     when {
         authService.isLoading -> LoadingView()
-        authService.isAuthenticated -> MainTabView(
-            authService = authService,
-            pollService = pollService,
-            calendarService = calendarService,
-            purchaseService = purchaseService
-        )
+        authService.isAuthenticated -> key(authService.identityGeneration) {
+            MainTabView(
+                authService = authService,
+                pollService = pollService,
+                calendarService = calendarService,
+                purchaseService = purchaseService
+            )
+        }
         else -> AuthView(authService)
     }
 }

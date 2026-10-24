@@ -70,7 +70,15 @@ fun PollDetailView(
     var commentError by remember(pollId, userId) { mutableStateOf("") }
     var calendarConflicts by remember(pollId, userId) { mutableStateOf<Set<String>>(emptySet()) }
 
-    val saveSession = remember(pollId, authService.currentUser?.id) { AvailabilitySaveSession() }
+    val recovery = remember(pollId, accountKey) { runCatching { pollService.availabilitySession(pollId) } }
+    if (recovery.isFailure) {
+        Column(Modifier.padding(24.dp)) {
+            Text("Your saved response retry could not be read. Check your saved responses before editing.")
+            TextButton(onClick = onNavigateBack) { Text("Back") }
+        }
+        return
+    }
+    val saveSession = recovery.getOrThrow()
     var availabilityLoaded by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
     var saveError by remember(pollId, authService.currentUser?.id) { mutableStateOf<String?>(null) }
     var hasVersionConflict by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
@@ -111,8 +119,8 @@ fun PollDetailView(
         responses = responses.filter { it.participantId != saved.participantId } + saved.responseRows()
         participants = participants.map { if (it.id == saved.participantId) it.copy(comment = saved.comment) else it }
         myParticipant = participants.firstOrNull { it.id == saved.participantId }
-        localResponses = saved.responses.associate { it.timeOptionId to it.status }
-        localComment = saved.comment.orEmpty()
+        localResponses = saveSession.pendingDraft?.responses ?: saved.responses.associate { it.timeOptionId to it.status }
+        localComment = saveSession.pendingDraft?.comment ?: saved.comment.orEmpty()
     }
 
     suspend fun loadSavedAvailability() {
@@ -164,7 +172,7 @@ fun PollDetailView(
 
                 // Auto-mark conflicts as unavailable
                 conflicts.forEach { conflictId ->
-                    if (!localResponses.containsKey(conflictId)) {
+                    if (saveSession.pendingDraft == null && !localResponses.containsKey(conflictId)) {
                         localResponses = localResponses + (conflictId to AvailabilityStatus.UNAVAILABLE)
                     }
                 }
@@ -605,9 +613,9 @@ fun PollDetailView(
                                     val savingUserId = authService.currentUser?.id
                                     try {
                                         val draft = AvailabilityDraft(localResponses, localComment.trim().ifEmpty { null })
-                                        val saved = saveSession.save(draft) { request ->
+                                        val saved = saveSession.save(draft, send = { request ->
                                             pollService.saveAvailability(pollId, request)
-                                        }
+                                        }, isCurrent = { pollService.creationAccountKey == accountKey })
                                         if (authService.currentUser?.id == savingUserId) {
                                             applySavedAvailability(saved)
                                             saveError = null
