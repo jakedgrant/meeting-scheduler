@@ -1,5 +1,5 @@
-import Foundation
 import EventKit
+import Foundation
 import Supabase
 
 /// Calendar source options
@@ -28,15 +28,48 @@ public final class CalendarService: CalendarServiceProtocol {
     public private(set) var googleCalendarAccountEmail: String?
     private let oauthSession = CalendarOAuthSession()
     private var connectionGeneration = 0
+    private var accountId: UUID?
+    private var accountGeneration: UInt64 = 0
+    private let preferences: UserDefaults
+    private let clientFactory: @MainActor () -> SupabaseClient
+    private let requestCredentials: @MainActor () -> AccountRequestCredentials?
+    private let accessRequest: (@MainActor () async -> Bool)?
 
     // Overall enabled state (true if any source is enabled)
     public var isEnabled: Bool {
         appleCalendarEnabled || googleCalendarEnabled
     }
 
-    private init() {
+    private convenience init() {
+        self.init(preferences: .standard, clientFactory: { SupabaseService.shared.client })
+    }
+
+    convenience init(preferences: UserDefaults, client: SupabaseClient, accessRequest: (@MainActor () async -> Bool)? = nil) {
+        self.init(preferences: preferences, clientFactory: { client }, accessRequest: accessRequest, requestCredentials: { nil })
+    }
+
+    init(
+        preferences: UserDefaults, clientFactory: @escaping @MainActor () -> SupabaseClient,
+        accessRequest: (@MainActor () async -> Bool)? = nil,
+        requestCredentials: @escaping @MainActor () -> AccountRequestCredentials? = { SupabaseService.shared.requestCredentials }
+    ) {
+        self.requestCredentials = requestCredentials
+        self.preferences = preferences
+        self.clientFactory = clientFactory
+        self.accessRequest = accessRequest
         updateAuthorizationStatus()
-        loadPreferences()
+        // Never import unowned legacy device preferences into an account.
+    }
+
+    public func accountDidChange(to id: UUID?) {
+        accountId = id
+        accountGeneration &+= 1
+        resetGoogleCalendarState()
+        appleCalendarEnabled = id.map { preferences.bool(forKey: applePreferenceKey($0)) } ?? false
+    }
+
+    private func applePreferenceKey(_ id: UUID) -> String {
+        "calendar.\(id.uuidString).appleEnabled"
     }
 
     // MARK: - Authorization Status
@@ -50,59 +83,57 @@ public final class CalendarService: CalendarServiceProtocol {
     /// Request calendar access from the user
     /// - Returns: true if access was granted
     public func requestAccess() async -> Bool {
-        do {
-            #if os(iOS)
-            if #available(iOS 17.0, *) {
-                // iOS 17+ uses requestFullAccessToEvents
-                let granted = try await eventStore.requestFullAccessToEvents()
-                updateAuthorizationStatus()
-                return granted
-            } else {
-                // Older iOS versions use requestAccess
-                let granted = try await eventStore.requestAccess(to: .event)
-                updateAuthorizationStatus()
-                return granted
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            if let accessRequest { return await accessRequest() }
+            do {
+                #if os(iOS)
+                    if #available(iOS 17.0, *) {
+                        // iOS 17+ uses requestFullAccessToEvents
+                        let granted = try await eventStore.requestFullAccessToEvents()
+                        updateAuthorizationStatus()
+                        return granted
+                    } else {
+                        // Older iOS versions use requestAccess
+                        let granted = try await eventStore.requestAccess(to: .event)
+                        updateAuthorizationStatus()
+                        return granted
+                    }
+                #else
+                    let granted = try await eventStore.requestAccess(to: .event)
+                    updateAuthorizationStatus()
+                    return granted
+                #endif
+            } catch {
+                print("Calendar access request failed: \(error)")
+                return false
             }
-            #else
-            let granted = try await eventStore.requestAccess(to: .event)
-            updateAuthorizationStatus()
-            return granted
-            #endif
-        } catch {
-            print("Calendar access request failed: \(error)")
-            return false
         }
     }
 
     // MARK: - Settings Persistence
 
-    /// Load calendar integration preferences from UserDefaults
-    private func loadPreferences() {
-        appleCalendarEnabled = UserDefaults.standard.bool(forKey: "appleCalendarEnabled")
-        UserDefaults.standard.removeObject(forKey: "googleCalendarEnabled")
-    }
-
-    /// Enable/disable Apple Calendar
+    /// Device permission is global; the user's choice to use it belongs to an account.
     public func setAppleCalendarEnabled(_ enabled: Bool) async {
-        // If enabling, check and request permission if needed
-        if enabled {
-            updateAuthorizationStatus()
-
-            // Check for full access
-            let hasAccess = authorizationStatus == .fullAccess
-
-            if !hasAccess {
-                let granted = await requestAccess()
-                if !granted {
-                    appleCalendarEnabled = false
-                    return
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            guard let account = accountId, credentials == nil || credentials?.accountId == account else { return }
+            let generation = accountGeneration
+            if enabled {
+                updateAuthorizationStatus()
+                if authorizationStatus != .fullAccess {
+                    let granted = await requestAccess()
+                    guard generation == accountGeneration, accountId == account, !Task.isCancelled else { return }
+                    if !granted {
+                        appleCalendarEnabled = false
+                        return
+                    }
                 }
             }
+            guard generation == accountGeneration, accountId == account, !Task.isCancelled else { return }
+            appleCalendarEnabled = enabled
+            preferences.set(enabled, forKey: applePreferenceKey(account))
         }
-
-        // Update local state
-        appleCalendarEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "appleCalendarEnabled")
     }
 
     public func resetGoogleCalendarState() {
@@ -115,78 +146,93 @@ public final class CalendarService: CalendarServiceProtocol {
     }
 
     public func refreshGoogleCalendarConnection() async {
-        guard !googleCalendarLoading else { return }
-        guard let userId = AuthService.shared.currentUserId else {
-            resetGoogleCalendarState()
-            return
-        }
-        let generation = connectionGeneration
-        do {
-            let status: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
-                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            googleCalendarEnabled = status.connected
-            googleCalendarAccountEmail = status.accountEmail
-            googleCalendarError = status.requiresReconnect ? "Reconnect Google Calendar in Settings." : nil
-            if status.revocationPending {
-                googleCalendarError = "Disconnected. Google access revocation is being retried."
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            let client = clientFactory()
+            guard !googleCalendarLoading else { return }
+            guard let userId = accountId else {
+                resetGoogleCalendarState()
+                return
             }
-        } catch {
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            googleCalendarEnabled = false
-            googleCalendarAccountEmail = nil
-            googleCalendarError = "Google Calendar connection could not be checked."
+            guard credentials == nil || credentials?.accountId == userId else { return }
+            connectionGeneration += 1
+            let generation = connectionGeneration
+            do {
+                let status: CalendarConnectionStatus = try await client.functions.invoke(
+                    "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                googleCalendarEnabled = status.connected
+                googleCalendarAccountEmail = status.accountEmail
+                googleCalendarError = status.requiresReconnect ? "Reconnect Google Calendar in Settings." : nil
+                if status.revocationPending {
+                    googleCalendarError = "Disconnected. Google access revocation is being retried."
+                }
+            } catch {
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                googleCalendarEnabled = false
+                googleCalendarAccountEmail = nil
+                googleCalendarError = "Google Calendar connection could not be checked."
+            }
         }
     }
 
     public func setGoogleCalendarEnabled(_ enabled: Bool) async {
-        guard let userId = AuthService.shared.currentUserId else { return }
-        oauthSession.cancel()
-        connectionGeneration += 1
-        let generation = connectionGeneration
-        googleCalendarLoading = true
-        googleCalendarError = nil
-        defer { if generation == connectionGeneration { googleCalendarLoading = false } }
-        do {
-            if !enabled {
-                let status: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
-                    "calendar-connection", options: FunctionInvokeOptions(body: ["action": "disconnect"]))
-                guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-                googleCalendarEnabled = status.connected
-                googleCalendarAccountEmail = status.accountEmail
-                if status.revocationPending { googleCalendarError = "Disconnected. Google access revocation is being retried." }
-                return
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            let client = clientFactory()
+            guard let userId = accountId, credentials == nil || credentials?.accountId == userId else { return }
+            oauthSession.cancel()
+            connectionGeneration += 1
+            let generation = connectionGeneration
+            googleCalendarLoading = true
+            googleCalendarError = nil
+            defer { if generation == connectionGeneration { googleCalendarLoading = false } }
+            do {
+                if !enabled {
+                    let status: CalendarConnectionStatus = try await client.functions.invoke(
+                        "calendar-connection", options: FunctionInvokeOptions(body: ["action": "disconnect"]))
+                    guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                    googleCalendarEnabled = status.connected
+                    googleCalendarAccountEmail = status.accountEmail
+                    if status.revocationPending {
+                        googleCalendarError = "Disconnected. Google access revocation is being retried."
+                    }
+                    return
+                }
+                let initialStatus: CalendarConnectionStatus = try await client.functions.invoke(
+                    "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                googleCalendarEnabled = initialStatus.connected
+                googleCalendarAccountEmail = initialStatus.accountEmail
+                if googleCalendarEnabled { return }
+                let result: CalendarAuthorizationStart = try await client.functions.invoke(
+                    "calendar-connection", options: FunctionInvokeOptions(body: ["action": "start", "target": "ios"]))
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                guard let url = URL(string: result.authorizationURL), url.scheme == "https",
+                    url.host == "accounts.google.com", url.path == "/o/oauth2/v2/auth"
+                else {
+                    throw CalendarConnectionError.authorizationFailed
+                }
+                let callback = try await oauthSession.authenticate(url: url)
+                guard callback.scheme == Config.appScheme, callback.host == "calendar", callback.path == "/callback",
+                    URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems?
+                        .first(where: { $0.name == "calendar" })?.value == "connected"
+                else {
+                    throw CalendarConnectionError.authorizationFailed
+                }
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                let finalStatus: CalendarConnectionStatus = try await client.functions.invoke(
+                    "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                googleCalendarEnabled = finalStatus.connected
+                googleCalendarAccountEmail = finalStatus.accountEmail
+                if !googleCalendarEnabled { throw CalendarConnectionError.authorizationFailed }
+            } catch {
+                guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
+                googleCalendarError =
+                    (error as? CalendarConnectionError)?.localizedDescription
+                    ?? "Google Calendar could not be updated. Try again."
             }
-            let initialStatus: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
-                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            googleCalendarEnabled = initialStatus.connected
-            googleCalendarAccountEmail = initialStatus.accountEmail
-            if googleCalendarEnabled { return }
-            let result: CalendarAuthorizationStart = try await SupabaseService.shared.client.functions.invoke(
-                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "start", "target": "ios"]))
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            guard let url = URL(string: result.authorizationURL), url.scheme == "https",
-                  url.host == "accounts.google.com", url.path == "/o/oauth2/v2/auth" else {
-                throw CalendarConnectionError.authorizationFailed
-            }
-            let callback = try await oauthSession.authenticate(url: url)
-            guard callback.scheme == Config.appScheme, callback.host == "calendar", callback.path == "/callback",
-                  URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems?
-                    .first(where: { $0.name == "calendar" })?.value == "connected" else {
-                throw CalendarConnectionError.authorizationFailed
-            }
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            let finalStatus: CalendarConnectionStatus = try await SupabaseService.shared.client.functions.invoke(
-                "calendar-connection", options: FunctionInvokeOptions(body: ["action": "status"]))
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            googleCalendarEnabled = finalStatus.connected
-            googleCalendarAccountEmail = finalStatus.accountEmail
-            if !googleCalendarEnabled { throw CalendarConnectionError.authorizationFailed }
-        } catch {
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return }
-            googleCalendarError = (error as? CalendarConnectionError)?.localizedDescription
-                ?? "Google Calendar could not be updated. Try again."
         }
     }
 
@@ -196,24 +242,31 @@ public final class CalendarService: CalendarServiceProtocol {
     /// - Parameter timeOptions: Array of poll time options to check
     /// - Returns: Set of option IDs that have calendar conflicts
     public func checkConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
-        guard isEnabled else { return Set() }
-        guard !timeOptions.isEmpty else { return Set() }
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            let account = accountId
+            let generation = connectionGeneration
+            guard account != nil, isEnabled else { return Set() }
+            guard !timeOptions.isEmpty else { return Set() }
 
-        var allConflictingIds = Set<UUID>()
+            var allConflictingIds = Set<UUID>()
 
-        // Check Apple Calendar if enabled
-        if appleCalendarEnabled {
-            let appleConflicts = await checkAppleCalendarConflicts(for: timeOptions)
-            allConflictingIds.formUnion(appleConflicts)
+            // Check Apple Calendar if enabled
+            if appleCalendarEnabled {
+                let appleConflicts = await checkAppleCalendarConflicts(for: timeOptions)
+                guard account == accountId, generation == connectionGeneration, !Task.isCancelled else { return [] }
+                allConflictingIds.formUnion(appleConflicts)
+            }
+
+            // Check Google Calendar if enabled
+            if googleCalendarEnabled {
+                let googleConflicts = await checkGoogleCalendarConflicts(for: timeOptions)
+                guard account == accountId, generation == connectionGeneration, !Task.isCancelled else { return [] }
+                allConflictingIds.formUnion(googleConflicts)
+            }
+
+            return allConflictingIds
         }
-
-        // Check Google Calendar if enabled
-        if googleCalendarEnabled {
-            let googleConflicts = await checkGoogleCalendarConflicts(for: timeOptions)
-            allConflictingIds.formUnion(googleConflicts)
-        }
-
-        return allConflictingIds
     }
 
     /// Check Apple Calendar for conflicts
@@ -267,7 +320,8 @@ public final class CalendarService: CalendarServiceProtocol {
 
     /// Check Google Calendar for conflicts via Edge Function
     private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
-        guard let userId = AuthService.shared.currentUserId else { return Set() }
+        let client = clientFactory()
+        guard let userId = accountId else { return Set() }
         let generation = connectionGeneration
         do {
             googleCalendarLoading = true
@@ -278,27 +332,28 @@ public final class CalendarService: CalendarServiceProtocol {
                 [
                     "id": option.id.uuidString,
                     "start_time": ISO8601DateFormatter().string(from: option.startTime),
-                    "end_time": ISO8601DateFormatter().string(from: option.endTime)
+                    "end_time": ISO8601DateFormatter().string(from: option.endTime),
                 ]
             }
 
             let requestBody = ["timeOptions": timeOptionsArray]
 
             // Invoke the Edge Function
-            let response: GoogleCalendarConflictResponse = try await SupabaseService.shared.client
+            let response: GoogleCalendarConflictResponse =
+                try await client
                 .functions
                 .invoke(
                     "check-calendar-conflicts",
                     options: FunctionInvokeOptions(body: requestBody)
                 )
 
-            guard AuthService.shared.currentUserId == userId, generation == connectionGeneration else { return Set() }
+            guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return Set() }
             guard response.success else { throw CalendarConnectionError.unavailable }
             googleCalendarError = nil
             let conflictIds = Set(response.conflictingIds.compactMap { UUID(uuidString: $0) })
             return conflictIds
         } catch {
-            if AuthService.shared.currentUserId == userId, generation == connectionGeneration {
+            if accountId == userId, generation == connectionGeneration {
                 googleCalendarError = "Google Calendar could not be checked. Review your availability before saving."
             }
             return Set()
@@ -311,24 +366,27 @@ public final class CalendarService: CalendarServiceProtocol {
     ///   - end: End time for the range
     /// - Returns: Array of conflicting events
     public func getConflictingEvents(start: Date, end: Date) async -> [EKEvent] {
-        guard appleCalendarEnabled else { return [] }
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            guard appleCalendarEnabled else { return [] }
 
-        updateAuthorizationStatus()
+            updateAuthorizationStatus()
 
-        guard authorizationStatus == .fullAccess else {
-            await setAppleCalendarEnabled(false)
-            return []
+            guard authorizationStatus == .fullAccess else {
+                await setAppleCalendarEnabled(false)
+                return []
+            }
+
+            let predicate = eventStore.predicateForEvents(
+                withStart: start,
+                end: end,
+                calendars: nil
+            )
+
+            let events = eventStore.events(matching: predicate)
+
+            return events.filter { !$0.isAllDay && $0.availability != .free }
         }
-
-        let predicate = eventStore.predicateForEvents(
-            withStart: start,
-            end: end,
-            calendars: nil
-        )
-
-        let events = eventStore.events(matching: predicate)
-
-        return events.filter { !$0.isAllDay && $0.availability != .free }
     }
 
     // MARK: - Add to Calendar
@@ -348,44 +406,47 @@ public final class CalendarService: CalendarServiceProtocol {
         notes: String? = nil,
         location: String? = nil
     ) async -> Bool {
-        
-        updateAuthorizationStatus()
-        
-        // check permission
-        switch authorizationStatus {
-        case .notDetermined:
-            
-            let _ = await requestAccess()
-            return false //
-            
-        case .restricted, .denied:
-            return false
-            
-        case .fullAccess, .writeOnly:
-            break
-            
-        case .authorized: // (Deprecated) This application is authorized to access the service.
-            break
-            
-        @unknown default:
-            return false
-        }
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
 
-        // Create the event
-        let event = EKEvent(eventStore: eventStore)
-        event.title = title
-        event.startDate = startDate
-        event.endDate = endDate
-        event.notes = notes
-        event.location = location
-        event.calendar = eventStore.defaultCalendarForNewEvents
+            updateAuthorizationStatus()
 
-        do {
-            try eventStore.save(event, span: .thisEvent)
-            return true
-        } catch {
-            print("Failed to save event to calendar: \(error)")
-            return false
+            // check permission
+            switch authorizationStatus {
+            case .notDetermined:
+
+                let _ = await requestAccess()
+                return false  //
+
+            case .restricted, .denied:
+                return false
+
+            case .fullAccess, .writeOnly:
+                break
+
+            case .authorized:  // (Deprecated) This application is authorized to access the service.
+                break
+
+            @unknown default:
+                return false
+            }
+
+            // Create the event
+            let event = EKEvent(eventStore: eventStore)
+            event.title = title
+            event.startDate = startDate
+            event.endDate = endDate
+            event.notes = notes
+            event.location = location
+            event.calendar = eventStore.defaultCalendarForNewEvents
+
+            do {
+                try eventStore.save(event, span: .thisEvent)
+                return true
+            } catch {
+                print("Failed to save event to calendar: \(error)")
+                return false
+            }
         }
     }
 
@@ -394,7 +455,10 @@ public final class CalendarService: CalendarServiceProtocol {
     /// Legacy method for backwards compatibility
     /// Enables Apple Calendar (the default)
     public func setEnabled(_ enabled: Bool) async {
-        await setAppleCalendarEnabled(enabled)
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return await AccountRequestContext.$credentials.withValue(credentials) {
+            await setAppleCalendarEnabled(enabled)
+        }
     }
 
     // MARK: - Helper Methods

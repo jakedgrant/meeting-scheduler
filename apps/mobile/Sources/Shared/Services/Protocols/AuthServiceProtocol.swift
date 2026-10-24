@@ -5,6 +5,7 @@ import Foundation
 public protocol AuthServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Properties
 
+    var sessionGeneration: UInt64 { get }
     var profile: Profile? { get }
     var isLoading: Bool { get }
     var isAuthenticated: Bool { get }

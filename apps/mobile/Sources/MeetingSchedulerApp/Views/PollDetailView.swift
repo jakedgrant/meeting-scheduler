@@ -109,6 +109,7 @@ struct PollDetailView: View {
         .task(id: DetailIdentity(pollId: pollId, accountId: authService.currentUserId)) {
             await loadPollData()
         }
+        .onDisappear { editor.suspend(); viewGeneration &+= 1 }
         .alert("Close Poll", isPresented: $showClosePollAlert) {
             Button("Cancel", role: .cancel) { }
             Button("Close Poll", role: .destructive) {
@@ -383,7 +384,9 @@ struct PollDetailView: View {
                 Text(message).foregroundStyle(.red).accessibilityIdentifier("availability-save-error")
                 if let participant = myParticipant, editor.saved == nil || editor.needsConflictReview {
                     Button(editor.needsConflictReview ? "Load Latest Saved Responses" : "Retry Loading Responses") {
-                        Task {
+                        let session = authService.sessionGeneration
+        Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
                             let generation = viewGeneration
                             await editor.load(pollId: pollId, participantId: participant.id,
                                               preservingDraft: true, using: pollService)
@@ -463,7 +466,7 @@ struct PollDetailView: View {
         let account = authService.currentUserId
         displayedAccountId = account
         displayedPollId = pollId
-        editor.reset()
+        editor.selectAccount(account, pollId: pollId)
         poll = nil; timeOptions = []; participants = []; responses = []; myParticipant = nil
         calendarConflicts = []; actionError = nil; commentError = ""
         isSelectingFinalDate = false; finalTimeOption = nil; selectedTimeOption = nil
@@ -509,7 +512,9 @@ struct PollDetailView: View {
     private func updateStatus(_ status: PollStatus) {
         let generation = viewGeneration
         let account = authService.currentUserId
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 try await pollService.updatePollStatus(pollId: pollId, status: status)
                 guard generation == viewGeneration, account == authService.currentUserId else { return }
@@ -525,7 +530,9 @@ struct PollDetailView: View {
     private func joinPoll() {
         let generation = viewGeneration
         let account = authService.currentUserId
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 let participant = try await pollService.joinPoll(pollId: pollId, anonymousName: nil)
                 guard generation == viewGeneration, account == authService.currentUserId else { return }
@@ -555,7 +562,9 @@ struct PollDetailView: View {
         guard let participant = myParticipant, validateComment(), canRespond else { return }
         let generation = viewGeneration
         let account = authService.currentUserId
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             await editor.save(pollId: pollId, participantId: participant.id, using: pollService)
             guard generation == viewGeneration, account == authService.currentUserId else { return }
             if editor.didSave { applySavedSnapshot() }
@@ -567,7 +576,9 @@ struct PollDetailView: View {
         let generation = viewGeneration
         let account = authService.currentUserId
         isSelectingFinalDate = true
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             defer { if generation == viewGeneration { isSelectingFinalDate = false } }
             do {
                 let finalized = try await pollService.finalizePoll(pollId: pollId, timeOptionId: option.id)
@@ -660,6 +671,7 @@ struct ParticipantRow: View {
 // MARK: - FinalDateDisplay
 
 struct FinalDateDisplay: View {
+    @Environment(\.authService) private var authService
     let selectedStart: Date
     let selectedEnd: Date
     let isAllDay: Bool
@@ -727,7 +739,9 @@ struct FinalDateDisplay: View {
         }
         .alert("Add to Calendar", isPresented: $showAddToCalendarAlert) {
             Button("Add Event", role: nil) {
-                Task {
+                let session = authService.sessionGeneration
+        Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
                     await addToCalendar()
                 }
             }

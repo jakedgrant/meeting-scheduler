@@ -154,7 +154,9 @@ struct ProfileEditView: View {
         isSaving = true
         errorMessage = nil
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 try await authService.updateProfile(
                     displayName: displayName.isEmpty ? nil : displayName,
@@ -162,11 +164,14 @@ struct ProfileEditView: View {
                     timezone: timezone
                 )
 
+                guard session == authService.sessionGeneration else { return }
                 await MainActor.run {
                     isSaving = false
                     showSuccessAlert = true
                 }
             } catch {
+                guard session == authService.sessionGeneration else { return }
+                guard session == authService.sessionGeneration else { return }
                 await MainActor.run {
                     isSaving = false
                     errorMessage = "Failed to update profile: \(error.localizedDescription)"

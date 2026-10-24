@@ -153,10 +153,13 @@ struct SettingsView: View {
     private func signOut() {
         isSigningOut = true
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 try await authService.signOut()
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 print("Sign out failed: \(error)")
             }
             isSigningOut = false
@@ -164,10 +167,13 @@ struct SettingsView: View {
     }
 
     private func restorePurchases() {
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 _ = try await purchaseService.restorePurchases()
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 print("Restore failed: \(error)")
             }
         }

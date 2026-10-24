@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 @Observable
 public final class MockAuthService: AuthServiceProtocol {
+    public var sessionGeneration: UInt64 = 0
     public var profile: Profile?
     public var isLoading: Bool
     public var isAuthenticated: Bool

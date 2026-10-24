@@ -304,10 +304,11 @@ struct CreatePollView: View {
         )
         guard let payload else { return }
         let identity = AuthService.shared.currentUserId
+        let session = AuthService.shared.sessionGeneration
         Task {
-            guard AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
+            guard AuthService.shared.sessionGeneration == session, AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
             await editor.submit(payload, using: pollService)
-            guard AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
+            guard AuthService.shared.sessionGeneration == session, AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
             if editor.result != nil { dismiss() }
         }
     }

@@ -4,8 +4,8 @@ import Foundation
 @MainActor
 @Observable
 public final class AvailabilityEditor {
-    public var responses: [UUID: AvailabilityStatus] = [:]
-    public var comment = ""
+    public var responses: [UUID: AvailabilityStatus] = [:] { didSet { retainDraft() } }
+    public var comment = "" { didSet { retainDraft() } }
     public private(set) var saved: AvailabilitySnapshot?
     public private(set) var isSaving = false
     public private(set) var isLoading = false
@@ -18,9 +18,55 @@ public final class AvailabilityEditor {
     private var loadGeneration: UInt64 = 0
     private var pending: SaveAvailabilityRequest?
 
+    private struct Recovery {
+        let responses: [UUID: AvailabilityStatus]
+        let comment: String
+        let notes: [UUID: String]
+        let saved: AvailabilitySnapshot?
+        let pending: SaveAvailabilityRequest?
+        let needsConflictReview: Bool
+    }
+    private static var recovery: [UUID: [UUID: Recovery]] = [:]
+    private var accountId: UUID?
+    private var pollId: UUID?
+    private var restoring = false
+    private var recoveredDraft = false
+
     public init() {}
 
+    /// Account-scoped in-process recovery survives screen recreation and logout.
+    /// Creation's separate durable envelope remains unchanged.
+    public func selectAccount(_ accountId: UUID?, pollId: UUID) {
+        retainDraft()
+        restoring = true
+        self.accountId = nil; self.pollId = nil
+        reset()
+        self.accountId = accountId; self.pollId = pollId
+        if let accountId, let value = Self.recovery[accountId]?[pollId] {
+            responses = value.responses; comment = value.comment; notes = value.notes
+            saved = value.saved; pending = value.pending; needsConflictReview = value.needsConflictReview
+            recoveredDraft = true
+        }
+        restoring = false
+    }
+
+    /// Retain retry identity, then fence suspended work when its screen leaves.
+    public func suspend() {
+        retainDraft()
+        restoring = true
+        accountId = nil; pollId = nil
+        reset()
+        restoring = false
+    }
+
+    private func retainDraft() {
+        guard !restoring, let accountId, let pollId else { return }
+        Self.recovery[accountId, default: [:]][pollId] = Recovery(responses: responses, comment: comment,
+            notes: notes, saved: saved, pending: pending, needsConflictReview: needsConflictReview)
+    }
+
     public func reset() {
+        recoveredDraft = false
         generation &+= 1
         loadGeneration &+= 1
         responses = [:]; comment = ""; notes = [:]; saved = nil; pending = nil
@@ -46,8 +92,12 @@ public final class AvailabilityEditor {
 
     public func load(pollId: UUID, participantId: UUID, guestToken: String? = nil,
                      preservingDraft: Bool = false, using service: any PollServiceProtocol) async {
+        // An ambiguous command must retry its original version and UUID. A read
+        // here would discard that envelope after a lost successful reply.
+        if recoveredDraft, pending != nil { recoveredDraft = false; return }
         let identity = generation
-        let retainKnownDraft = preservingDraft && saved != nil
+        let retainKnownDraft = (preservingDraft || recoveredDraft) && saved != nil
+        recoveredDraft = false
         loadGeneration &+= 1
         let request = loadGeneration
         isLoading = true
@@ -61,6 +111,7 @@ public final class AvailabilityEditor {
             needsConflictReview = false
             errorMessage = nil
             if !retainKnownDraft { adoptDraft(snapshot) }
+            retainDraft()
         } catch {
             guard generation == identity, request == loadGeneration, !Task.isCancelled else { return }
             errorMessage = "Saved responses could not be loaded. Your draft has been retained. Retry loading before saving."
@@ -80,6 +131,7 @@ public final class AvailabilityEditor {
             pending = SaveAvailabilityRequest(pollId: pollId, responses: draft, comment: draftComment,
                                               expectedVersion: saved.version, participantId: participantId, guestToken: guestToken)
         }
+        retainDraft()
         guard let operation = pending else { return }
         let identity = generation
         isSaving = true; didSave = false; errorMessage = nil
@@ -93,12 +145,14 @@ public final class AvailabilityEditor {
             didSave = true
             // An edit made while suspended remains a draft even though the submitted operation succeeded.
             if answers == draft && trimmedComment == draftComment { adoptDraft(snapshot) }
+            retainDraft()
         } catch {
             guard generation == identity, !Task.isCancelled else { return }
             let failure = (error as? AvailabilityCommandError) ?? .transport
             errorMessage = failure.localizedDescription
             if failure == .conflict { needsConflictReview = true; pending = nil }
             if failure == .closed { isClosed = true }
+            retainDraft()
         }
     }
 

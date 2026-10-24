@@ -115,10 +115,13 @@ struct AuthView: View {
         isLoading = true
         errorMessage = nil
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 try await authService.signInWithGoogle()
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 errorMessage = error.localizedDescription
             }
             isLoading = false
@@ -129,10 +132,13 @@ struct AuthView: View {
         isLoading = true
         errorMessage = nil
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 try await authService.signInWithApple()
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 errorMessage = error.localizedDescription
             }
             isLoading = false
@@ -143,11 +149,15 @@ struct AuthView: View {
         isLoading = true
         errorMessage = nil
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 try await authService.signInWithMagicLink(email: email)
+                guard session == authService.sessionGeneration else { return }
                 showMagicLinkSent = true
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 errorMessage = error.localizedDescription
             }
             isLoading = false

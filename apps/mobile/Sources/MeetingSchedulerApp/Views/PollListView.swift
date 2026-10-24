@@ -2,6 +2,7 @@ import SwiftUI
 import Shared
 
 struct PollListView: View {
+    @Environment(\.authService) private var authService
     enum PollFilter: String, CaseIterable, Identifiable {
         case all = "All"
         case myMeets = "My Meets"
@@ -183,7 +184,9 @@ struct PollListView: View {
     }
 
     private func handleJoinByCode() {
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             isJoining = true
             joinError = nil
 
@@ -201,6 +204,7 @@ struct PollListView: View {
                 return
             }
 
+            guard session == authService.sessionGeneration else { return }
             if poll.status == .closed || poll.status == .archived {
                 joinError = "This poll is closed and cannot accept new participants."
                 isJoining = false

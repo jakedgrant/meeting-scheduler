@@ -3,6 +3,7 @@ import Shared
 import RevenueCat
 
 struct PaywallView: View {
+    @Environment(\.authService) private var authService
     @Environment(\.dismiss) var dismiss
     @Environment(\.purchaseService) var purchaseService
 
@@ -150,11 +151,15 @@ struct PaywallView: View {
         isPurchasing = true
         errorMessage = nil
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 _ = try await purchaseService.purchase(package: package)
+                guard session == authService.sessionGeneration else { return }
                 dismiss()
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 errorMessage = error.localizedDescription
             }
             isPurchasing = false
@@ -165,15 +170,19 @@ struct PaywallView: View {
         isPurchasing = true
         errorMessage = nil
 
+        let session = authService.sessionGeneration
         Task {
+            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
             do {
                 _ = try await purchaseService.restorePurchases()
+                guard session == authService.sessionGeneration else { return }
                 if purchaseService.hasProAccess {
                     dismiss()
                 } else {
                     errorMessage = "No purchases to restore"
                 }
             } catch {
+                guard session == authService.sessionGeneration else { return }
                 errorMessage = error.localizedDescription
             }
             isPurchasing = false
