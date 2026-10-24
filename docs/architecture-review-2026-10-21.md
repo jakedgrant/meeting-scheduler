@@ -504,7 +504,7 @@ After the merge, 12 calendar database tests, 23 calendar Edge Function tests, an
 
 ### Parallel streams and ownership
 
-Four streams can make progress together. A stream identifies ownership of files and contracts, not a requirement for four engineers. With fewer contributors, take the first available task whose prerequisites are satisfied. Work within each stream is ordered; entries in the same column are not all simultaneous tasks.
+The following stream table and first-PR ordering preserve the October 22 plan. F02–F10, F11, F13 application ownership, F25 and F26 subsequently merged through #70/#71. Their placement under “Start now” is historical, not a new assignment. The current work is remaining F12, F14 and F22; the owner directed the continuation to run one implementation agent at a time. See the [progress tracker](architecture-remediation-progress.md) for current ownership and results.
 
 | Stream | Start now | Next | Later |
 | --- | --- | --- | --- |
@@ -580,10 +580,10 @@ In the tables below, **start after** identifies the contract or implementation r
 
 ### Merge milestones and release gates
 
-1. **Close poll exposure:** integrate F02, then F03/F04 and their direct API tests. F08, F25, F26, lifecycle preparation, and isolated date fixtures can proceed alongside this work. A compatibility adapter must not keep the original access bypass alive.
-2. **Make saves and sessions reliable:** integrate F06/F10 with F12's platform slices; complete F13/F14 and F22 regression coverage. Calendar coverage work can proceed against the shared date fixtures. Verify each platform as its adapter lands.
-3. **Make paid creation atomic:** integrate F08's entitlement/pass output with F05/F09 and their client adapters. Release after duplicate/out-of-order billing, failed writes, concurrent limits, pass redemption, and retry tests pass. F17 uses the resulting entitlement policy if calendar access is paid.
-4. **Bound reads and live updates:** integrate F19, then F18 adapters and F20. F11 participates only if its cache returns. Measure query count, payload size, latency, and completeness against representative histories.
+1. **Close poll exposure — merged:** F02 and F03/F04, including direct API regressions, are on main through #70. Preserve their authorization and compatibility checks. Hosted verification remains separate.
+2. **Make saves and sessions reliable — lifecycle tranche active:** F06/F10 and F13 application ownership are on main through #70. Complete remaining F12, Android F14 and web F22 coverage under the recorded session contract; preserve merged command/cache behavior.
+3. **Make paid creation atomic — merged:** F08 and F05/F09 backend/client integration are on main through #71. Its six workflows passed for exact head `6148a12`; preserve idempotent creation, explicit pass use and entitlement rules. Hosted rollout and live purchase evidence remain separate.
+4. **Bound reads and live updates:** integrate F19, then F18 adapters and F20. Preserve the merged F11 cache ownership and completeness regressions when updating its read adapters. Measure query count, payload size, latency, and completeness against representative histories.
 
 F23 contracts and F24 checks grow within these milestones. F01/F07/F15 hosted verification and F27 diagnostics can finish independently when their prerequisites are available. These are integration milestones rather than fixed-duration sprints; partial work in another stream can continue while one milestone is being validated.
 

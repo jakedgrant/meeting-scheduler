@@ -123,7 +123,7 @@ Merging code does not change hosted state. The following are prelaunch checks or
 - [x] F05/F09: implemented across backend/web/iOS/Android, combined replay and independent review complete. Main-targeted #71 merged as `d51f45a`; all six workflows passed for exact head `6148a12`. Hosted rollout remains separate.
 - [x] Accept final F10 integration in #69. Backend, web, Android and iOS are integrated; independent review found no remaining blockers among the seven review gaps. The [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md) records checks, source identities, merge dependencies and prelaunch limits.
 - [ ] Complete broader F12 lifecycle work on web/Android and verify live auth/provider transitions; the reviewed iOS cache/session gaps are fixed in #56. F14 Android callbacks remain separate.
-- [ ] Optional F13 emulator check. The worker asked for one API 36 emulator for about 30 minutes (install the debug build, rotate, background, sign in and out, uninstall). An agent must request a new coordinator reservation before using an emulator; none was used in this remediation.
+- [x] F13 deterministic Activity lifecycle checks now run with the F12/F14 continuation: two instrumentation tests plus process-cold/warm routing on a fresh offline API 36 emulator. Devices were stopped/deleted after the reservation. Real provider sign-in remains an owner check; the original optional reservation was not reused.
 - [ ] Current architecture work: remaining F12/F14 lifecycle and F22 regression coverage. Keep F21/F16 dates/calendar and F19 → F18 → F20 bounded reads/realtime queued; broader F24 launch checks remain. F05/F09 is merged, with hosted validation separate.
 
 ## Progress log
