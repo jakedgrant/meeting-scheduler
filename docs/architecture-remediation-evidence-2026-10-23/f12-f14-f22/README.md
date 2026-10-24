@@ -14,12 +14,17 @@ Web owns auth/profile, subscription, RevenueCat, calendar, poll and screen integ
 
 The preserved backend at contract commit `483ca17` passed `npm run test:database` (142 checks), `npm run test:billing:edge` (15), `npm run test:calendar:edge` (23), frozen checks for seven entry points and billing lint (eight files). No backend or migration changes are planned. These are deterministic in-process/offline regressions and did not contact a hosted project or provider.
 
+## Web integration checkpoint
+
+Web source/test commit `c5b6538e26f066515e2cdaf95db9ddc700181238` was integrated as `d15fad2`; evidence-only `00b6d59` was integrated as `c1d83fb`. The coordinator reran all 111 web tests on the integration tree (55 lifecycle/SDK plus 56 existing regressions), type checking (zero errors/five existing warnings) and production client/SSR build. [Platform evidence](web.md) records covered races and live-provider limits. [Integrated test output](web-results.txt).
+
 ## Runtime reservations
 
 | Runtime | Approval | Cleanup |
 | --- | --- | --- |
 | iOS | Fresh iPhone 17 Pro / iOS 27.0, `0EC9E5B6-47CE-4D21-A938-3C00075E1D02`; create/boot/install/test, 40 minutes from creation; package tests and brief wrapper lifecycle smoke only | Coordinator shut down and deleted this device after the interruption; a fresh reservation/device is required for subsequent tests |
 | Android | New isolated SDK `/private/tmp/session-android-sdk`, AVD `session-f12-f14` under `/private/tmp/session-android-avd`, ports 5580/5581 after unused-port check; headless deterministic callback/recreation checks; 45 minutes from start | Coordinator stopped `emulator-5580` after the interruption (`emu kill`: OK). Downloaded image and named AVD remain as stopped test artifacts; future checks require a fresh reservation/device |
+| Android continuation | Fresh AVD `session-f12-f14-resume` under `/private/tmp/session-android-avd-resume`, ports 5582/5583 after unused-port check; 45 minutes from creation; headless/offline deterministic checks | Android owner must kill only `emulator-5582` and delete this new AVD after validation |
 | Web | In-process fixtures, type check and production build; no listening server | No server to stop |
 
 The first reservations expired during the interruption. At approximately 07:54 UTC October 24 the coordinator stopped the stalled task-owned Gradle jobs and named emulator, and shut down/deleted the named simulator. Existing user runtimes were left intact. Earlier runtime reservations and device IDs were not reused. Workers must request coordinator approval before any further simulator/emulator/local server/Supabase/Docker/existing-service use.
