@@ -6,6 +6,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.meetingscheduler.android.services.AuthService
+import com.meetingscheduler.android.services.authRedirectUrl
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,14 +18,22 @@ class SessionActivityTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         lateinit var auth: AuthService
+        lateinit var attempt: String
         val launchIntent = Intent(context, MainActivity::class.java)
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 auth = (activity.application as MeetingSchedulerApplication).container.authService
                 assertFalse(auth.isAuthenticated)
-                auth.callbackRouter.beginFlow()
-                auth.callbackRouter.route("meetingscheduler://auth/callback?code=")
+                val obsolete = auth.callbackRouter.beginFlow()
+                attempt = auth.callbackRouter.beginFlow()
+                activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse(authRedirectUrl(obsolete) + "&error=access_denied")))
+            }
+            instrumentation.waitForIdleSync()
+            scenario.onActivity {
+                assertNull(auth.callbackError)
+                assertEquals(attempt, auth.callbackRouter.pendingAttemptId)
+                auth.callbackRouter.route(authRedirectUrl(attempt) + "&code=")
             }
             scenario.recreate()
             scenario.onActivity { activity ->
@@ -33,7 +42,7 @@ class SessionActivityTest {
                 assertTrue(auth.callbackError!!.contains("could not be completed"))
                 activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse("meetingscheduler://auth/other?error=access_denied")))
                 assertTrue(auth.callbackError!!.contains("could not be completed"))
-                activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse("meetingscheduler://auth/callback?error=access_denied")))
+                activity.startActivity(Intent(activity, MainActivity::class.java).setAction(Intent.ACTION_VIEW).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP).setData(Uri.parse(authRedirectUrl(attempt) + "&error=access_denied")))
             }
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
@@ -47,8 +56,9 @@ class SessionActivityTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
         val app = context.applicationContext as MeetingSchedulerApplication
-        instrumentation.runOnMainSync { app.container.authService.callbackRouter.beginFlow() }
-        val link = "meetingscheduler://auth/callback?error=access_denied&description=cold-runtime"
+        lateinit var attempt: String
+        instrumentation.runOnMainSync { attempt = app.container.authService.callbackRouter.beginFlow() }
+        val link = authRedirectUrl(attempt) + "&error=access_denied&description=cold-runtime"
         val launchIntent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(Uri.parse(link))
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
             instrumentation.waitForIdleSync()

@@ -12,6 +12,8 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+class NativeSignInAttempt internal constructor(val revision: Long, val accountId: String?, val generation: Long)
+
 /** Billing identity follows the auth session. Implemented by [PurchaseService]. */
 interface BillingIdentity {
     suspend fun login(userId: String)
@@ -60,18 +62,25 @@ class AuthService(
         return { boundaries -= reset }
     }
 
+    private var disposed = false
     private var authAttemptRevision = 0L
     private val ready = kotlinx.coroutines.CompletableDeferred<Unit>()
     private var initialized = false
-    val callbackRouter = AuthCallbackRouter(
+    val callbackRouter: AuthCallbackRouter = AuthCallbackRouter(
         scope = scope,
         sessionKey = { "${currentUser?.id}:$identityGeneration" },
         awaitReady = { gateway.awaitInitialization(); ready.await() },
-        exchange = { gateway.exchangeCode(it) },
-        install = { session ->
+        exchange = { code ->
+            val attemptId = callbackRouter.pendingAttemptId
             val id = currentUser?.id
             val generation = identityGeneration
-            gateway.importSession(session) { isCurrent(id, generation) }
+            gateway.exchangeCode(code) { isCurrent(id, generation) && callbackRouter.isCurrentFlow(attemptId) }
+        },
+        install = { session ->
+            val revision = authAttemptRevision
+            val id = currentUser?.id
+            val generation = identityGeneration
+            gateway.importSession(session) { isCurrent(id, generation) && revision == authAttemptRevision }
         },
         reportError = { callbackError = it },
         attempts = attempts,
@@ -153,10 +162,13 @@ class AuthService(
         }
     }
 
-    fun isCurrent(id: String?, generation: Long) = currentUser?.id == id && identityGeneration == generation
+    fun isCurrent(id: String?, generation: Long) = !disposed && currentUser?.id == id && identityGeneration == generation
 
     /** For explicit teardown in tests; process services otherwise live with Application. */
     fun dispose() {
+        disposed = true
+        ++authAttemptRevision
+        callbackRouter.cancelFlow()
         jobs.forEach { it.cancel() }
         profileJob?.cancel()
         expiryJob?.cancel()
@@ -167,34 +179,59 @@ class AuthService(
 
     // MARK: - Sign In Methods
 
-    suspend fun signInWithGoogle(idToken: String, nonce: String? = null) {
-        val attempt = ++authAttemptRevision
+    fun beginNativeSignIn(): NativeSignInAttempt {
+        check(!disposed) { "Authentication service disposed" }
+        val revision = ++authAttemptRevision
         callbackRouter.cancelFlow()
-        val id = currentUser?.id
-        val generation = identityGeneration
-        val session = gateway.googleSession(idToken, nonce)
-        if (!isCurrent(id, generation) || attempt != authAttemptRevision) throw kotlinx.coroutines.CancellationException("Account changed")
-        gateway.importSession(session) { isCurrent(id, generation) && attempt == authAttemptRevision }
+        return NativeSignInAttempt(revision, currentUser?.id, identityGeneration)
     }
 
-    suspend fun signInWithMagicLink(email: String) = startExternal { gateway.startMagicLink(email) }
-    suspend fun signInWithGoogleBrowser() = startExternal { gateway.startBrowserGoogle() }
+    fun isCurrent(attempt: NativeSignInAttempt) = isCurrent(attempt.accountId, attempt.generation) && attempt.revision == authAttemptRevision
 
-    private suspend fun startExternal(start: suspend () -> Unit) {
-        gateway.awaitInitialization()
-        ready.await()
-        ++authAttemptRevision
-        val attemptId = callbackRouter.beginFlow(ready = false)
+    suspend fun signInWithGoogle(idToken: String, nonce: String? = null, attempt: NativeSignInAttempt = beginNativeSignIn()) {
         try {
-            start()
-            callbackRouter.completeFlow(attemptId)
+            if (!isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+            val session = gateway.googleSession(idToken, nonce)
+            if (!isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+            gateway.importSession(session) { isCurrent(attempt) }
         } catch (error: Exception) {
-            callbackRouter.failFlow(attemptId)
+            if (!isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+            throw error
+        }
+    }
+
+    suspend fun signInWithMagicLink(email: String) = startExternal { redirect, current -> gateway.startMagicLink(email, redirect, current) }
+    suspend fun signInWithGoogleBrowser() = startExternal { redirect, current -> gateway.startBrowserGoogle(redirect, current) }
+
+    private suspend fun startExternal(start: suspend (String, () -> Boolean) -> Unit) {
+        val initiating = beginNativeSignIn() // Supersede before awaiting SDK initialization.
+        var attemptId: String? = null
+        var request = initiating
+        try {
+            gateway.awaitInitialization()
+            ready.await()
+            // The first signed-out initialization is not an account replacement.
+            if (initiating.generation == 0L && identityGeneration == 1L && currentUser?.id == initiating.accountId) {
+                request = NativeSignInAttempt(initiating.revision, currentUser?.id, identityGeneration)
+            }
+            if (!isCurrent(request)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+            val id = callbackRouter.beginFlow(ready = false)
+            attemptId = id
+            val current = { isCurrent(request) && callbackRouter.isCurrentFlow(id) }
+            start(authRedirectUrl(id), current)
+            if (!current()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+            callbackRouter.completeFlow(id)
+        } catch (error: Exception) {
+            val stillCurrent = isCurrent(request) && (attemptId == null || callbackRouter.isCurrentFlow(attemptId))
+            attemptId?.let { callbackRouter.failFlow(it) }
+            if (!stillCurrent) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
             throw error
         }
     }
 
     suspend fun signOut() {
+        ++authAttemptRevision
+        callbackRouter.cancelFlow()
         acceptSession(null)
         gateway.signOut()
     }

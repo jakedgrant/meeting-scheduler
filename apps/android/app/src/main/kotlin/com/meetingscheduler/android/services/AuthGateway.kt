@@ -9,16 +9,20 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.withLock
 
 const val AUTH_REDIRECT_URL = "meetingscheduler://auth/callback"
+fun authRedirectUrl(attemptId: String): String {
+    require(java.util.UUID.fromString(attemptId).toString() == attemptId)
+    return "$AUTH_REDIRECT_URL?attempt=$attemptId"
+}
 
 /** Injected boundary retains the pinned SDK's persistence, PKCE verifier and refresh logic. */
 interface AuthGateway {
     val status: Flow<SessionStatus>
     suspend fun loadProfile(userId: String): Profile
     suspend fun awaitInitialization()
-    suspend fun exchangeCode(code: String): UserSession
+    suspend fun exchangeCode(code: String, isCurrent: () -> Boolean = { true }): UserSession
     suspend fun googleSession(idToken: String, nonce: String?): UserSession
-    suspend fun startMagicLink(email: String)
-    suspend fun startBrowserGoogle()
+    suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean = { true })
+    suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean = { true })
     suspend fun signOut()
     suspend fun importSession(session: UserSession, isCurrent: () -> Boolean = { true })
 }
@@ -37,7 +41,10 @@ class SupabaseAuthGateway(
     }.decodeSingle()
     override suspend fun awaitInitialization() = client.auth.awaitInitialization()
     // Do not import until the router verifies that the initiating session still owns it.
-    override suspend fun exchangeCode(code: String) = client.auth.exchangeCodeForSession(code, saveSession = false)
+    override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean) = starts.withLock {
+        if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+        client.auth.exchangeCodeForSession(code, saveSession = false)
+    }
     override suspend fun googleSession(idToken: String, nonce: String?): UserSession {
         var result: UserSession? = null
         io.github.jan.supabase.auth.providers.builtin.IDToken.login(client, onSuccess = { result = it }, redirectUrl = null) {
@@ -47,10 +54,18 @@ class SupabaseAuthGateway(
         }
         return checkNotNull(result)
     }
-    override suspend fun startMagicLink(email: String) = starts.withLock { client.auth.signInWith(io.github.jan.supabase.auth.providers.builtin.OTP, redirectUrl = AUTH_REDIRECT_URL) {
-        this.email = email; createUser = true
-    } }
-    override suspend fun startBrowserGoogle() = starts.withLock { client.auth.signInWith(io.github.jan.supabase.auth.providers.Google, redirectUrl = AUTH_REDIRECT_URL) }
+    override suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean) = starts.withLock {
+        if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+        client.auth.signInWith(io.github.jan.supabase.auth.providers.builtin.OTP, redirectUrl = redirectUrl) {
+            this.email = email; createUser = true
+        }
+        if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+    }
+    override suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean) = starts.withLock {
+        if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+        client.auth.signInWith(io.github.jan.supabase.auth.providers.Google, redirectUrl = redirectUrl)
+        if (!isCurrent()) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
+    }
     override suspend fun signOut() {
         val previous = kotlinx.coroutines.withContext(dispatcher) { mutations.withLock {
             val previous = client.auth.currentSessionOrNull()

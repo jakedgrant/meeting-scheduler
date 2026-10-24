@@ -17,16 +17,17 @@ private fun profile(id: String) = Profile(id, "$id@example.test", createdAt = ko
 private class Gateway : AuthGateway {
     override val status = MutableSharedFlow<SessionStatus>()
     var load: suspend (String) -> Profile = { profile(it) }
+    var initialize: suspend () -> Unit = {}
     var browser: suspend () -> Unit = {}
     var magic: suspend () -> Unit = {}
     var native: suspend () -> UserSession = { session("A") }
     val installed = mutableListOf<String>()
     override suspend fun loadProfile(userId: String) = load(userId)
-    override suspend fun awaitInitialization() {}
-    override suspend fun exchangeCode(code: String) = session("A")
+    override suspend fun awaitInitialization() = initialize()
+    override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean) = session("A")
     override suspend fun googleSession(idToken: String, nonce: String?) = native()
-    override suspend fun startMagicLink(email: String) = magic()
-    override suspend fun startBrowserGoogle() = browser()
+    override suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean) = magic()
+    override suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean) = browser()
     override suspend fun signOut() {}
     override suspend fun importSession(session: UserSession, isCurrent: () -> Boolean) { installed += session.user!!.id }
     suspend fun user(id: String?) { status.emit(if (id == null) SessionStatus.NotAuthenticated() else SessionStatus.Authenticated(session(id))) }
@@ -297,8 +298,40 @@ class SessionLifecycleTest {
         gateway.browser = { reply.await(); error("browser cancelled") }
         val old = async { runCatching { auth.signInWithGoogleBrowser() } }
         yield(); auth.signInWithMagicLink("A@example.test"); reply.complete(Unit); old.await()
-        auth.callbackRouter.route("meetingscheduler://auth/callback?code=latest-otp")
+        auth.callbackRouter.route(authRedirectUrl(auth.callbackRouter.pendingAttemptId!!) + "&code=latest-otp")
         assertEquals(listOf("A"), gateway.installed)
+        auth.dispose(); scope.cancel()
+    }
+
+    @Test(timeout = 15000) fun initializationPublishesOnlyLatestRequestedIntentAndRestoredAccountReplacementRejectsIt() = runBlocking {
+        for (restored in listOf<String?>(null, "B")) {
+            val scope = createApplicationScope(Dispatchers.Unconfined); val gateway = Gateway()
+            val ready = CompletableDeferred<Unit>(); gateway.initialize = { ready.await() }
+            var browser = 0; var magic = 0
+            gateway.browser = { browser++ }; gateway.magic = { magic++ }
+            val auth = AuthService(scope, null, gateway)
+            val old = async { runCatching { auth.signInWithMagicLink("old@example.test") } }; yield()
+            val current = async { runCatching { auth.signInWithGoogleBrowser() } }; yield()
+            gateway.user(restored); ready.complete(Unit)
+            assertTrue(old.await().exceptionOrNull() is CancellationException)
+            assertEquals(0, magic)
+            if (restored == null) { assertTrue(current.await().isSuccess); assertEquals(1, browser); assertNotNull(auth.callbackRouter.pendingAttemptId) }
+            else { assertTrue(current.await().exceptionOrNull() is CancellationException); assertEquals(0, browser); assertNull(auth.callbackRouter.pendingAttemptId) }
+            auth.dispose(); scope.cancel()
+        }
+    }
+
+    @Test(timeout = 15000) fun credentialManagerAttemptIsSupersededBeforeNativeSdkCallAndSignoutCancelsPendingLink() = runBlocking {
+        val scope = createApplicationScope(Dispatchers.Unconfined)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        gateway.user(null); var nativeCalls = 0
+        gateway.native = { nativeCalls++; session("A") }
+        val credentialManagerAttempt = auth.beginNativeSignIn()
+        auth.signInWithMagicLink("latest@example.test")
+        assertNotNull(auth.callbackRouter.pendingAttemptId)
+        val old = runCatching { auth.signInWithGoogle("old-token", "nonce", credentialManagerAttempt) }
+        assertTrue(old.exceptionOrNull() is CancellationException); assertEquals(0, nativeCalls)
+        auth.signOut(); assertNull(auth.callbackRouter.pendingAttemptId)
         auth.dispose(); scope.cancel()
     }
 

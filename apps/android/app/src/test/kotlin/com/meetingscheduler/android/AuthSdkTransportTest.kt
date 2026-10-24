@@ -33,7 +33,7 @@ class AuthSdkTransportTest {
         }
     } as Settings
 
-    private fun client(engine: MockEngine, manager: AtomicSessionManager, refresh: Boolean = false, launch: ((String) -> Unit)? = null) = createSupabaseClient("https://unit.invalid", "unit-key") {
+    private fun client(engine: MockEngine, manager: AtomicSessionManager, refresh: Boolean = false, launch: (suspend (String) -> Unit)? = null) = createSupabaseClient("https://unit.invalid", "unit-key") {
         httpEngine = engine
         install(Auth) {
             autoLoadFromStorage = true; autoSaveToStorage = true; alwaysAutoRefresh = refresh
@@ -168,12 +168,14 @@ class AuthSdkTransportTest {
         }, AtomicSessionManager("session", settings(mutableMapOf())), launch = { urls += it })
         client.auth.setSessionStatus(SessionStatus.NotAuthenticated())
         val gateway = SupabaseAuthGateway(client, Dispatchers.Unconfined)
-        gateway.startMagicLink("A@example.test")
+        val redirect = authRedirectUrl(java.util.UUID.randomUUID().toString())
+        gateway.startMagicLink("A@example.test", redirect)
         assertTrue(requests.single().contains("redirect_to=meetingscheduler%3A%2F%2Fauth%2Fcallback"))
         assertTrue(requests.single().contains("code_challenge"))
-        gateway.startBrowserGoogle()
+        gateway.startBrowserGoogle(redirect)
         val browser = Url(urls.single())
-        assertEquals(AUTH_REDIRECT_URL, browser.parameters["redirect_to"])
+        assertEquals(redirect, browser.parameters["redirect_to"])
+        assertEquals(redirect, Url(requests.first().substringBefore(" ")).parameters["redirect_to"])
         assertEquals("google", browser.parameters["provider"])
         assertNotNull(browser.parameters["code_challenge"])
         val native = gateway.googleSession("google-id-token", "original-nonce")
@@ -181,6 +183,152 @@ class AuthSdkTransportTest {
         assertTrue(requests.last().contains("google-id-token")); assertTrue(requests.last().contains("original-nonce"))
         assertNull(client.auth.currentSessionOrNull())
         client.close()
+    }
+
+    private fun service(client: io.github.jan.supabase.SupabaseClient, scope: CoroutineScope): AuthService {
+        val gateway = SupabaseAuthGateway(client, Dispatchers.Unconfined)
+        return AuthService(scope, null, object : AuthGateway by gateway {
+            override suspend fun loadProfile(userId: String) = Profile(userId, "$userId@example.test",
+                createdAt = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z"), updatedAt = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z"))
+        })
+    }
+
+    @Test(timeout = 15000) fun originatingUriMustMatchLatestIntentBeforeRealSdkTransportAcrossAccountBoundaries() = runBlocking {
+        for (returning in listOf(false, true)) {
+            val requests = mutableListOf<String>()
+            val client = client(MockEngine { request ->
+                requests += request.url.toString()
+                if (request.url.parameters["grant_type"] == "pkce") respond(body("new-account"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                else respond("{}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            }, AtomicSessionManager("session", settings(mutableMapOf())))
+            client.auth.setSessionStatus(SessionStatus.NotAuthenticated())
+            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = service(client, scope)
+            val gateway = SupabaseAuthGateway(client, Dispatchers.Unconfined)
+            gateway.importSession(session("A")); withTimeout(1000) { while (auth.currentUser?.id != "A") yield() }; auth.signInWithMagicLink("A@example.test")
+            val old = auth.callbackRouter.pendingAttemptId!!
+            if (returning) { client.auth.clearSession(); withTimeout(1000) { while (auth.isAuthenticated) yield() }; gateway.importSession(session("A", token = "new-A")) }
+            else gateway.importSession(session("B"))
+            withTimeout(1000) { while (auth.currentUser?.id != if (returning) "A" else "B") yield() }
+            auth.signInWithMagicLink("current@example.test")
+            val current = auth.callbackRouter.pendingAttemptId!!; val before = requests.size
+            for (query in listOf("code=old-valid-code", "error=access_denied", "code=a&code=b")) auth.handleDeepLink(authRedirectUrl(old) + "&" + query)
+            assertEquals(before, requests.size); assertNull(auth.callbackError)
+            assertEquals(current, auth.callbackRouter.pendingAttemptId)
+            auth.handleDeepLink(authRedirectUrl(current) + "&code=genuine-new-code")
+            withTimeout(1000) { while (client.auth.currentUserOrNull()?.id != "new-account" || auth.currentUser?.id != "new-account") yield() }
+            assertEquals("new-account", auth.currentUser!!.id); assertEquals(before + 1, requests.size)
+            assertNull(auth.callbackError); assertNull(auth.callbackRouter.pendingAttemptId)
+            auth.dispose(); scope.cancel(); client.close()
+        }
+    }
+
+    @Test(timeout = 15000) fun delayedInitiationSuccessAndFailureCannotDeleteNewIntentOrBorrowItsRotatedVerifier() = runBlocking {
+        for (fails in listOf(false, true)) {
+            val started = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
+            var otp = 0; val exchanges = mutableListOf<String>()
+            val client = client(MockEngine { request ->
+                if (request.url.parameters["grant_type"] == "pkce") {
+                    exchanges += request.body.toByteArray().decodeToString()
+                    respond(body("current"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                } else {
+                    if (++otp == 1) { started.complete(Unit); reply.await() }
+                    if (otp == 1 && fails) respond("{\"message\":\"old offline failure\"}", HttpStatusCode.BadRequest, headersOf(HttpHeaders.ContentType, "application/json"))
+                    else respond("{}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                }
+            }, AtomicSessionManager("session", settings(mutableMapOf())))
+            client.auth.setSessionStatus(SessionStatus.NotAuthenticated())
+            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = service(client, scope)
+            val old = async { runCatching { auth.signInWithMagicLink("old@example.test") } }
+            started.await(); val oldId = auth.callbackRouter.pendingAttemptId!!
+            val oldVerifier = client.auth.codeVerifierCache.loadCodeVerifier()
+            val next = async { auth.signInWithMagicLink("new@example.test") }
+            yield(); val current = auth.callbackRouter.pendingAttemptId!!
+            assertNotEquals(oldId, current)
+            auth.handleDeepLink(authRedirectUrl(oldId) + "&code=old")
+            auth.handleDeepLink(authRedirectUrl(oldId) + "&error=access_denied")
+            assertTrue(exchanges.isEmpty()); assertNull(auth.callbackError)
+            // Receipt of the genuine current callback waits for queued verifier rotation.
+            auth.handleDeepLink(authRedirectUrl(current) + "&code=new")
+            assertTrue(exchanges.isEmpty())
+            reply.complete(Unit); assertTrue(old.await().exceptionOrNull() is CancellationException); next.await()
+            withTimeout(1000) { while (client.auth.currentUserOrNull()?.id != "current") yield() }
+            assertEquals(1, exchanges.size); assertTrue(exchanges.single().contains("new"))
+            assertFalse(exchanges.single().contains(oldVerifier!!)); assertNull(auth.callbackError)
+            auth.dispose(); scope.cancel(); client.close()
+        }
+    }
+
+    @Test(timeout = 15000) fun delayedBrowserLaunchSuccessAndFailureCannotClearNewOtpIntent() = runBlocking {
+        for (fails in listOf(false, true)) {
+            val launched = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>(); val urls = mutableListOf<String>()
+            val client = client(MockEngine { request ->
+                if (request.url.parameters["grant_type"] == "pkce") respond(body("current"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                else respond("{}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            }, AtomicSessionManager("session", settings(mutableMapOf())), launch = {
+                urls += it; launched.complete(Unit); reply.await(); if (fails) error("old browser launch failed")
+            })
+            client.auth.setSessionStatus(SessionStatus.NotAuthenticated())
+            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = service(client, scope)
+            val old = async { runCatching { auth.signInWithGoogleBrowser() } }; launched.await()
+            val oldRedirect = Url(urls.single()).parameters["redirect_to"]!!
+            val next = async { auth.signInWithMagicLink("new@example.test") }; yield()
+            val current = auth.callbackRouter.pendingAttemptId!!
+            auth.handleDeepLink(oldRedirect + "&error=access_denied")
+            assertNull(auth.callbackError); assertEquals(current, auth.callbackRouter.pendingAttemptId)
+            reply.complete(Unit); assertTrue(old.await().exceptionOrNull() is CancellationException); next.await()
+            assertEquals(current, auth.callbackRouter.pendingAttemptId)
+            auth.handleDeepLink(authRedirectUrl(current) + "&code=current")
+            withTimeout(1000) { while (client.auth.currentUserOrNull()?.id != "current") yield() }
+            assertNull(auth.callbackError); auth.dispose(); scope.cancel(); client.close()
+        }
+    }
+
+    @Test(timeout = 15000) fun exchangeAndNewInitiationSerializeSoOldCodeCannotDeleteTheNewVerifier() = runBlocking {
+        val started = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
+        var tokenCalls = 0; val bodies = mutableListOf<String>()
+        val client = client(MockEngine { request ->
+            if (request.url.parameters["grant_type"] == "pkce") {
+                bodies += request.body.toByteArray().decodeToString()
+                if (++tokenCalls == 1) { started.complete(Unit); reply.await() }
+                respond(body(if (tokenCalls == 1) "old" else "new"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            } else respond("{}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        }, AtomicSessionManager("session", settings(mutableMapOf())))
+        client.auth.setSessionStatus(SessionStatus.NotAuthenticated())
+        val scope = createApplicationScope(Dispatchers.Unconfined); val auth = service(client, scope)
+        auth.signInWithMagicLink("old@example.test")
+        auth.handleDeepLink(authRedirectUrl(auth.callbackRouter.pendingAttemptId!!) + "&code=old")
+        started.await()
+        val next = async { auth.signInWithMagicLink("new@example.test") }; yield()
+        val current = auth.callbackRouter.pendingAttemptId!!
+        reply.complete(Unit); next.await()
+        assertNull(client.auth.currentSessionOrNull())
+        val verifier = client.auth.codeVerifierCache.loadCodeVerifier()!!
+        auth.handleDeepLink(authRedirectUrl(current) + "&code=new")
+        withTimeout(1000) { while (client.auth.currentUserOrNull()?.id != "new") yield() }
+        assertTrue(bodies.last().contains(verifier)); assertFalse(bodies.first().contains(verifier)); assertNull(auth.callbackError)
+        auth.dispose(); scope.cancel(); client.close()
+    }
+
+    @Test(timeout = 15000) fun delayedNativeSdkResultCannotInstallAfterDisposeOrExplicitSignedOutSignout() = runBlocking {
+        for (dispose in listOf(false, true)) for (fails in listOf(false, true)) {
+            val started = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>(); val disk = mutableMapOf<String, String>()
+            val client = client(MockEngine {
+                started.complete(Unit); reply.await()
+                if (fails) respond("{\"error\":\"invalid_grant\"}", HttpStatusCode.BadRequest, headersOf(HttpHeaders.ContentType, "application/json"))
+                else respond(body("old-native"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            }, AtomicSessionManager("session", settings(disk)))
+            client.auth.setSessionStatus(SessionStatus.NotAuthenticated())
+            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = service(client, scope)
+            val native = async { runCatching { auth.signInWithGoogle("token", "nonce") } }; started.await()
+            val obsolete = auth.callbackRouter.beginFlow()
+            if (dispose) auth.dispose() else auth.signOut()
+            reply.complete(Unit)
+            assertTrue(native.await().exceptionOrNull() is CancellationException)
+            assertNull(auth.callbackRouter.pendingAttemptId); assertNull(client.auth.currentSessionOrNull()); assertTrue(disk.isEmpty()); assertNull(auth.callbackError)
+            auth.handleDeepLink(authRedirectUrl(obsolete) + "&code=old")
+            assertNull(client.auth.currentSessionOrNull())
+            auth.dispose(); scope.cancel(); client.close()
+        }
     }
 
     @Test(timeout = 15000) fun commandDispatchKeepsTheOriginatingCredentialWhenSdkTokenResolutionWaitsAcrossAccountChanges() = runBlocking {
@@ -261,10 +409,10 @@ class AuthSdkTransportTest {
             override val status = events
             override suspend fun loadProfile(userId: String) = Profile(userId, "$userId@example.test", createdAt = stamp, updatedAt = stamp)
             override suspend fun awaitInitialization() {}
-            override suspend fun exchangeCode(code: String): UserSession = error("unused")
+            override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean): UserSession = error("unused")
             override suspend fun googleSession(idToken: String, nonce: String?): UserSession = error("unused")
-            override suspend fun startMagicLink(email: String) {}
-            override suspend fun startBrowserGoogle() {}
+            override suspend fun startMagicLink(email: String, redirectUrl: String, isCurrent: () -> Boolean) {}
+            override suspend fun startBrowserGoogle(redirectUrl: String, isCurrent: () -> Boolean) {}
             override suspend fun signOut() {}
             override suspend fun importSession(session: UserSession, isCurrent: () -> Boolean) {}
         }
