@@ -68,3 +68,45 @@ The final source tree is `50933caff3bd8e84b8053c102cce2a5b85ee3212`. The validat
 At **2026-10-24 08:48 UTC**, `adb -s emulator-5582 emu kill` returned OK. Both task-owned AVDs (`session-f12-f14-resume` and the stopped earlier `session-f12-f14`) were deleted with avdmanager. Ports 5582/5583 had no listener afterward. The task-owned Gradle cache reported no running Gradle daemons. The isolated downloaded SDK image and copied build cache remain under `/private/tmp` for review; no emulator, localhost server, database or provider session remains reserved.
 
 Retained local logs: `/private/tmp/android-session-dispatch-final2-build.log`, `/private/tmp/android-session-final-runtime.log`, `/private/tmp/android-session-final-cold.log`, `/private/tmp/android-session-final-calendar.log`, `/private/tmp/android-session-final-invalid.log`, and `/private/tmp/android-session-final-consumed.xml`. The previous interrupted run and test-harness failures are not counted as passing evidence. The final runtime result supersedes them.
+
+## Originating callback UUID follow-up
+
+Source **`a025ca5f80bee73ee26b7b762023325186a34495`**, followed by instrumentation harness correction **`d60192c9cd11728b254d7fabe28aa7bbcd5454f5`**. These extend the earlier deliveries above; the final tested source is `d60192c9cd11728b254d7fabe28aa7bbcd5454f5`.
+
+The coordinator identified a receipt-time ownership gap: an old URI carried only a code, so a newer pending attempt could be mistaken for its origin. OTP and browser Google now send `meetingscheduler://auth/callback?attempt=<uuid>` as their SDK redirect. The router requires exactly one canonical UUID matching persisted ownership before exchange, error reporting, replay tracking or pending-state changes. Old links received after B or A → logout → A, and links without an originating UUID, cannot borrow a newer marker. Query and error-only fragment cancellations require the same match; access-token fragments remain rejected.
+
+SDK initiation and code exchange share one mutex. A queued obsolete initiation/exchange checks its owner before SDK entry, and an older successful exchange cannot delete a newer verifier. New native, browser and OTP requests supersede before initialization awaits. A native revision is captured before Credential Manager opens and reaches both native UI paths. Explicit sign-out invalidates pending work even when already signed out. Disposal fences delayed caller-owned native results and queued imports. Old failure and cleanup cannot report into or remove a newer attempt; UI loading cleanup checks its own request order.
+
+The same offline Gradle command above completed on the final source: **64 JVM tests, zero failures; debug and instrumentation APKs built**. Counts: 16 production session-service tests, nine router tests, 13 real SDK transport tests, 11 creation, six availability, six lifetime, two model and one example. The existing originating-credential dispatch and creation/availability recovery tests remain passing.
+
+New production tests cover old URI receipt after newer attempts across B and returning A; initialization races with signed-out and restored B states; a Credential Manager result superseded before its SDK call; delayed native SDK success and failure after disposal or explicit already-signed-out sign-out; delayed OTP and browser initiation success/failure during verifier rotation; a genuine callback waiting for readiness; and old exchange completion before queued new initiation. The transport tests run AuthService and the production gateway against Supabase 3.3.0/Ktor MockEngine with injected profile fixtures and AtomicSessionManager. They inspect exact redirect queries, PKCE request bodies, actual SDK credentials, persisted credentials and pending attempts. No provider network is used.
+
+### Fresh offline runtime and cleanup
+
+Fresh AVD `session-android-attempt`, directory `/private/tmp/session-android-attempt-avd`, serial `emulator-5584`, unused console/ADB ports 5584/5585. Coordinator approval was for 30 minutes from **2026-10-24 18:43:07 UTC**. It used the existing task-owned isolated Android 36 Google APIs ARM64 image. Airplane mode was 1 and Wi-Fi was 0 before installation; mobile data was disabled. No real account was installed or used.
+
+The final APKs were installed and this command returned **OK (2 tests)** in **2.776 seconds**:
+
+```bash
+adb -s emulator-5584 shell am instrument -w \
+  -e class com.meetingscheduler.android.SessionActivityTest \
+  -e timeout_msec 20000 \
+  com.meetingscheduler.android.debug.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+The tests retain the application-owned AuthService and pending attempt across Activity recreation, reject an obsolete UUID delivered through `onNewIntent`, accept the matching current callback, separate calendar/other paths, and exercise launch-intent duplicate delivery. Two earlier harness runs timed out because a warm VIEW intent changed Android's Activity record before ActivityScenario recreation. The corrected harness recreates first, then delivers warm intents. Those failed runs are excluded from the final result.
+
+A separate process-cold check seeded only a synthetic UUID/owner marker in `auth_attempt_v1` after force-stop. The obsolete UUID launched **COLD, 1064 ms**, displayed no callback error and retained the current UUID. The genuine current query cancellation then arrived warm, displayed cancellation and consumed the marker. A second seeded matching callback with an error-only fragment launched **COLD, 985 ms**, displayed cancellation and left `<map />` in pending storage. The warm calendar route reached the existing Activity; the malformed `/auth/other` route failed implicit intent resolution. [Final offline screen](android-attempt-cold.png).
+
+These commands need quotes on the Android shell as well as the host shell so `&` is preserved:
+
+```bash
+adb -s emulator-5584 shell "am start -W -a android.intent.action.VIEW -d 'meetingscheduler://auth/callback?attempt=<uuid>&error=access_denied'"
+adb -s emulator-5584 shell "am start -W -a android.intent.action.VIEW -d 'meetingscheduler://auth/callback?attempt=<uuid>#error=access_denied&error_description=cancelled'"
+```
+
+At **2026-10-24 18:50:32 UTC**, `adb -s emulator-5584 emu kill` returned OK and avdmanager deleted `session-android-attempt`. A subsequent check found no listener on 5584/5585 and no AVD remaining in its directory. The task Gradle cache reported no running daemons. The isolated image/cache and local evidence logs remain; no runtime reservation remains active.
+
+Final logs: `/private/tmp/android-attempt-final3-build.log`, `/private/tmp/android-attempt-final3-runtime.log`, `/private/tmp/android-attempt-final-cold-check.log`, `/private/tmp/android-attempt-final-{stale-cold,current-warm,current-cold}-{ui,pending}.xml`, `/private/tmp/android-attempt-final-calendar.log`, and `/private/tmp/android-attempt-final-invalid.log`. The reproduction script is `/private/tmp/android-attempt-runtime-check.py`. A first manually unquoted ADB diagnostic dropped URL parameters at the Android shell; only the final correctly quoted script runs above count as cold/warm evidence.
+
+The owner must configure `meetingscheduler://auth/callback\?attempt=*` under Supabase's documented glob rules and verify query preservation through real OTP/browser providers. Hosted allowlist acceptance, email delivery, Google consent/cancellation and real sign-in remain unverified. No hosted configuration changed. See the updated [external configuration actions](../../../android-auth-callbacks.md#required-external-configuration). Combined independent review remains the coordinator's integration gate.
