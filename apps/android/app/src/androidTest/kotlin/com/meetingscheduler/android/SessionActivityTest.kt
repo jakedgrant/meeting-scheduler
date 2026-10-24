@@ -49,7 +49,7 @@ class SessionActivityTest {
         val app = context.applicationContext as MeetingSchedulerApplication
         instrumentation.runOnMainSync { app.container.authService.callbackRouter.beginFlow() }
         val link = "meetingscheduler://auth/callback?error=access_denied&description=cold-runtime"
-        val launchIntent = Intent(context, MainActivity::class.java).setData(Uri.parse(link))
+        val launchIntent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(Uri.parse(link))
         ActivityScenario.launch<MainActivity>(launchIntent).use { scenario ->
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
