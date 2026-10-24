@@ -10,6 +10,7 @@ private final class LifecycleURLProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() { Self.waiting.withLock { $0.append(self) } }
     override func stopLoading() {}
+    static func requestURLs() -> [URL] { waiting.withLock { $0.map { $0.request.url! } } }
     static func count(path: String, method: String? = nil) -> Int {
         waiting.withLock {
             $0.filter { $0.request.url?.path == path && (method == nil || $0.request.httpMethod == method) }.count
@@ -45,6 +46,16 @@ private final class AdaptationGate {
     var waiting: [CheckedContinuation<Void, Never>] = []
     func pause() async { await withCheckedContinuation { waiting.append($0) } }
     func release() { waiting.removeFirst().resume() }
+}
+
+@MainActor
+private final class OAuthReplyGate {
+    var urls: [URL] = []
+    var replies: [CheckedContinuation<URL, any Error>] = []
+    func launch(_ url: URL) async throws -> URL {
+        urls.append(url)
+        return try await withCheckedThrowingContinuation { replies.append($0) }
+    }
 }
 
 @MainActor
@@ -264,15 +275,42 @@ final class SessionTransportTests: XCTestCase {
         }
     }
 
-    private func adapter() -> SessionAuthAdapter {
+    private func adapter(storage: LifecycleAuthStorage = LifecycleAuthStorage()) -> SessionAuthAdapter {
         LifecycleURLProtocol.waiting.withLock { $0 = [] }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [LifecycleURLProtocol.self]
         let transport = URLSession(configuration: configuration)
         return SessionAuthAdapter(
             url: URL(string: "https://session-transport.invalid")!, key: "test-only",
-            storage: LifecycleAuthStorage(), fetch: { try await transport.data(for: $0) }, autoRefreshToken: false)
+            storage: storage, fetch: { try await transport.data(for: $0) }, autoRefreshToken: false)
     }
+    private func callback(_ id: UUID, code: String = "code") -> URL {
+        var parts = URLComponents(url: AuthCallbackIntentStore.redirectURL(attempt: id), resolvingAgainstBaseURL: false)!
+        parts.queryItems!.append(URLQueryItem(name: "code", value: code))
+        return parts.url!
+    }
+    private func correlationService(
+        adapter: SessionAuthAdapter, sdk: SupabaseClient, intents: AuthCallbackIntentStore,
+        launch: (@MainActor (URL) async throws -> URL)? = nil
+    ) -> AuthService {
+        var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
+        dependencies.accountChanged = { _ in adapter.accountDidChange() }
+        dependencies.authRevision = { adapter.revision }
+        dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
+        dependencies.invalidateAuthAttempts = { adapter.accountDidChange() }
+        dependencies.signOutSession = { session, revision in
+            try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
+        }
+        dependencies.callbackIntents = intents
+        dependencies.launchOAuth = launch
+        dependencies.refreshCalendar = {}
+        dependencies.refreshProviderIdentity = {}
+        dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
+        return AuthService(
+            persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk, auth: adapter.auth)
+    }
+
     private func wireSession(_ id: UUID, token: String) throws -> Data {
         let user = User(id: id, appMetadata: [:], userMetadata: [:], aud: "authenticated", createdAt: Date(), updatedAt: Date())
         let session = Session(
@@ -363,17 +401,31 @@ final class SessionTransportTests: XCTestCase {
         let suite = "callback-cold-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        AuthCallbackIntentStore(defaults: defaults).begin(session: nil)
+        let coldIntent = AuthCallbackIntentStore(defaults: defaults).begin(session: nil)
         var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
         dependencies.accountChanged = { _ in adapter.accountDidChange() }
         dependencies.authRevision = { adapter.revision }
+        dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.refreshCalendar = {}
         dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
         dependencies.callbackIntents = AuthCallbackIntentStore(defaults: defaults)
         let service = AuthService(
             persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk, auth: adapter.auth)
-        let link = URL(string: "meetingscheduler://auth/callback?code=cold-code")!
+        let link = callback(coldIntent, code: "cold-code")
+        for malformed in [
+            "meetingscheduler://auth/callback?code=old",
+            "meetingscheduler://auth/callback?attempt=invalid&code=old",
+            "meetingscheduler://auth/callback?attempt=\(coldIntent)&attempt=\(coldIntent)&code=old",
+            "meetingscheduler://auth/callback?attempt=\(coldIntent)&code=",
+            "meetingscheduler://auth/callback?attempt=\(coldIntent)&code=one&code=two",
+            "meetingscheduler://auth/callback?attempt=\(coldIntent)#access_token=old",
+        ] {
+            await service.handleDeepLink(url: URL(string: malformed)!)
+            XCTAssertEqual(dependencies.callbackIntents?.current?.id, coldIntent)
+            XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+        }
         let callback = Task { await service.handleDeepLink(url: link) }
         await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
         let a = UUID()
@@ -392,6 +444,256 @@ final class SessionTransportTests: XCTestCase {
         service.dispose()
     }
 
+    func testOlderLinkAfterNewOTPIntentCannotConsumeItBeforeOrAfterInitiationReply() async throws {
+        for signedOut in [false, true] {
+            for fails in [false, true] {
+                let adapter = adapter()
+                let sdk = client()
+                let a = UUID()
+                let b = UUID()
+                try await signIn(a, auth: adapter.auth)
+                let suite = "otp-correlation-\(UUID())"
+                let defaults = UserDefaults(suiteName: suite)!
+                defer { defaults.removePersistentDomain(forName: suite) }
+                let intents = AuthCallbackIntentStore(defaults: defaults)
+                let service = correlationService(adapter: adapter, sdk: sdk, intents: intents)
+                await service.initialize()
+                let old = Task { try await service.signInWithMagicLink(email: "old@example.invalid") }
+                await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1 }
+                let oldId = try XCTUnwrap(intents.current?.id)
+                if signedOut {
+                    let logout = Task { try await service.signOut() }
+                    await settle { LifecycleURLProtocol.count(path: "/auth/v1/logout") == 1 }
+                    LifecycleURLProtocol.reply(path: "/auth/v1/logout", status: 204, data: Data())
+                    try await logout.value
+                    XCTAssertNil(service.currentUserId)
+                } else {
+                    try await signIn(b, auth: adapter.auth)
+                    await settle { service.currentUserId == b }
+                }
+                let current = Task { try await service.signInWithMagicLink(email: "current@example.invalid") }
+                await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 2 }
+                let currentId = try XCTUnwrap(intents.current?.id)
+                XCTAssertNotEqual(oldId, currentId)
+                let requestURLs = LifecycleURLProtocol.requestURLs()
+                let redirects = requestURLs.filter { $0.path == "/auth/v1/otp" }.map { requestURL in
+                    URLComponents(url: requestURL, resolvingAgainstBaseURL: false)?.queryItems?.first {
+                        $0.name == "redirect_to"
+                    }?.value
+                }
+                XCTAssertEqual(
+                    redirects,
+                    [
+                        AuthCallbackIntentStore.redirectURL(attempt: oldId).absoluteString,
+                        AuthCallbackIntentStore.redirectURL(attempt: currentId).absoluteString,
+                    ])
+                // The old URL arrives only AFTER the current intent/verifier exists.
+                await service.handleDeepLink(url: callback(oldId, code: "valid-old-code"))
+                XCTAssertEqual(intents.current?.id, currentId)
+                XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+                LifecycleURLProtocol.reply(
+                    path: "/auth/v1/otp", status: fails ? 400 : 200,
+                    data: fails ? Data("{\"msg\":\"expired\"}".utf8) : Data("{}".utf8))
+                do {
+                    try await old.value
+                    XCTFail("Older OTP initiation must be canceled")
+                } catch {}
+                XCTAssertEqual(intents.current?.id, currentId)
+                LifecycleURLProtocol.reply(path: "/auth/v1/otp", data: Data("{}".utf8))
+                try await current.value
+                let accepted = Task { await service.handleDeepLink(url: self.callback(currentId)) }
+                await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+                LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(b, token: "current-B"))
+                await accepted.value
+                await settle { service.currentUserId == b }
+                XCTAssertEqual(adapter.auth.currentUser?.id, b)
+                service.dispose()
+            }
+        }
+    }
+
+    func testObsoleteInitiationCannotRotateNewIntentVerifierAcrossSDKExecutorHop() async throws {
+        let storage = LifecycleAuthStorage()
+        let adapter = adapter(storage: storage)
+        let sdk = client()
+        let pause = AdaptationGate()
+        let suite = "otp-verifier-race-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let intents = AuthCallbackIntentStore(defaults: defaults)
+        let oldId = intents.begin(session: nil)
+        adapter.beginAuthAttempt(oldId)
+        let old = Task {
+            try await AuthAttemptContext.$intentId.withValue(oldId) {
+                await pause.pause()  // emulate the SDK hop after intent.begin, before verifier rotation
+                try await adapter.auth.signInWithOTP(
+                    email: "old@example.invalid", redirectTo: AuthCallbackIntentStore.redirectURL(attempt: oldId))
+            }
+        }
+        await settle { pause.waiting.count == 1 }
+        let service = correlationService(adapter: adapter, sdk: sdk, intents: intents)
+        await service.initialize()
+        let current = Task { try await service.signInWithMagicLink(email: "new@example.invalid") }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1 }
+        let currentId = try XCTUnwrap(intents.current?.id)
+        let verifierKey = "sb-session-transport-auth-token-code-verifier"
+        let verifier = try XCTUnwrap(storage.values.withLock { $0[verifierKey] })
+        pause.release()
+        do {
+            try await old.value
+            XCTFail("Old SDK initiation must not dispatch")
+        } catch {}
+        XCTAssertEqual(storage.values.withLock { $0[verifierKey] }, verifier)
+        XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/otp"), 1)
+        await service.handleDeepLink(url: callback(oldId))
+        XCTAssertEqual(intents.current?.id, currentId)
+        LifecycleURLProtocol.reply(path: "/auth/v1/otp", data: Data("{}".utf8))
+        try await current.value
+        let accepted = Task { await service.handleDeepLink(url: self.callback(currentId)) }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "new-owner"))
+        await accepted.value
+        await settle { service.currentUserId == account }
+        service.dispose()
+    }
+
+    func testBrowserRedirectCorrelationRejectsOldReplyAfterNewSameAccountAttempt() async throws {
+        let adapter = adapter()
+        let sdk = client()
+        let browser = OAuthReplyGate()
+        let suite = "browser-correlation-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let intents = AuthCallbackIntentStore(defaults: defaults)
+        let service = correlationService(adapter: adapter, sdk: sdk, intents: intents, launch: { try await browser.launch($0) })
+        await service.initialize()
+        let old = Task { try await service.signInWithGoogle() }
+        await settle { browser.urls.count == 1 }
+        let oldId = try XCTUnwrap(intents.current?.id)
+        let current = Task { try await service.signInWithGoogle() }
+        await settle { browser.urls.count == 2 }
+        let currentId = try XCTUnwrap(intents.current?.id)
+        let redirects = browser.urls.map {
+            URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "redirect_to" }?.value
+        }
+        XCTAssertEqual(
+            redirects,
+            [
+                AuthCallbackIntentStore.redirectURL(attempt: oldId).absoluteString,
+                AuthCallbackIntentStore.redirectURL(attempt: currentId).absoluteString,
+            ])
+        browser.replies.removeFirst().resume(returning: callback(oldId, code: "old-browser-code"))
+        do {
+            try await old.value
+            XCTFail("Old browser response must be canceled")
+        } catch {}
+        XCTAssertEqual(intents.current?.id, currentId)
+        XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+        browser.replies.removeFirst().resume(returning: callback(currentId, code: "current-browser-code"))
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "browser-current"))
+        try await current.value
+        await settle { service.currentUserId == account }
+        service.dispose()
+    }
+
+    func testCurrentBrowserReceivingOlderURLKeepsItsIntentForTheGenuineCallback() async throws {
+        let adapter = adapter()
+        let sdk = client()
+        let browser = OAuthReplyGate()
+        let suite = "browser-receipt-correlation-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let intents = AuthCallbackIntentStore(defaults: defaults)
+        let service = correlationService(adapter: adapter, sdk: sdk, intents: intents, launch: { try await browser.launch($0) })
+        await service.initialize()
+        let pending = Task { try await service.signInWithGoogle() }
+        await settle { browser.urls.count == 1 }
+        let currentId = try XCTUnwrap(intents.current?.id)
+        browser.replies.removeFirst().resume(returning: callback(UUID(), code: "older-link"))
+        do {
+            try await pending.value
+            XCTFail("Unmatched URL must be rejected before SDK exchange")
+        } catch {}
+        XCTAssertEqual(intents.current?.id, currentId)
+        XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+        let genuine = Task { await service.handleDeepLink(url: self.callback(currentId)) }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "genuine-browser-owner"))
+        await genuine.value
+        await settle { service.currentUserId == account }
+        service.dispose()
+    }
+
+    func testSignedOutDisposeInvalidatesOTPBrowserAndPKCEWorkOnDelayedSuccessAndFailure() async throws {
+        for flow in ["otp", "browser", "exchange"] {
+            for fails in [false, true] {
+                let adapter = adapter()
+                let sdk = client()
+                let browser = OAuthReplyGate()
+                let suite = "disposed-auth-\(UUID())"
+                let defaults = UserDefaults(suiteName: suite)!
+                defer { defaults.removePersistentDomain(forName: suite) }
+                let intents = AuthCallbackIntentStore(defaults: defaults)
+                let service = correlationService(
+                    adapter: adapter, sdk: sdk, intents: intents, launch: { try await browser.launch($0) })
+                await service.initialize()
+                let pending = Task {
+                    if flow == "browser" {
+                        try await service.signInWithGoogle()
+                    } else {
+                        try await service.signInWithMagicLink(email: "disposed@example.invalid")
+                    }
+                }
+                await settle {
+                    flow == "browser" ? browser.urls.count == 1 : LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1
+                }
+                let intent = try XCTUnwrap(intents.current?.id)
+                var exchange: Task<Void, Never>?
+                if flow == "exchange" {
+                    LifecycleURLProtocol.reply(path: "/auth/v1/otp", data: Data("{}".utf8))
+                    try await pending.value
+                    exchange = Task { await service.handleDeepLink(url: self.callback(intent)) }
+                    await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+                }
+                let revision = adapter.revision
+                service.dispose()
+                XCTAssertGreaterThan(adapter.revision, revision)
+                XCTAssertNil(intents.current)
+                if flow == "browser" {
+                    if fails {
+                        browser.replies.removeFirst().resume(throwing: URLError(.cancelled))
+                    } else {
+                        browser.replies.removeFirst().resume(returning: callback(intent))
+                    }
+                } else if flow == "exchange" {
+                    LifecycleURLProtocol.reply(
+                        path: "/auth/v1/token", status: fails ? 400 : 200,
+                        data: fails ? Data("{\"msg\":\"expired\"}".utf8) : try wireSession(UUID(), token: "disposed"))
+                } else {
+                    LifecycleURLProtocol.reply(
+                        path: "/auth/v1/otp", status: fails ? 400 : 200,
+                        data: fails ? Data("{\"msg\":\"expired\"}".utf8) : Data("{}".utf8))
+                }
+                if let exchange {
+                    await exchange.value
+                } else {
+                    do {
+                        try await pending.value
+                        XCTFail("Disposed auth operation must not succeed")
+                    } catch {}
+                }
+                XCTAssertNil(adapter.auth.currentSession)
+                XCTAssertNil(service.currentSession)
+                XCTAssertNil(intents.current)
+                XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+            }
+        }
+    }
+
     func testOrdinarySDKRefreshKeepsSessionBoundaryWhileReauthenticationAdvancesIt() async throws {
         let adapter = adapter()
         let sdk = client()
@@ -400,6 +702,8 @@ final class SessionTransportTests: XCTestCase {
         var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
         dependencies.accountChanged = { _ in adapter.accountDidChange() }
         dependencies.authRevision = { adapter.revision }
+        dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.refreshCalendar = {}
         dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
@@ -441,6 +745,8 @@ final class SessionTransportTests: XCTestCase {
         var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
         dependencies.accountChanged = { _ in adapter.accountDidChange() }
         dependencies.authRevision = { adapter.revision }
+        dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.callbackIntents = intents
         dependencies.refreshCalendar = {}
         dependencies.refreshProviderIdentity = {}
@@ -448,19 +754,19 @@ final class SessionTransportTests: XCTestCase {
         let service = AuthService(
             persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk, auth: adapter.auth)
         await service.initialize()
-        intents.begin(session: adapter.auth.currentSession)
-        let url = URL(string: "meetingscheduler://auth/callback?code=old")!
-        let old = Task { await service.handleDeepLink(url: url) }
+        let oldId = intents.begin(session: adapter.auth.currentSession)
+        let oldURL = callback(oldId)
+        let old = Task { await service.handleDeepLink(url: oldURL) }
         await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
         try await signIn(b, auth: adapter.auth)
         await settle { service.currentUserId == b }
-        intents.begin(session: adapter.auth.currentSession)
-        let current = Task { await service.handleDeepLink(url: url) }
+        let currentId = intents.begin(session: adapter.auth.currentSession)
+        let currentURL = callback(currentId)
+        let current = Task { await service.handleDeepLink(url: currentURL) }
         await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 2 }
         LifecycleURLProtocol.reply(path: "/auth/v1/token", status: 400, data: Data("{\"msg\":\"expired\"}".utf8))
         await old.value
-        intents.begin(session: adapter.auth.currentSession)
-        await service.handleDeepLink(url: url)  // duplicate while the current attempt is in flight
+        await service.handleDeepLink(url: currentURL)  // duplicate while the current attempt is in flight
         XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 1)
         LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(b, token: "current-B"))
         await current.value

@@ -26,7 +26,7 @@ public final class CalendarService: CalendarServiceProtocol {
     public private(set) var googleCalendarLoading = false
     public private(set) var googleCalendarError: String?
     public private(set) var googleCalendarAccountEmail: String?
-    private let oauthSession = CalendarOAuthSession()
+    private let oauthSession = OAuthBrowserSession()
     private var connectionGeneration = 0
     private var accountId: UUID?
     private var accountGeneration: UInt64 = 0

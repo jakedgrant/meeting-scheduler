@@ -37,6 +37,10 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     private var appleController: ASAuthorizationController?
     private var appleAttemptRevision: UInt64?
     private var appleAttemptGeneration: UInt64?
+    private let authBrowser = OAuthBrowserSession(errorMapper: { error in
+        if case .cancelled = error { return CancellationError() }
+        return AuthError.browserSignInFailed
+    })
     private var callbackAttemptId: UUID?
     private var observedAuthRevision: UInt64?
     private var initializationWaiters: [CheckedContinuation<Void, Never>] = []
@@ -56,6 +60,9 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         var invalidateAuthAttempts: @MainActor () -> Void = {}
         var signOutSession: (@MainActor (Session?, UInt64?) async throws -> Void)?
         var callbackIntents: AuthCallbackIntentStore?
+        var beginAuthAttempt: @MainActor (UUID) -> Void = { _ in }
+        var endAuthAttempt: @MainActor (UUID) -> Void = { _ in }
+        var launchOAuth: (@MainActor (URL) async throws -> URL)?
         var isStoredSession: @MainActor (Session?) -> Bool = { _ in true }
         var now: @MainActor () -> Date = { Date() }
         var waitForExpiry: @MainActor (TimeInterval) async throws -> Void = { seconds in
@@ -115,6 +122,9 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
         }
         dependencies.callbackIntents = AuthCallbackIntentStore(defaults: .standard)
+        dependencies.beginAuthAttempt = { SupabaseService.shared.sessionAdapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { SupabaseService.shared.sessionAdapter.endAuthAttempt($0) }
+        dependencies.launchOAuth = { [authBrowser] in try await authBrowser.authenticate(url: $0) }
         self.dependencies = dependencies
         self.persistence = AccountPersistence.shared
         super.init()
@@ -134,6 +144,9 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
         }
         dependencies.callbackIntents = AuthCallbackIntentStore(defaults: .standard)
+        dependencies.beginAuthAttempt = { SupabaseService.shared.sessionAdapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { SupabaseService.shared.sessionAdapter.endAuthAttempt($0) }
+        dependencies.launchOAuth = { [authBrowser] in try await authBrowser.authenticate(url: $0) }
         self.dependencies = dependencies
         self.persistence = persistence
         super.init()
@@ -154,6 +167,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         profileTask?.cancel()
         calendarTask?.cancel()
         expiryTask?.cancel()
+        authBrowser.cancel()
     }
 
     public func initialize() async {
@@ -196,6 +210,10 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         authEventRevision &+= 1
         observerTask?.cancel()
         observerTask = nil
+        dependencies.invalidateAuthAttempts()
+        dependencies.callbackIntents?.clear()
+        callbackAttemptId = nil
+        authBrowser.cancel()
         profileTask?.cancel()
         calendarTask?.cancel()
         applySession(nil)
@@ -248,6 +266,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         }
         guard changed else { return }
         sessionGeneration &+= 1
+        authBrowser.cancel()
         callbackAttemptId = nil
         if dependencies.callbackIntents?.matches(session: session) == false { dependencies.callbackIntents?.clear() }
         profileTask?.cancel()
@@ -284,20 +303,48 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     // MARK: - Sign In Methods
 
     public func signInWithGoogle() async throws {
-        let intent = dependencies.callbackIntents?.begin(session: currentSession)
+        guard let intents = dependencies.callbackIntents, let launch = dependencies.launchOAuth else {
+            throw AuthError.browserSignInFailed
+        }
+        let intent = intents.begin(session: currentSession)
+        callbackAttemptId = nil
+        dependencies.beginAuthAttempt(intent)
+        authBrowser.cancel()
         let revision = dependencies.authRevision()
         do {
-            try await AuthAttemptContext.$revision.withValue(revision) {
-                let session = try await auth.signInWithOAuth(
-                    provider: .google,
-                    redirectTo: URL(string: "\(Config.appScheme)://auth/callback"))
-                guard auth.currentSession == session else { throw CancellationError() }
+            try await AuthAttemptContext.$intentId.withValue(intent) {
+                try await AuthAttemptContext.$revision.withValue(revision) {
+                    let session = try await auth.signInWithOAuth(
+                        provider: .google,
+                        redirectTo: AuthCallbackIntentStore.redirectURL(attempt: intent)
+                    ) { url in
+                        guard intents.current?.id == intent, intents.matches(session: self.currentSession) else {
+                            throw CancellationError()
+                        }
+                        let callback = try await launch(url)
+                        guard intents.current?.id == intent, intents.matches(session: self.currentSession) else {
+                            throw CancellationError()
+                        }
+                        guard intents.accepts(url: callback, session: self.currentSession) else {
+                            throw AuthCallbackRejection.unmatchedLink
+                        }
+                        intents.clear(id: intent)
+                        return callback
+                    }
+                    guard auth.currentSession == session else { throw CancellationError() }
+                }
             }
+        } catch AuthCallbackRejection.unmatchedLink {
+            // A scheme-routed URL from another attempt must not consume this
+            // browser's pending intent/verifier. Its genuine link can still finish.
+            throw AuthError.browserSignInFailed
         } catch {
-            if let intent { dependencies.callbackIntents?.clear(id: intent) }
+            intents.clear(id: intent)
+            dependencies.endAuthAttempt(intent)
             throw error
         }
-        if let intent { dependencies.callbackIntents?.clear(id: intent) }
+        intents.clear(id: intent)
+        dependencies.endAuthAttempt(intent)
     }
 
     public func signInWithApple() async throws {
@@ -340,13 +387,20 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     public func signInWithMagicLink(email: String) async throws {
-        let intent = dependencies.callbackIntents?.begin(session: currentSession)
+        guard let intents = dependencies.callbackIntents else { throw AuthError.browserSignInFailed }
+        let intent = intents.begin(session: currentSession)
+        callbackAttemptId = nil
+        dependencies.beginAuthAttempt(intent)
+        let revision = dependencies.authRevision()
         do {
-            try await auth.signInWithOTP(
-                email: email,
-                redirectTo: URL(string: "\(Config.appScheme)://auth/callback"))
+            try await AuthAttemptContext.$intentId.withValue(intent) {
+                try await AuthAttemptContext.$revision.withValue(revision) {
+                    try await auth.signInWithOTP(email: email, redirectTo: AuthCallbackIntentStore.redirectURL(attempt: intent))
+                }
+            }
         } catch {
-            if let intent { dependencies.callbackIntents?.clear(id: intent) }
+            intents.clear(id: intent)
+            dependencies.endAuthAttempt(intent)
             throw error
         }
     }
@@ -354,6 +408,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     public func signOut() async throws {
         let originalSession = currentSession
         dependencies.callbackIntents?.clear()
+        authBrowser.cancel()
         callbackAttemptId = nil
         dependencies.invalidateAuthAttempts()
         applySession(nil)
@@ -426,15 +481,21 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         guard url.scheme == Config.appScheme, url.host == "auth", url.path == "/callback" else { return }
         await initialize()
         guard callbackAttemptId == nil, let intents = dependencies.callbackIntents,
-            intents.matches(session: currentSession), let intent = intents.current
+            intents.accepts(url: url, session: currentSession), let intent = intents.current
         else { return }
         let callbackId = UUID()
         callbackAttemptId = callbackId
+        dependencies.beginAuthAttempt(intent.id)
         intents.clear(id: intent.id)
-        defer { if callbackAttemptId == callbackId { callbackAttemptId = nil } }
+        defer {
+            if callbackAttemptId == callbackId { callbackAttemptId = nil }
+            dependencies.endAuthAttempt(intent.id)
+        }
         let revision = dependencies.authRevision()
         do {
-            _ = try await AuthAttemptContext.$revision.withValue(revision) { try await auth.session(from: url) }
+            _ = try await AuthAttemptContext.$intentId.withValue(intent.id) {
+                try await AuthAttemptContext.$revision.withValue(revision) { try await auth.session(from: url) }
+            }
         } catch {
             // SDK verifies PKCE and server expiry. Consumed attempts are not replayed.
         }
@@ -442,8 +503,11 @@ public final class AuthService: NSObject, AuthServiceProtocol {
 
 }
 
+private enum AuthCallbackRejection: Error { case unmatchedLink }
+
 public enum AuthError: Error {
     case notAuthenticated
+    case browserSignInFailed
     case appleSignInFailed(String)
 }
 

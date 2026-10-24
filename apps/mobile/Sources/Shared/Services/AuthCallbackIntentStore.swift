@@ -25,6 +25,31 @@ final class AuthCallbackIntentStore {
         guard let current else { return false }
         return current.accountId == session?.user.id && current.sessionId == Self.sessionId(session)
     }
+    static func redirectURL(attempt id: UUID) -> URL {
+        var parts = URLComponents()
+        parts.scheme = Config.appScheme
+        parts.host = "auth"
+        parts.path = "/callback"
+        parts.queryItems = [URLQueryItem(name: "attempt", value: id.uuidString)]
+        return parts.url!
+    }
+    /// Reject stale or malformed links before consuming the current intent or
+    /// allowing the SDK to touch its shared PKCE verifier/session storage.
+    func accepts(url: URL, session: Session?) -> Bool {
+        guard let current, matches(session: session), url.scheme == Config.appScheme,
+            url.host == "auth", url.path == "/callback", url.user == nil,
+            url.password == nil, url.port == nil, url.fragment == nil,
+            let parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return false }
+        let attempts = parts.queryItems?.filter { $0.name == "attempt" } ?? []
+        guard attempts.count == 1, let value = attempts[0].value,
+            UUID(uuidString: value) == current.id
+        else { return false }
+        let codes = parts.queryItems?.filter { $0.name == "code" } ?? []
+        let errors = parts.queryItems?.filter { $0.name == "error" } ?? []
+        return (codes.count == 1 && codes[0].value?.isEmpty == false && errors.isEmpty)
+            || (codes.isEmpty && errors.count == 1 && errors[0].value?.isEmpty == false)
+    }
     func clear(id: UUID? = nil) {
         if id == nil || current?.id == id { defaults.removeObject(forKey: key) }
     }
@@ -47,4 +72,5 @@ enum SessionTokenIdentity {
 
 enum AuthAttemptContext {
     @TaskLocal static var revision: UInt64?
+    @TaskLocal static var intentId: UUID?
 }

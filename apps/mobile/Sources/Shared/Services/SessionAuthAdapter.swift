@@ -31,12 +31,16 @@ final class SessionAuthAdapter: Sendable {
                 storageKey: "sb-\(project)-auth-token", localStorage: revisioned,
                 fetch: { request in
                     let revision = revisioned.revision
+                    guard revisioned.acceptsIntent(AuthAttemptContext.intentId) else { throw CancellationError() }
                     if let attempt = AuthAttemptContext.revision, attempt != revision { throw CancellationError() }
                     let result = try await fetch(request)
+                    guard revisioned.acceptsIntent(AuthAttemptContext.intentId) else { throw CancellationError() }
                     let path = request.url?.path ?? ""
                     let installsSession = path.hasSuffix("/token") || path.hasSuffix("/verify") || path.hasSuffix("/user")
                     if installsSession {
-                        guard revision == revisioned.revision else { throw CancellationError() }
+                        guard revision == revisioned.revision, revisioned.acceptsIntent(AuthAttemptContext.intentId) else {
+                            throw CancellationError()
+                        }
                         // The SDK awaits SessionManager after transport returns; check
                         // the same ownership atomically when credentials are stored.
                         let isRefresh =
@@ -74,6 +78,8 @@ final class SessionAuthAdapter: Sendable {
     /// Also reject refreshes suspended across app-owned expiry boundaries, which
     /// do not themselves remove the SDK's offline credential record.
     var revision: UInt64 { storage.revision }
+    func beginAuthAttempt(_ id: UUID) { storage.beginIntent(id) }
+    func endAuthAttempt(_ id: UUID) { storage.endIntent(id) }
     func accountDidChange() { storage.advance() }
 }
 
@@ -81,12 +87,21 @@ final class RevisionedAuthStorage: AuthLocalStorage, Sendable {
     private let underlying: any AuthLocalStorage
     private struct State {
         var revision: UInt64 = 0
+        var intentId: UUID?
         var refreshTicket: (token: String, revision: UInt64)?
     }
     private let state = Mutex(State())
     init(_ underlying: any AuthLocalStorage) { self.underlying = underlying }
     var revision: UInt64 { state.withLock { $0.revision } }
-    func advance() { state.withLock { $0.revision &+= 1 } }
+    func advance() {
+        state.withLock {
+            $0.revision &+= 1
+            $0.intentId = nil
+        }
+    }
+    func beginIntent(_ id: UUID) { state.withLock { $0.intentId = id } }
+    func endIntent(_ id: UUID) { state.withLock { if $0.intentId == id { $0.intentId = nil } } }
+    func acceptsIntent(_ id: UUID?) -> Bool { state.withLock { id == nil || $0.intentId == id } }
     func authorizeRefresh(data: Data, revision: UInt64) {
         // Pinned SDK coalesces refresh through one task until decode/store ends.
         // One complete-response ticket bounds storage even on decoding failures.
@@ -110,6 +125,7 @@ final class RevisionedAuthStorage: AuthLocalStorage, Sendable {
     }
     func store(key: String, value: Data) throws {
         try state.withLock { state in
+            if let intent = AuthAttemptContext.intentId, intent != state.intentId { throw CancellationError() }
             if let attempt = AuthAttemptContext.revision, attempt != state.revision { throw CancellationError() }
             if let token = Self.tokenKey(value), let ticket = state.refreshTicket, ticket.token == token {
                 state.refreshTicket = nil
@@ -123,6 +139,7 @@ final class RevisionedAuthStorage: AuthLocalStorage, Sendable {
     func retrieve(key: String) throws -> Data? { try underlying.retrieve(key: key) }
     func remove(key: String) throws {
         try state.withLock { state in
+            if let intent = AuthAttemptContext.intentId, intent != state.intentId { throw CancellationError() }
             if let attempt = AuthAttemptContext.revision, attempt != state.revision { throw CancellationError() }
             let hadOwner = try underlying.retrieve(key: key).flatMap(Self.owner) != nil
             try underlying.remove(key: key)
