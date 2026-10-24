@@ -14,7 +14,7 @@ Calendar connection/conflict reads and errors are generation-fenced. Device pref
 
 Availability retry records now persist the original snapshot, request UUID, expected version and draft under account/poll keys. Returning to A or recreating a screen restores them. Failed creation retains its existing account-scoped exact envelope. A production PollService/editor regression simulates a committed creation with a lost reply, changes accounts, then recovers the original poll with one receipt and one pass redemption.
 
-Authentication callback configuration, attempt ownership, exact routes, SDK persistence scheduling and immediate local sign-out are described in [Android authentication callbacks](../../../android-auth-callbacks.md). Calendar routing remains separate. Native Google is preserved and a browser fallback is wired into AuthView.
+Authentication callback configuration, attempt ownership, exact routes, SDK persistence scheduling and immediate local sign-out are described in [Android authentication callbacks](../../android-auth-callbacks.md). Calendar routing remains separate. Native Google is preserved and a browser fallback is wired into AuthView.
 
 ## Deterministic validation
 
@@ -57,7 +57,7 @@ A separate `am force-stop` followed by implicit `am start -W -a android.intent.a
 
 Self-review corrected old list/offer loading cleanup, account preference error handling, returning-account profile completion, latest-attempt ownership, callback readiness during overlapping starts, and SDK credential publication/revocation ordering. The coordinator independently flagged personalized offerings before final validation; that finding is fixed and covered. A further coordinator review identified dispatch credential resolution; the transport regressions and credential capture fix are included in the final source commit. Final combined independent review belongs to the coordinator after all platform streams are integrated.
 
-No live Google/OTP/RevenueCat sign-in, email delivery, real purchase or hosted redirect configuration was verified. [Owner actions](../../../android-auth-callbacks.md#required-external-configuration) list the required test environment checks. F21/F16 and F19 → F18 → F20 remain queued. This tranche adds no database migrations or hosted rollout.
+No live Google/OTP/RevenueCat sign-in, email delivery, real purchase or hosted redirect configuration was verified. [Owner actions](../../android-auth-callbacks.md#required-external-configuration) list the required test environment checks. F21/F16 and F19 → F18 → F20 remain queued. This tranche adds no database migrations or hosted rollout.
 
 Final runtime result and cleanup are recorded below.
 
