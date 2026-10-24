@@ -4,7 +4,7 @@ The combined implementation is `1cfb5f06a5f5f1c998aa62d9897b29298b07ed1e`, based
 
 ## Pull request and CI
 
-[PR #71](https://github.com/jakedgrant/meeting-scheduler/pull/71) targets main directly and contains the migration and all three client integrations. The PR description records the exact CI head and final six-workflow results; its Checks tab is the current source for subsequent runs. No stacking, merge or hosted deployment is part of this delivery.
+[PR #71](https://github.com/jakedgrant/meeting-scheduler/pull/71) targets main directly and contains the migration and all three client integrations. The PR description records the exact CI head and final six-workflow results; its Checks tab is the current source for subsequent runs. The owner subsequently merged #71 as `d51f45a366cbd4a9ecd30e774d8b50441a938894`. Its exact final head `6148a12edfa66d11e293e0d0bea27896091b15c9` is a merge parent and ancestor of current main, and the merge tree is identical to that head. All six workflows passed for `6148a12`. Hosted deployment remains separate.
 
 ## Baseline and review
 

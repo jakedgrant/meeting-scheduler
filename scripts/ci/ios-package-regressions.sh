@@ -108,3 +108,14 @@ xcodebuild "${common[@]}" \
   test-without-building 2>&1 | tee "$output/test.log"
 
 verify_lockfile
+
+# Compile the tracked application wrapper as well as the package. Shared auth,
+# calendar and billing changes must remain wired into the shipping entry point.
+xcodebuild -project "$repo_root/apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj" \
+  -scheme MeetingScheduler -configuration Debug \
+  -derivedDataPath "$output/WrapperDerivedData" \
+  -clonedSourcePackagesDirPath "$output/SourcePackages" \
+  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO \
+  build 2>&1 | tee "$output/wrapper-build.log"
+verify_lockfile

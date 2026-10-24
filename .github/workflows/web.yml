@@ -24,6 +24,6 @@ jobs:
           cache-dependency-path: apps/web/package-lock.json
       - run: npm --prefix apps/web ci --ignore-scripts --no-audit --no-fund
       - name: Test guest, member, draft and lifecycle flows without a server
-        run: node --test tests/web-guest-capability.test.mjs tests/web-availability.test.mjs tests/web-creation.test.mjs
+        run: node --test tests/web-guest-capability.test.mjs tests/web-availability.test.mjs tests/web-creation.test.mjs tests/web-session-lifecycle.test.mjs
       - run: npm --prefix apps/web run check
       - run: npm --prefix apps/web run build -- --configLoader runner
