@@ -39,11 +39,11 @@ Compose reads service state through `mutableStateOf` snapshot state, as before. 
 - The manifest registers `.MeetingSchedulerApplication`.
 - A collector in the application scope keeps receiving events after an "Activity" scope is cancelled, and a failed child does not cancel the application scope.
 
-The tests run in CI's `:app:testDebugUnitTest` step. That step comes from the `Android` workflow added with F26 (`.github/workflows/android.yml`), which is not on this branch. They were not run locally, because this workstation has no Gradle-compatible JDK or Android SDK 36 (see `docs/android-release-signing.md`).
+The original F13 delivery added these six tests to CI's `:app:testDebugUnitTest` step. Its local validation was limited by the toolchain available at that time. The F12/F14 follow-up now runs 55 JVM tests, builds both Android APKs and exercises a fresh Android 36 emulator; see the [current evidence](architecture-remediation-evidence-2026-10-23/f12-f14-f22/android.md).
 
-## Not covered here (follow-ups)
+## Scope of the original F13 delivery (historical)
 
-- **Session scope (F12).** The listener lives in the application scope, and account changes are not yet a separate, cancellable session scope. `CalendarService` already guards results with a connection generation. A per-session scope with poll, billing, and calendar state reset should follow the F12 contract.
+- **Session scope (F12).** This remained open in the original F13 delivery. The subsequent F12 work establishes account/generation boundaries, cancels old profile/screen work, resets poll/billing/calendar state and fences provider results and cleanup. The authenticated Compose subtree is recreated at each boundary; account retry records remain durable. [Current contract](session-lifecycle.md).
 - **ViewModels.** Screens still call services directly from `rememberCoroutineScope`, and requests are cancelled when a screen leaves composition. Moving screen state into ViewModels (`viewModelScope`) so work survives recreation is the remaining F13 step 2, and is easier now that the container provides dependencies.
-- **Auth deep links (F14).** `handleDeepLink` is still empty, and `MainActivity` doesn't process auth intents.
-- **Behaviour checks on a device.** Rotation, background/foreground, and sign-out after recreation were not exercised. They need an emulator reservation (see the report).
+- **Auth deep links (F14).** These were incomplete in F13. The follow-up now routes cold and warm intents through an application-owned PKCE router, with persisted attempt ownership and distinct auth/calendar routes. [Callback configuration and remaining provider actions](android-auth-callbacks.md).
+- **Behaviour checks on a device.** The original F13 delivery did not use an emulator. The F12/F14 follow-up verifies Activity recreation, cold/warm callbacks and route separation on a newly reserved offline emulator. Real sign-in/sign-out across providers still requires an approved test environment/account; local runtime evidence does not establish it.
