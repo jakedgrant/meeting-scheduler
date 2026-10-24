@@ -96,6 +96,9 @@ test('F04 membership reconciliation, uniqueness, idempotent joins and claims on 
     await db.exec(await readFile(new URL(name, directory), 'utf8'));
   }
   assert.ok(replayed, 'F04 migration must be replayed');
+  // F05 now enforces capacity; this membership/credential suite deliberately
+  // accumulates many independent guests. Capacity itself has a focused suite.
+  await db.query('UPDATE public.polls SET max_participants=100 WHERE id=$1', [polls.active.id]);
 
   const asRole = async (role, userId, action) => {
     await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)", [userId ?? '']);

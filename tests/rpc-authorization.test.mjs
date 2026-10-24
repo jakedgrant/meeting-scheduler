@@ -2,6 +2,8 @@ import { PGlite } from '@electric-sql/pglite';
 import assert from 'node:assert/strict';
 import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { randomUUID } from 'node:crypto';
+import { creationPayload } from './helpers/creation-database.mjs';
 
 const owner = '00000000-0000-4000-8000-000000000001';
 const member = '00000000-0000-4000-8000-000000000002';
@@ -112,6 +114,11 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
   await db.query(`INSERT INTO public.subscriptions(user_id,entitlement,is_active,expires_at)
     VALUES ($1,'team_access',true,now()+interval '1 day'),
       ($2,'pro_access',true,now()-interval '1 day')`, [owner, member]);
+  // F05 reads canonical timed billing state, not the public projection.
+  await db.query(`INSERT INTO private.billing_entitlements
+    (user_id,resource_id,entitlement,store,purchased_at,valid_until) VALUES
+    ($1,'rpc-team','team_access','PROMOTIONAL',now(),now()+interval '1 day'),
+    ($2,'rpc-expired','pro_access','PROMOTIONAL',now(),now()-interval '1 day')`, [owner, member]);
   const verifiedPassSchema = (await db.query(`SELECT column_name FROM information_schema.columns
     WHERE table_schema='public' AND table_name='event_passes' AND column_name='verified_until'`)).rows.length > 0;
   if (verifiedPassSchema) {
@@ -240,10 +247,12 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
 
   await t.test('expired or inactive subscription access cannot bypass free creation limits', async () => {
     const original = (await db.query('SELECT expires_at,is_active FROM public.subscriptions WHERE user_id=$1', [owner])).rows[0];
+    const canonicalValidUntil = (await db.query('SELECT valid_until FROM private.billing_entitlements WHERE user_id=$1', [owner])).rows[0].valid_until;
     const redeemed = (await db.query(`UPDATE public.event_passes SET redeemed_at=now()
       WHERE user_id=$1 AND redeemed_at IS NULL RETURNING id`, [owner])).rows.map(row => row.id);
     try {
       await db.query('UPDATE public.subscriptions SET expires_at=now() WHERE user_id=$1', [owner]);
+      await db.query('UPDATE private.billing_entitlements SET valid_until=now() WHERE user_id=$1', [owner]);
       await asRole('authenticated', owner, async () => {
         assert.equal(await selfRead('has_active_subscription'), false);
         assert.equal(await selfRead('get_user_entitlement'), null);
@@ -257,6 +266,7 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
         assert.equal(await selfRead('can_create_poll'), false);
       });
     } finally {
+      await db.query('UPDATE private.billing_entitlements SET valid_until=$1 WHERE user_id=$2', [canonicalValidUntil, owner]);
       await db.query('UPDATE public.subscriptions SET expires_at=$1,is_active=$2 WHERE user_id=$3',
         [original.expires_at, original.is_active, owner]);
       await db.query('UPDATE public.event_passes SET redeemed_at=NULL WHERE id=ANY($1::uuid[])', [redeemed]);
@@ -406,12 +416,14 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     }
   });
 
-  await t.test('invoker reads cannot bypass table grants and elevated helpers resist a hostile search path', async () => {
+  await t.test('canonical self entitlement reads remain narrow and elevated helpers resist a hostile search path', async () => {
     await db.exec('REVOKE SELECT ON public.subscriptions FROM authenticated');
     try {
       await asRole('authenticated', owner, async () => {
-        await assert.rejects(selfRead('has_active_subscription'), deny);
-        await assert.rejects(selfRead('get_user_entitlement'), deny);
+        assert.equal(await selfRead('has_active_subscription'), true);
+        assert.equal(await selfRead('get_user_entitlement'), 'team_access');
+        await assert.rejects(db.query('SELECT * FROM private.billing_entitlements'), deny);
+        await assert.rejects(selfRead('get_user_entitlement', '$1', [member]), deny);
       });
     } finally { await db.exec('GRANT SELECT ON public.subscriptions TO authenticated'); }
     await db.exec(`CREATE SCHEMA hostile;
@@ -434,8 +446,8 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     assert.equal((await db.query('SELECT id FROM public.profiles WHERE id=$1', [missing])).rows.length, 1);
     await asRole('authenticated', owner, async () => {
       await db.exec('SET search_path = hostile, public, pg_temp');
-      const poll = (await db.query(`INSERT INTO public.polls(creator_id,title)
-        VALUES ($1,'Generated invitation') RETURNING *`, [owner])).rows[0];
+      const poll = (await scalar('SELECT public.create_poll($1,$2) AS result',
+        [randomUUID(), JSON.stringify(creationPayload({title:'Generated invitation'}))])).poll;
       assert.match(poll.share_code, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/);
       assert.notEqual(poll.share_code, 'TAKENX');
       assert.equal(typeof await selfRead('generate_share_code'), 'string');
