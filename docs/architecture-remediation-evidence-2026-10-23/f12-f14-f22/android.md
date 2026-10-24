@@ -111,9 +111,9 @@ Final logs: `/private/tmp/android-attempt-final3-build.log`, `/private/tmp/andro
 
 The owner must configure `meetingscheduler://auth/callback\?attempt=*` under Supabase's documented glob rules and verify query preservation through real OTP/browser providers. Hosted allowlist acceptance, email delivery, Google consent/cancellation and real sign-in remain unverified. No hosted configuration changed. See the updated [external configuration actions](../../../android-auth-callbacks.md#required-external-configuration). Combined independent review remains the coordinator's integration gate.
 
-## Final integrated compile and JVM replay
+## Pre-review integrated compile and JVM replay
 
-The coordinator reran the final integrated source at `f3df14f3328bfd051b51de61465e6d8c4b3ec78f` with the isolated JDK/SDK/cache:
+The coordinator reran the pre-review integrated source at `f3df14f3328bfd051b51de61465e6d8c4b3ec78f` with the isolated JDK/SDK/cache:
 
 ```bash
 JAVA_HOME=/private/tmp/meeting-fix-jdk21/jdk-21.0.12.1+1/Contents/Home \
@@ -125,3 +125,45 @@ apps/android/gradlew -p apps/android --no-daemon --offline \
 ```
 
 Build succeeded in 19 seconds (73 tasks). XML results contain **64 tests, zero failures/errors/skips**. Log: `/private/tmp/session-final-android-build.log`. No emulator, server or provider was started. The earlier two emulator tests remain tied to the identical tested Android subtree in the source manifest.
+## Independent-review corrections: logout ownership, dispatch and server lineage
+
+Final source **`c0bd8126d7ae9e59c2ebcc0055e20162688d26ed`** fixes all three Android findings from the independent review of the coordinator's combined `f3df14f` tree. The preceding evidence remains historical. The coordinator owns final combined-tree re-review and CI.
+
+- **Queued logout (P1):** AuthService captures the original UserSession before clearing UI state or suspending and passes it explicitly to the gateway. The local mutation removes credentials only when account plus JWT `session_id` match; nonstandard tokens use exact-credential identity. B and a fresh A server session survive cleanup queued behind their installation. An ordinary refresh from the original lineage is removed. The isolated `LOCAL` revoker always receives the captured original. Cleanup belongs to the application scope so disposing the settings screen cannot cancel it before local removal; the bounded local mutation survives cancellation. Further original-lineage status updates cannot resurrect signed-out UI. Replacement-session errors and old screen cleanup are fenced.
+- **All authenticated dispatch (P2):** Poll detail/options/participants/responses, status changes and profile reads/updates now use their captured app credential. A first actual SDK regression exposed `[Bearer unit-key, Bearer original-A]` from the select/update query builder's appended headers. `AccountPostgrest` provides a request-owned SupabaseClient view whose `accessToken` returns the captured credential, then constructs the normal PostgREST plugin through the pinned factory with the application's existing configuration. It shares the HTTP transport and serializer and registers no client, listener or engine. Supabase 3.3.0 API declarations/bytecode confirm accessToken resolution precedes shared Auth lookup, and the plugin constructor creates its API adapter without runtime registration. The opted-in internal boundary is version-pinned and exercised by transport tests. Existing RPC and calendar builder paths retain their already-tested header assignment. Every tested header value is asserted, including absence of duplicate values. Calendar conflict work captures its owner and credential before device-calendar suspension, rechecks before backend dispatch and fences device/backend errors and results.
+- **Fresh same-account session (P2):** Session identity now includes account and server `session_id`; ordinary JWT rotation in that lineage retains generation, while fresh same-account authentication advances it, clears old state and invalidates pending callbacks. Missing/malformed claim data conservatively uses exact-credential hashing. Persisted callback ownership includes lineage, so cold SDK restoration accepts the same server session with a refreshed JWT and rejects a fresh login for the same UUID. No raw credential is persisted in the attempt owner key. Supabase's current [session documentation](https://supabase.com/docs/guides/auth/sessions#access-token-jwt-claims) and [claim reference](https://supabase.com/docs/guides/auth/jwt-fields) confirm `session_id` identifies the server session. This classification partitions client work and does not authorize backend access.
+
+### Final deterministic result
+
+The offline Gradle command recorded above ran on the final source and passed: **75 JVM tests, zero failures; debug and instrumentation APKs built**. Log: `/private/tmp/android-review-final2-build.log`. Counts: 11 new independent-review tests, 16 session-service, 13 SDK transport, nine router, 11 creation, six availability, six lifetime, two model and one example. Earlier compiler/test-fixture failures are excluded. The final amended source changes the delayed-read fixtures to populated results; the app/instrumentation source and APKs are unchanged from the successful runtime below.
+
+`ReviewedIsolationTest` executes production AuthService, SupabaseAuthGateway, PollService, CalendarService, AtomicSessionManager and Supabase 3.3.0 with injected MockEngine transport. Its cases cover:
+
+- A logout held on a dispatcher while B or fresh A is installed; delayed remote success/failure; SDK and persisted credentials retained together; only the original A header reaches the `LOCAL` revoker.
+- Same-lineage refreshed-token removal, and caller-screen cancellation while logout is queued. Original-lineage refresh events remain signed out; new B/A sessions remain current.
+- All four populated direct read paths plus status changes with shared SDK B and app-owned A. Profile loading/updating also run against shared SDK B. Each request has exactly one A Authorization value.
+- Populated delayed read/profile-write success and delayed failures across B and a fresh same-account lineage, with cancellation and current profile assertions.
+- Delayed old profile success/failure, same-session refresh retaining generation/attempts, and fresh same-account authentication advancing generation and rejecting old URI receipt.
+- Real SDK/AtomicSessionManager cold restoration: same-lineage refreshed JWT accepts the persisted attempt, fresh same-UUID lineage rejects it before exchange.
+- Device-calendar suspension followed by B/fresh A, on success and failure: no old backend dispatch and no replacement error/state mutation. Actual delayed conflict backend responses retain A's sole credential and cannot affect replacement state.
+
+The existing durable creation/availability recovery and originating command credential tests remain passing. Backend commands, RLS/grants, funding/idempotency and account-scoped retry storage were not changed.
+
+### Fresh offline runtime and release
+
+Coordinator-approved fresh AVD `session-android-review` in `/private/tmp/session-android-review-avd` used the existing task-owned Android 36 ARM64 image read only. Ports 5586/5587 were checked unused. Reservation began **2026-10-24 19:10:46 UTC** for 30 minutes; serial `emulator-5586`. Airplane mode 1, Wi-Fi 0 and disabled mobile data were confirmed before APK installation. No real provider account or hosted configuration was used.
+
+```bash
+adb -s emulator-5586 install -r app-debug.apk
+adb -s emulator-5586 install -r app-debug-androidTest.apk
+adb -s emulator-5586 shell am instrument -w \
+  -e class com.meetingscheduler.android.SessionActivityTest \
+  -e timeout_msec 20000 \
+  com.meetingscheduler.android.debug.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Result: **OK (3 tests)** in **2.034 seconds**, `/private/tmp/android-review-final-runtime.log`. The existing Activity recreation/cold-intent/warm-intent/route-separation checks pass. A new synthetic test drives the actual application SDK: same-lineage JWT rotation retains generation and the pending attempt; a fresh same-account lineage advances generation, clears that attempt and rejects its old code/error URI after a newer marker exists. The test clears its synthetic SDK session locally in `finally`; it performs no provider sign-in.
+
+A separate correctly quoted process-cold script rejected an obsolete UUID without consuming the current marker (**COLD 959 ms**), then accepted the matching cancellation warm. A matching error-fragment callback restored after force-stop (**COLD 962 ms**) and consumed its persisted marker. Calendar routing stayed warm/separate; `/auth/other` failed OS resolution. Pending storage ended as `<map />`. Script and log: `/private/tmp/android-review-runtime-check.py`, `/private/tmp/android-review-final-cold-check.log`; UI/persistence captures use `/private/tmp/android-review-final-{stale-cold,current-warm,current-cold}-{ui,pending}.xml`.
+
+At **2026-10-24 19:19:06 UTC**, `adb -s emulator-5586 emu kill` returned OK and avdmanager deleted `session-android-review`. Subsequent checks found no listener on 5586/5587 and an empty AVD directory. The task-owned image/cache and evidence logs remain. No emulator, server, database or provider session remains reserved. Hosted redirect acceptance/query preservation and real Google/OTP/RevenueCat validation remain the documented owner actions; no hosted changes were made.
