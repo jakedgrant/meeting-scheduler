@@ -70,7 +70,7 @@ function capabilityForPoll(pollId: string) {
   return capability ?? null
 }
 
-function readRpc(name: string, args?: Record<string, unknown>, signal = captureSession().signal) {
+function sessionRpc(name: string, args?: Record<string, unknown> | CreationOperation, signal = captureSession().signal) {
   return supabase.rpc(name, args).abortSignal(signal)
 }
 
@@ -91,7 +91,7 @@ export async function loadParticipatedPolls() {
   const identity = identityGeneration
 
   try {
-    const { data, error } = await readRpc('get_user_participated_polls', undefined, listAbort.signal)
+    const { data, error } = await sessionRpc('get_user_participated_polls', undefined, listAbort.signal)
 
     if (identity !== identityGeneration || generation !== listGeneration) return
     if (error) throw error
@@ -118,7 +118,7 @@ export async function loadMyPolls() {
 export async function loadPollByCode(code: string): Promise<Poll | null> {
   const identity = identityGeneration
   try {
-    const { data, error } = await readRpc('get_poll_by_code', { code: code.toUpperCase() })
+    const { data, error } = await sessionRpc('get_poll_by_code', { code: code.toUpperCase() })
 
     if (identity !== identityGeneration) return null
     if (error) throw error
@@ -157,7 +157,7 @@ function dropGuestCapability(pollId: string, expectedToken: string) {
 // Signed-out guests cannot read participant rows; they load the poll through
 // their capability. Returns false when the caller should use the normal path.
 async function loadGuestPoll(pollId: string, guest: GuestCapability, generation: number): Promise<boolean> {
-  const { data, error } = await readRpc('get_guest_poll_detail', {
+  const { data, error } = await sessionRpc('get_guest_poll_detail', {
     participant_uuid: guest.participantId,
     guest_token: guest.token
   }, detailAbort.signal)
@@ -350,7 +350,7 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
   const currentUser = get(user)
   if (!currentUser) throw { code: '42501' }
   const identity = identityGeneration
-  const { data, error } = await supabase.rpc('create_poll', operation)
+  const { data, error } = await sessionRpc('create_poll', operation)
   if (identity !== identityGeneration || get(user)?.id !== currentUser.id) throw { code: 'ACCOUNT_CHANGED' }
   if (error) throw error
   const result = data as CreationResult
@@ -379,6 +379,7 @@ export async function updatePollStatus(pollId: string, status: Poll['status']) {
   const { error } = await supabase
     .from('polls')
     .update({ status })
+    .abortSignal(captureSession().signal)
     .eq('id', pollId)
 
   if (identity !== identityGeneration || generation !== loadGeneration || get(currentPoll)?.id !== pollId) return
@@ -395,7 +396,7 @@ export async function updatePollStatus(pollId: string, status: Poll['status']) {
 export async function setSelectedFinalDate(pollId: string, timeOptionId: string) {
   const identity = identityGeneration
   const generation = loadGeneration
-  const { data, error } = await supabase.rpc('finalize_poll', {
+  const { data, error } = await sessionRpc('finalize_poll', {
     poll_uuid: pollId, time_option_uuid: timeOptionId
   })
   if (identity !== identityGeneration || generation !== loadGeneration) return
@@ -412,7 +413,7 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
   savePendingGuestToken(browserStorage(), pollId, token)
   const identity = identityGeneration
   const generation = loadGeneration
-  const { data, error } = await supabase.rpc('join_poll_as_guest', {
+  const { data, error } = await sessionRpc('join_poll_as_guest', {
     poll_uuid: pollId, display_name: name ?? '', contact_email: email ?? null, guest_token: token
   })
   if (error) {
@@ -442,7 +443,7 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
 export async function joinPoll(pollId: string, name?: string, email?: string): Promise<PollParticipant> {
   try {
     if (!get(user)) return await joinPollAsGuest(pollId, name, email)
-    const { data, error } = await supabase.rpc('join_poll', { poll_uuid: pollId })
+    const { data, error } = await sessionRpc('join_poll', { poll_uuid: pollId })
     if (error) throw error
     return (data as { participant: PollParticipant }).participant
   } catch (error) {
@@ -466,7 +467,7 @@ export async function loadAvailability(pollId: string, participantId: string): P
   const identity = identityGeneration
   const generation = loadGeneration
   const requestIdentity = availabilityIdentity(pollId, participantId)
-  const { data, error } = await readRpc('get_availability', {
+  const { data, error } = await sessionRpc('get_availability', {
     poll_uuid: pollId, ...requestIdentity
   }, detailAbort.signal)
   if (error) {
@@ -516,7 +517,7 @@ export async function saveAvailability(save: AvailabilitySave): Promise<Availabi
   const identity = identityGeneration
   const generation = loadGeneration
   const requestIdentity = availabilityIdentity(save.pollId, save.participantId)
-  const { data, error } = await supabase.rpc('save_availability', {
+  const { data, error } = await sessionRpc('save_availability', {
     poll_uuid: save.pollId, request_id: save.requestId,
     expected_version: save.expectedVersion, responses: save.responses, comment: save.comment,
     ...requestIdentity

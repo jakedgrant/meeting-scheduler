@@ -452,7 +452,7 @@ async function sdkTransport(t, state) {
   let locked = false;
   let tail = Promise.resolve();
   const requests = [];
-  const control = { requests, logout: null, refresh: null };
+  const control = { requests, logout: null, refresh: null, user: null, aborted: 0 };
   const client = createClient('https://session.test.invalid', 'test-anon-key', {
     auth: {
       persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
@@ -467,12 +467,16 @@ async function sdkTransport(t, state) {
     global: {
       async fetch(input, options = {}) {
         const url = new URL(typeof input === 'string' ? input : input.url);
+        if (options.signal?.aborted) { control.aborted++; throw new DOMException("Session cancelled", "AbortError"); }
         const headers = new Headers(options.headers);
         const authorization = headers.get('Authorization');
         requests.push({ path: url.pathname, authorization, locked });
         const payload = authorization?.split('.')[1];
         const account = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString()).sub : null;
-        if (url.pathname.endsWith('/user')) return Response.json({ id: account, email: 'sdk@test.invalid' });
+        if (url.pathname.endsWith('/user')) {
+          if (control.user?.account === account) { control.user.started.resolve(); await control.user.finish.promise; }
+          return Response.json({ id: account, email: 'sdk@test.invalid' });
+        }
         if (url.pathname.endsWith('/logout')) {
           control.logout?.started.resolve();
           if (control.logout) await control.logout.finish.promise;
@@ -719,4 +723,37 @@ for (const path of ['A-B', 'A-logout-A', 'A-B-A']) for (const outcome of ['succe
   assert.equal(actual.get(actual.polls.currentPoll).id, 'CURRENT');
   assert.deepEqual(actual.get(actual.polls.createdPolls).map(poll => poll.id), ['CURRENT']);
   assert.equal(actual.get(actual.polls.pollsLoading), false);
+});
+
+
+test('real SDK queued creation cannot resolve B credentials for an operation captured by A', async t => {
+  const { actual, state, mount } = await fixture(t);
+  const { client, control } = await sdkTransport(t, state);
+  state.supabase.rpc = (...args) => client.rpc(...args);
+  mount();
+  await client.auth.setSession({ access_token: jwt(accountA), refresh_token: 'refresh-A' });
+  await flush();
+  const storage = disk();
+  const editor = actual.createPollCreation({ create: actual.polls.createPoll }, storage);
+  const stop = actual.auth.user.subscribe(value => editor.setOwner(value?.id ?? null));
+  t.after(stop);
+  editor.edit({ title: 'A private recovery', useEventPass: true, timeOptions: [{ id: 'draft', date: '2026-11-01', startTime: '12:00', endTime: '13:00' }] });
+  control.user = { account: accountB, started: deferred(), finish: deferred() };
+  const replacement = client.auth.setSession({ access_token: jwt(accountB), refresh_token: 'refresh-B' });
+  await control.user.started.promise;
+  assert.equal(actual.get(actual.auth.user).id, accountA);
+  const creation = editor.submit();
+  // The command waits behind B installation's SDK lock while its durable owner
+  // and exact recovery payload are still A. Cancellation must reach Fetch.
+  await Promise.resolve();
+  control.user.finish.resolve();
+  await replacement;
+  assert.equal(await creation, null);
+  await flush();
+  assert.equal(actual.get(actual.auth.user).id, accountB);
+  assert.equal(actual.get(editor).draft.title, '');
+  assert.ok(storage.getItem(`meeting-scheduler:create-poll:${accountA}`));
+  assert.equal(storage.getItem(`meeting-scheduler:create-poll:${accountB}`), null);
+  assert.equal(control.requests.filter(request => request.path.endsWith('/rpc/create_poll')).length, 0);
+  assert.equal(control.aborted, 1);
 });
