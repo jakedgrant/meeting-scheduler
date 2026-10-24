@@ -1,6 +1,6 @@
 # RevenueCat billing processing (F08)
 
-Implemented and merged into `main` October 22, 2026 ([#60](https://github.com/jakedgrant/meeting-scheduler/pull/60)). **Merging did not deploy anything. Hosted migration, secrets, deployment, scheduling, backfill and real store/provider validation remain pending.** Nothing in this change deploys functions or changes RevenueCat accounts, products or customers. F05 quota enforcement and atomic pass redemption remain separate work.
+Implemented and merged into `main` October 22, 2026 ([#60](https://github.com/jakedgrant/meeting-scheduler/pull/60)). **Merging did not deploy anything. Hosted migration, secrets, deployment, scheduling, backfill and real store/provider validation remain pending.** Nothing in this change deploys functions or changes RevenueCat accounts, products or customers. F05/F09 quota enforcement and atomic pass redemption now use this contract through [transactional creation](creation-commands.md); hosted rollout remains pending.
 
 ## Delivery and processing
 

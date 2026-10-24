@@ -59,6 +59,15 @@ The role tests replay every migration and exercise `anon`, `authenticated`, an i
 
 Real independent-session races assert an observed `pg_stat_activity.wait_event_type='Lock'` before releasing the first transaction. They cover competing free creates, same-ID recovery and mismatch, pass competition and changed ownership/eligibility, natural subscription/pass/deadline expiry while blocked, reactivation, direct and command guest/member capacity, full-place retries and the option-count boundary. CI runs both real race suites in separate empty databases on PostgreSQL 17 and 18.
 
+Exact final PostgreSQL commands, run from `/private/tmp/f05-f09-backend`, used two newly created empty databases:
+
+```bash
+TEST_DATABASE_URL='postgresql://jake@localhost:56519/scheduler_test_f05_final?host=%2Fprivate%2Ftmp%2Ff05-f09-backend-pg%2Fsocket' node --test tests/concurrent-creation.test.mjs > /private/tmp/f05-race-final-results.txt 2>&1
+TEST_DATABASE_URL='postgresql://jake@localhost:56519/scheduler_test_commands_f05?host=%2Fprivate%2Ftmp%2Ff05-f09-backend-pg%2Fsocket' node --test tests/concurrent-commands.test.mjs > /private/tmp/f05-old-race-results.txt 2>&1
+```
+
+The backend created those databases through a Node `pg` admin connection to `postgres` on the same private socket, with `CREATE DATABASE scheduler_test_f05_final` and `CREATE DATABASE scheduler_test_commands_f05`. The final cleanup command was `/private/tmp/meeting-scheduler-backend-pg-deps-20261023/package/native/bin/pg_ctl -D /private/tmp/f05-f09-backend-pg/data -m fast stop`, followed by removal of that disposable directory.
+
 ## Resources, cleanup and prelaunch limits
 
 All implementation took place in isolated clones. The original checkout and untracked `.claude/worktrees/` were preserved. The initially created unused managed worktree was archived without changing the original checkout.
