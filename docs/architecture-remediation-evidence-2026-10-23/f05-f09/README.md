@@ -2,6 +2,10 @@
 
 The combined implementation is `1cfb5f06a5f5f1c998aa62d9897b29298b07ed1e`, based on verified main `5b9c5e46a1fc7f023339a755297774e60f0c5806`. Documentation correction `53f092cdfeeebe776ce94b293d7a1d5cc913c370` clarifies recovery after a changed-payload retry. Subsequent evidence/tracker changes do not change implementation. [Manifest](manifest.json) records source identities and every migration hash.
 
+## Pull request and CI
+
+[PR #71](https://github.com/jakedgrant/meeting-scheduler/pull/71) targets main directly and contains the migration and all three client integrations. The PR description records the exact CI head and final six-workflow results; its Checks tab is the current source for subsequent runs. No stacking, merge or hosted deployment is part of this delivery.
+
 ## Baseline and review
 
 `git fetch origin main` succeeded. GitHub confirms #70 merged as `5b9c5e46a1fc7f023339a755297774e60f0c5806`. `git merge-base --is-ancestor` passed for its exact head `040f9ee480f7ad2f1beb41e6d27b7f46cc363ba6` and all five previously missing deliveries:
