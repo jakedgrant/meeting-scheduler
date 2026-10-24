@@ -1,5 +1,7 @@
 # Web F12/F22 lifecycle evidence
 
+Current follow-up source/test commit: `f82b7e21119f375aa63bc10f809aff91636459f3`, based on combined integration `c126675d679d23c6269da252ac36f6a48efa7185`. The SDK-ownership follow-up below supersedes the earlier logout/callback implementation and validation. The original tranche record is retained as historical evidence.
+
 Source/test commit: `c5b6538e26f066515e2cdaf95db9ddc700181238`, based on the agreed session contract `483ca17` and verified main `d51f45a366cbd4a9ecd30e774d8b50441a938894` (PR #71). Work was isolated in `/private/tmp/meeting-scheduler-session-web`, branch `codex/f12-f22-web`. The original checkout and `.claude/worktrees/` were untouched.
 
 ## Changes delivered
@@ -59,3 +61,42 @@ Integration source `b1e311a60025252aa68a171370ea060739b81141` attaches the accou
 Test follow-up `d0a7e82` additionally exercises the existing production calendar disconnect cancellation through the same real SDK lock/credential race. No A disconnect reaches transport under B. The integrated suite passes **113 tests** (57 lifecycle/SDK, 56 existing regressions). Integrated type checking passes with zero errors/five existing warnings, and the production client/SSR build passes. No SDK version or command/backend contract changed. Logs are `/private/tmp/session-integration-web-tests3.log`, `/private/tmp/session-integration-web-check2.log`, `/private/tmp/session-integration-web-build2.log`; expected failure of the original dispatch path is `/private/tmp/session-web-dispatch-regression-before.log`.
 
 Coordinator source `6aeb9a1` also makes explicit sign-out local/device scoped. The real SDK logout test asserts `scope=local`, so an old A logout cannot revoke a newly authenticated A session globally. Final rerun: 113 tests pass, type check has zero errors/five existing warnings, production client/SSR build passes. Logs: `/private/tmp/session-integration-web-tests4.log`, `/private/tmp/session-integration-web-check4.log`, `/private/tmp/session-integration-web-build4.log`.
+
+
+## SDK ownership follow-up, 2026-10-24
+
+The coordinator reproduced an additional queued-logout defect after the original delivery: B's SDK `setSession` held the SDK lock while app state still showed A; an A sign-out queued behind it then selected and revoked B. Waiting for `getSession` before invoking SDK `signOut` would still leave a check/mutation race. A further source audit found that SDK automatic URL initialization could install an unowned callback before the root observer existed. This follow-up addresses those production SDK boundaries.
+
+Source/test commit `f82b7e21119f375aa63bc10f809aff91636459f3` was implemented alone in `/private/tmp/meeting-scheduler-session-web`, branch `codex/web-original-session-logout`, from exact combined integration `c126675d679d23c6269da252ac36f6a48efa7185`. It retains the coordinator's queued creation/calendar credential-dispatch guards and all prior platform work.
+
+The main SDK now uses an explicit public storage/lock adapter with the **unchanged existing** `sb-<project-host-prefix>-auth-token` key. Conditional local removal executes under the same exported `navigatorLock`/`processLock` used by the SDK, after SDK initialization or earlier queued session installations finish. Ownership compares account plus JWT `session_id`, so a normal refresh retains ownership and a fresh A login does not. Nonstandard JWTs without a session ID use exact credentials and fail closed if those changed. Explicit sign-out clears visible state, command ownership and Realtime credentials synchronously. It then removes only the matching original SDK session and revokes the captured original JWT through public `auth.admin.signOut(jwt, 'local')` outside the storage lock. Slow or failed remote revocation cannot block B installation, revoke B/new A, clear its state or report into a later signed-out generation. Local sign-out remains effective if remote revocation fails; server revocation is then unconfirmed.
+
+Main SDK automatic URL installation is disabled. Google, Apple and OTP initiation use the public PKCE APIs and save a ten-minute, single-use intent containing its initiating session lineage, UUID, origin and verifier. Root composition completes the owning callback before rendering its callback navigator. A public `AuthClient.exchangeCodeForSession` helper uses a virtual storage adapter and the same main SDK lock: it validates intent/owner before exchange and checks owner/lifetime again before publishing the returned SDK session. The helper has an empty virtual storage key, so it creates no BroadcastChannel; auto-refresh is disabled and public `stopAutoRefresh` removes its initialization visibility observer. No private SDK field or method is used in production.
+
+Owned cleanup notifications ask the application to verify current SDK storage without synchronously clearing a newer account from an old snapshot. Native browser `storage` events retain prompt cross-tab boundary handling. The observer is mount-owned and disposed with the root. Nil-session reconciliation uses the public Realtime API with the anon key rather than asking SDK storage to resurrect an old credential. A fresh same-account session ID advances the app generation; ordinary refresh retains it.
+
+Final validation of this source commit:
+
+```bash
+node --test tests/web-session-lifecycle.test.mjs tests/web-availability.test.mjs tests/web-creation.test.mjs tests/web-guest-capability.test.mjs
+# 137 passed, 0 failed/cancelled/skipped: 113 prior tests plus 24 new follow-up checks.
+# The lifecycle file contains 81 tests; the other merged suites contain 56.
+npm --prefix apps/web run check
+# 0 errors; 5 unchanged warnings.
+VITE_SUPABASE_URL=https://session.test.invalid VITE_SUPABASE_ANON_KEY=test-anon-key npm --prefix apps/web run build
+# Production client/SSR build passed; no deployment adapter selected.
+git diff --check
+# Passed.
+```
+
+The new real-SDK tests cover queued B and fresh-A installation before original A logout; delayed remote success/failure; immediate visible/local-SDK reset; original JWT and `scope=local` at HTTP transport; queued SDK initialization; same-session refresh and fresh-login generations; old logout failure after B also signs out; PKCE initiation/public exchange; obsolete callbacks queued behind B/new A; delayed callback success/failure before B installation; genuine cold root callback completion and production callback-controller navigation; automatic URL initialization against persisted B with obsolete implicit/unowned/owned links; callback disposal before late success/failure; OTP/Apple initiation; and malformed, cancelled, expired and replayed routes. Browser shims count helper/main channels and visibility observers and verify cross-tab storage observer disposal. The SDK's multiple-instance warnings in cold-reload simulation are retained in logs; tests use isolated clients and injected Fetch, not live providers. Test JWT issue time is fixed within the suite to avoid timestamp-boundary assertions.
+
+Final logs: `/private/tmp/web-owned-all.log`, `/private/tmp/web-owned-check.log`, `/private/tmp/web-owned-build.log`. SDK versions and Node version are unchanged from the original record. All Fetch traffic remains injected; browser globals/channels are deterministic shims restored by teardown. No simulator, emulator, server, port, container, hosted account or prior resource reservation was used. Independent final combined review and CI remain coordinator work.
+
+### Required owner configuration and live evidence
+
+The exact callback shape is now `/auth/callback?attempt=<UUID>`. [The web README](../../../apps/web/README.md) records the production/dev allowlist patterns. For each approved deployed host, the documented pattern is `https://<deployed-web-host>/auth/callback\?attempt=*`; local defaults are `http://localhost:5173/auth/callback\?attempt=*` and `http://127.0.0.1:5173/auth/callback\?attempt=*`. The owner must substitute the actual deployed host and approved development port. These are **Supabase allowlist glob patterns**, not literal app redirect URLs. The escaped `\?` is a literal query separator and `*` admits the UUID without widening the host or path, derived from [Supabase's documented glob rules](https://supabase.com/docs/guides/auth/redirect-urls). Hosted pattern matching and query preservation were not tested. Do not assume an existing exact `/auth/callback` entry already admits the new query.
+
+Confirm that the project's deployed Auth service preserves the emitted attempt parameter for Google, Apple and email links, and that email templates preserve the SDK's confirmation/redirect URL. Provider dashboards still point to the Supabase project's `/auth/v1/callback`; calendar OAuth routing is unchanged. The application rejects old implicit, missing-intent and obsolete links; request a fresh link from this build. Existing development/beta sessions and recovery data are preserved. No public-client retirement or hosted change was invented.
+
+An approved provider test environment/account is still required for real sign-in, cancellation, remote revocation failures, account replacement, reload and live purchase/calendar journeys. The [public PKCE exchange API](https://supabase.com/docs/reference/javascript/auth-exchangecodeforsession) and [public captured-JWT sign-out API](https://supabase.com/docs/reference/javascript/auth-admin-signout) were checked against the pinned SDK source. No hosted allowlist, provider or email configuration was changed, and no live validation is claimed.
