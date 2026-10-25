@@ -98,9 +98,7 @@ class PollService(
 
     private suspend inline fun <reified T : Any> accountRpc(function: String, parameters: T): io.github.jan.supabase.postgrest.result.PostgrestResult {
         val credential = requestCredential()
-        return supabase.postgrest.rpc(function, parameters) {
-            headers[io.ktor.http.HttpHeaders.Authorization] = "Bearer $credential"
-        }
+        return accountPostgrest(supabase, credential).rpc(function, parameters)
     }
 
     var availabilityRecovery: AvailabilityRecoveryStore? = null
