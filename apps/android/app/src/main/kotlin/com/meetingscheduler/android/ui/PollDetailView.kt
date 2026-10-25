@@ -30,7 +30,11 @@ import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
 import java.text.SimpleDateFormat
 import java.time.ZoneId
 import java.util.*
@@ -456,7 +460,9 @@ fun PollDetailView(
                             FinalDateDisplay(
                                 selectedStart = selectedStart,
                                 selectedEnd = selectedEnd,
-                                isAllDay = timeOptions.firstOrNull()?.isAllDay ?: false,
+                                // Finalization copies the chosen option's interval onto the poll.
+                                isAllDay = timeOptions.any { it.isAllDay && it.startTime == selectedStart && it.endTime == selectedEnd },
+                                pollTimeZone = poll?.timezone ?: "UTC",
                                 pollTitle = poll?.title ?: "",
                                 pollDescription = poll?.description,
                                 pollLocation = poll?.location
@@ -483,6 +489,7 @@ fun PollDetailView(
                                     val stats = responsesForOption(option.id)
                                     FinalDateOptionRow(
                                         option = option,
+                                        pollTimeZone = poll?.timezone ?: "UTC",
                                         stats = stats,
                                         onClick = {
                                             finalTimeOption = option
@@ -503,6 +510,7 @@ fun PollDetailView(
 
                 items(timeOptions) { option ->
                     TimeOptionRow(
+                        pollTimeZone = poll?.timezone ?: "UTC",
                         option = option,
                         responses = responsesForOption(option.id),
                         myResponse = localResponses[option.id],
@@ -748,6 +756,7 @@ fun PollDetailView(
     if (showSelectFinalDateDialog) {
         val formattedOption = finalTimeOption?.let { option ->
             val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
+                .apply { timeZone = PollDates.displayZone(option.isAllDay, poll?.timezone ?: "UTC") }
             val dateStr = dateFormat.format(Date.from(option.startTime.toJavaInstant()))
 
             if (option.isAllDay) {
@@ -796,6 +805,7 @@ fun PollDetailView(
 @Composable
 fun TimeOptionRow(
     option: PollTimeOption,
+    pollTimeZone: String,
     responses: ResponseSummary,
     myResponse: AvailabilityStatus?,
     hasCalendarConflict: Boolean,
@@ -819,6 +829,7 @@ fun TimeOptionRow(
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                            .apply { timeZone = PollDates.displayZone(option.isAllDay, pollTimeZone) }
                         Text(
                             dateFormat.format(Date.from(option.startTime.toJavaInstant())),
                             style = MaterialTheme.typography.titleSmall
@@ -1005,6 +1016,7 @@ fun FinalDateDisplay(
     selectedStart: Instant,
     selectedEnd: Instant,
     isAllDay: Boolean,
+    pollTimeZone: String,
     pollTitle: String,
     pollDescription: String?,
     pollLocation: String?
@@ -1027,8 +1039,16 @@ fun FinalDateDisplay(
                     val intent = Intent(Intent.ACTION_INSERT).apply {
                         data = CalendarContract.Events.CONTENT_URI
                         putExtra(CalendarContract.Events.TITLE, pollTitle)
-                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, selectedStart.toEpochMilliseconds())
-                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, selectedEnd.toEpochMilliseconds())
+                        if (isAllDay) {
+                            // Calendar Provider all-day events are UTC midnights of their dates.
+                            val date = PollDates.allDayDate(selectedStart, pollTimeZone)
+                            putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, true)
+                            putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds())
+                            putExtra(CalendarContract.EXTRA_EVENT_END_TIME, date.plus(1, DateTimeUnit.DAY).atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds())
+                        } else {
+                            putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, selectedStart.toEpochMilliseconds())
+                            putExtra(CalendarContract.EXTRA_EVENT_END_TIME, selectedEnd.toEpochMilliseconds())
+                        }
                         pollDescription?.let {
                             putExtra(CalendarContract.Events.DESCRIPTION, it)
                         }
@@ -1077,6 +1097,7 @@ fun FinalDateDisplay(
                         Icon(Icons.Default.CalendarToday, null, tint = Color.White)
                         Spacer(Modifier.width(8.dp))
                         val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
+                            .apply { timeZone = PollDates.displayZone(isAllDay, pollTimeZone) }
                         Text(
                             dateFormat.format(Date.from(selectedStart.toJavaInstant())),
                             style = MaterialTheme.typography.titleMedium,
@@ -1107,6 +1128,7 @@ fun FinalDateDisplay(
 @Composable
 fun FinalDateOptionRow(
     option: PollTimeOption,
+    pollTimeZone: String,
     stats: ResponseSummary,
     onClick: () -> Unit,
     enabled: Boolean
@@ -1125,6 +1147,7 @@ fun FinalDateOptionRow(
         ) {
             Column {
                 val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+                    .apply { timeZone = PollDates.displayZone(option.isAllDay, pollTimeZone) }
                 Text(
                     dateFormat.format(Date.from(option.startTime.toJavaInstant())),
                     style = MaterialTheme.typography.titleSmall

@@ -1,5 +1,6 @@
 import { get, writable } from 'svelte/store'
 import type { Poll, PollTimeOption } from './supabase'
+import { allDayInterval, currentZone, DateTimeError, deadlineFor, isCalendarDate, timedInterval } from './date-time'
 
 export interface CreationPayload {
 	title: string
@@ -53,30 +54,36 @@ export function creationStorage(): DraftStorage | null {
 export function emptyCreationDraft(): CreationDraft {
 	return {
 		title: '', description: '', location: '', dueDate: '', isAllDay: false, useEventPass: false,
-		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+		timezone: currentZone(),
 		timeOptions: [{ id: crypto.randomUUID(), date: '', startTime: '09:00', endTime: '10:00' }]
 	}
 }
 
-export function creationPayload(draft: CreationDraft): CreationPayload {
+export function creationPayload(draft: CreationDraft, zone: string = currentZone()): CreationPayload {
 	if (!draft.title.trim()) throw new Error('Please enter a poll title.')
 	if (!draft.timeOptions.length || draft.timeOptions.some(option => !option.date || !option.startTime || !option.endTime)) {
 		throw new Error('Choose a date and times for every option, or remove the unfinished option.')
 	}
+	// New payloads interpret picker values in this browser's current zone and
+	// record that zone. Pending payloads are reused verbatim, including across a zone change.
 	const time_options = draft.timeOptions.map(option => {
-		const start = new Date(`${option.date}T${draft.isAllDay ? '00:00' : option.startTime}`)
-		const end = new Date(`${option.date}T${draft.isAllDay ? '23:59' : option.endTime}`)
-		if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) {
+		try {
+			return { ...(draft.isAllDay ? allDayInterval(option.date, zone) : timedInterval(option.date, option.startTime, option.endTime, zone)), is_all_day: draft.isAllDay }
+		} catch (error) {
+			if (error instanceof DateTimeError && error.code === 'nonexistent_local_time') {
+				throw new Error(`${option.date} ${option.startTime}–${option.endTime} includes a time skipped by a clock change in ${zone}. Choose another time.`)
+			}
 			throw new Error('End time must be after start time for every option.')
 		}
-		return { start_time: start.toISOString(), end_time: end.toISOString(), is_all_day: draft.isAllDay }
 	})
+	let closes_at: string | null = null
+	if (draft.dueDate) {
+		if (!isCalendarDate(draft.dueDate)) throw new Error('Choose a valid response due date.')
+		closes_at = deadlineFor(draft.dueDate, zone)
+	}
 	return {
 		title: draft.title.trim(), description: draft.description.trim() || null, location: draft.location.trim() || null,
-		// New payloads interpret picker values in this browser's current zone.
-		// Pending payloads are reused verbatim, including across a zone change.
-		timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, closes_at: draft.dueDate ? new Date(draft.dueDate).toISOString() : null,
-		time_options, use_event_pass: draft.useEventPass
+		timezone: zone, closes_at, time_options, use_event_pass: draft.useEventPass
 	}
 }
 

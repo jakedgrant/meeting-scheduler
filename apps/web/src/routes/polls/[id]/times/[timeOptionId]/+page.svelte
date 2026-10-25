@@ -10,6 +10,7 @@
 		ownPollDetail
 	} from '$lib/stores/polls';
 	import { sessionIdentity } from '$lib/session-scope';
+	import { allDayDate, formatCalendarDate } from '$lib/date-time';
 	import type { AvailabilityStatus } from '$lib/supabase';
 
 	const pollId = $derived($page.params.id as string);
@@ -77,15 +78,14 @@
 	});
 	onDestroy(() => detail?.dispose());
 
-	function formatDateTime(isoString: string) {
+	function formatDateTime(isoString: string, isAllDay = false) {
 		const date = new Date(isoString);
+		const dateOptions: Intl.DateTimeFormatOptions = { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' };
 		return {
-			date: date.toLocaleDateString('en-US', {
-				weekday: 'long',
-				month: 'long',
-				day: 'numeric',
-				year: 'numeric'
-			}),
+			// An all-day option is a calendar date in the poll's zone.
+			date: isAllDay && $currentPoll
+				? formatCalendarDate(allDayDate({ start_time: isoString }, $currentPoll.timezone), dateOptions)
+				: date.toLocaleDateString('en-US', dateOptions),
 			time: date.toLocaleTimeString('en-US', {
 				hour: 'numeric',
 				minute: '2-digit'
@@ -102,7 +102,7 @@
 	{#if !timeOption}
 		<div class="loading">Loading...</div>
 	{:else}
-		{@const formatted = formatDateTime(timeOption.start_time)}
+		{@const formatted = formatDateTime(timeOption.start_time, timeOption.is_all_day)}
 		{@const endFormatted = formatDateTime(timeOption.end_time)}
 		<header>
 			<button class="back-link" onclick={goBack}>&larr; Back to Poll</button>

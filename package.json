@@ -15,7 +15,9 @@
     "test:creation:db": "node --test tests/creation-commands.test.mjs",
     "test:creation:concurrent": "node --test tests/concurrent-creation.test.mjs",
     "test:web:creation": "node --test tests/web-creation.test.mjs",
-    "test:web:lifecycle": "node --test tests/web-session-lifecycle.test.mjs"
+    "test:web:lifecycle": "node --test tests/web-session-lifecycle.test.mjs",
+    "test:web:dates": "node --test tests/web-date-time.test.mjs",
+    "test:dates:db": "node --test tests/date-time-database.test.mjs"
   },
   "dependencies": {
     "jsonwebtoken": "^9.0.3"

@@ -135,17 +135,17 @@ private fun CreationForm(
             isLoading = true
             errorMessage = null
             try {
+                // Picker values are wall times in the device zone, which the poll records.
+                val zone = TimeZone.currentSystemDefault()
                 val payload = editor.pending?.payload ?: PollCreationPayload(
                     title = title,
                     description = description.ifBlank { null },
                     location = location.ifBlank { null },
-                    timezone = TimeZone.currentSystemDefault().id,
-                    closesAt = if (hasDueDate) dueDate?.atStartOfDayIn(TimeZone.currentSystemDefault()) else null,
+                    timezone = zone.id,
+                    closesAt = if (hasDueDate) dueDate?.let { PollDates.deadline(it, zone) } else null,
                     timeOptions = timeOptions.map { option ->
-                        val start = option.date.atTime(if (isAllDay) LocalTime(0, 0) else option.startTime).toInstant(TimeZone.currentSystemDefault())
-                        val end = option.date.atTime(if (isAllDay) LocalTime(23, 59) else option.endTime).toInstant(TimeZone.currentSystemDefault())
-                        require(end > start) { "End time must be after start time for every option." }
-                        CreationTimeOption(start, end, isAllDay)
+                        if (isAllDay) PollDates.allDayOption(option.date, zone)
+                        else PollDates.timedOption(option.date, option.startTime, option.endTime, zone)
                     },
                     useEventPass = useEventPass,
                 )

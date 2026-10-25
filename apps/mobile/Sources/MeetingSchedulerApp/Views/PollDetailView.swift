@@ -62,7 +62,7 @@ struct PollDetailView: View {
 
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "MMMM d, yyyy"
-        let dateStr = dateFormatter.string(from: option.startTime)
+        let dateStr = dateFormatter.string(from: option.displayDate(pollTimeZone: poll?.timezone))
 
         if option.isAllDay {
             return dateStr
@@ -127,7 +127,7 @@ struct PollDetailView: View {
             Text("Set \(formattedSelectedOption) as the final meeting time? This closes responses for the poll.")
         }
         .navigationDestination(item: $selectedTimeOption) { timeOption in
-            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption)
+            TimeOptionResponsesView(pollId: pollId, timeOption: timeOption, pollTimeZone: poll?.timezone ?? "UTC")
         }
     }
 
@@ -267,7 +267,9 @@ struct PollDetailView: View {
                 FinalDateDisplay(
                     selectedStart: selectedStart,
                     selectedEnd: selectedEnd,
-                    isAllDay: timeOptions.first(where: { $0.isAllDay }) != nil,
+                    // Finalization copies the chosen option's interval onto the poll.
+                    allDayDate: timeOptions.first(where: { $0.startTime == selectedStart && $0.endTime == selectedEnd && $0.isAllDay })
+                        .map { $0.allDayDate(pollTimeZone: poll.timezone) },
                     pollTitle: poll.title,
                     pollDescription: poll.description,
                     pollLocation: poll.location
@@ -277,6 +279,7 @@ struct PollDetailView: View {
             Section {
                 FinalDateSelectionView(
                     sortedTimeOptions: sortedTimeOptions,
+                    pollTimeZone: poll.timezone,
                     isSelectingFinalDate: isSelectingFinalDate,
                     responsesForOption: responsesForOption,
                     onSelectOption: { option in
@@ -296,6 +299,7 @@ struct PollDetailView: View {
                 } label: {
                     TimeOptionRow(
                         option: option,
+                        pollTimeZone: poll.timezone,
                         responses: responsesForOption(option.id),
                         myResponse: editor.responses[option.id],
                         hasCalendarConflict: calendarConflicts.contains(option.id),
@@ -660,7 +664,9 @@ struct FinalDateDisplay: View {
     @Environment(\.authService) private var authService
     let selectedStart: Date
     let selectedEnd: Date
-    let isAllDay: Bool
+    /// Set when the final option is all-day: its calendar date in the poll's zone.
+    let allDayDate: CalendarDay?
+    private var isAllDay: Bool { allDayDate != nil }
     let pollTitle: String
     let pollDescription: String?
     let pollLocation: String?
@@ -696,7 +702,7 @@ struct FinalDateDisplay: View {
                 HStack {
                     Image(systemName: "calendar")
                         .foregroundStyle(.white)
-                    Text(selectedStart, style: .date)
+                    Text(allDayDate?.pickerDate() ?? selectedStart, style: .date)
                         .font(.title3)
                         .fontWeight(.semibold)
                         .foregroundStyle(.white)
@@ -743,8 +749,10 @@ struct FinalDateDisplay: View {
             operation: { _ in
                 await calendarService.addEventToCalendar(
                     title: pollTitle,
-                    startDate: selectedStart,
-                    endDate: selectedEnd,
+                    // An all-day event is a floating date in the device calendar.
+                    startDate: allDayDate?.pickerDate() ?? selectedStart,
+                    endDate: allDayDate?.pickerDate() ?? selectedEnd,
+                    isAllDay: isAllDay,
                     notes: pollDescription,
                     location: pollLocation
                 )
@@ -759,6 +767,7 @@ struct FinalDateDisplay: View {
 
 struct FinalDateSelectionView: View {
     let sortedTimeOptions: [PollTimeOption]
+    let pollTimeZone: String
     let isSelectingFinalDate: Bool
     let responsesForOption: (UUID) -> ResponseSummary
     let onSelectOption: (PollTimeOption) -> Void
@@ -780,6 +789,7 @@ struct FinalDateSelectionView: View {
                 } label: {
                     FinalDateOptionRow(
                         option: option,
+                        pollTimeZone: pollTimeZone,
                         stats: responsesForOption(option.id)
                     )
                 }
@@ -794,12 +804,13 @@ struct FinalDateSelectionView: View {
 
 struct FinalDateOptionRow: View {
     let option: PollTimeOption
+    let pollTimeZone: String
     let stats: ResponseSummary
 
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(option.startTime, style: .date)
+                Text(option.displayDate(pollTimeZone: pollTimeZone), style: .date)
                     .font(.headline)
                     .foregroundStyle(.primary)
 
@@ -833,6 +844,7 @@ struct FinalDateOptionRow: View {
 
 struct TimeOptionRow: View {
     let option: PollTimeOption
+    let pollTimeZone: String
     let responses: ResponseSummary
     let myResponse: AvailabilityStatus?
     let hasCalendarConflict: Bool
@@ -853,7 +865,7 @@ struct TimeOptionRow: View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(option.startTime, style: .date)
+                    Text(option.displayDate(pollTimeZone: pollTimeZone), style: .date)
                         .font(.headline)
 
                     if hasCalendarConflict {

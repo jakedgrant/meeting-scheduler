@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import com.meetingscheduler.android.models.AvailabilityResponse
 import com.meetingscheduler.android.models.AvailabilityStatus
+import com.meetingscheduler.android.models.PollDates
 import com.meetingscheduler.android.models.PollParticipant
 import com.meetingscheduler.android.models.PollTimeOption
 import com.meetingscheduler.android.services.PollService
@@ -51,6 +52,7 @@ fun TimeOptionResponsesView(
     onNavigateBack: () -> Unit
 ) {
     var timeOption by remember { mutableStateOf<PollTimeOption?>(null) }
+    var pollTimeZone by remember { mutableStateOf("UTC") }
     var participants by remember { mutableStateOf<List<PollParticipant>>(emptyList()) }
     var responses by remember { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
@@ -83,6 +85,8 @@ fun TimeOptionResponsesView(
         isLoading = true
         val allTimeOptions = pollService.loadTimeOptions(pollId)
         timeOption = allTimeOptions.firstOrNull { it.id == timeOptionId }
+        // All-day dates are read in the poll's zone.
+        if (timeOption?.isAllDay == true) pollTimeZone = pollService.loadPoll(pollId)?.timezone ?: "UTC"
 
         participants = pollService.loadParticipants(pollId)
         responses = pollService.loadResponses(allTimeOptions.map { it.id })
@@ -128,6 +132,7 @@ fun TimeOptionResponsesView(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
+                                    .apply { timeZone = PollDates.displayZone(option.isAllDay, pollTimeZone) }
                                 Text(
                                     dateFormat.format(Date.from(option.startTime.toJavaInstant())),
                                     style = MaterialTheme.typography.titleMedium

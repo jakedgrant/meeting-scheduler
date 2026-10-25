@@ -403,6 +403,7 @@ public final class CalendarService: CalendarServiceProtocol {
         title: String,
         startDate: Date,
         endDate: Date,
+        isAllDay: Bool,
         notes: String? = nil,
         location: String? = nil
     ) async -> Bool {
@@ -434,6 +435,7 @@ public final class CalendarService: CalendarServiceProtocol {
             // Create the event
             let event = EKEvent(eventStore: eventStore)
             event.title = title
+            event.isAllDay = isAllDay
             event.startDate = startDate
             event.endDate = endDate
             event.notes = notes
