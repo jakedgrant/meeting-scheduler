@@ -60,3 +60,36 @@ Both coordinator-owned reservations were fresh iPhone 17 Pro / iOS 27.0 devices,
 Both IDs are absent from the final `simctl` inventory. Resource logs are `/private/tmp/session-review-comments-resource.log` and `/private/tmp/session-review-comments-final-resource.log`; inventory is `/private/tmp/session-review-comments-final-device-inventory.json`. No reservation, emulator, local server, database or live provider session remains. No hosted configuration or development/beta data changed. The existing approved-environment provider checks remain owner actions.
 
 Exact published head and final workflow results are maintained in [PR #72](https://github.com/jakedgrant/meeting-scheduler/pull/72) and its checks; evidence-only publication commits preserve the tested implementation.
+
+## CI follow-up: deterministic Android RPC credential coverage
+
+The first CI run for owner-comment head `e4c10c6` failed the existing Android `commandDispatchKeepsTheOriginatingCredentialWhenSdkTokenResolutionWaitsAcrossAccountChanges` test ([run](https://github.com/jakedgrant/meeting-scheduler/actions/runs/40150345532)). The coordinator reproduced it directly without subagents: iteration 71 failed `expected:<0> but was:<1>` at the pre-dispatch assertion. The test assumed the pinned SDK's Initializing status would prevent HTTP dispatch; it was not an explicit scheduling barrier. Log: `/private/tmp/session-review-comments-android-repeat-before.log`.
+
+Replacing that assumption with an explicit SDK-replacement/HTTP-response ordering exposed a production problem: PostgREST RPC query headers appended the original token to the SDK's current token, yielding `[Bearer token-B, Bearer original-A]`. Earlier assertions inside MockEngine could be swallowed by `runCatching` as the expected stale-command failure. The coordinator moved exact-header assertions outside that capture and changed `accountRpc` to use the existing request-owned `AccountPostgrest` adapter, as direct reads/profile/status already did. No backend, payload, funding, idempotency, retry or authorization contract changed.
+
+Source **`c578fd4c16e1f0a7c9bcbf906d2c2ea4a0e11f08`**, Android subtree **`8fb857bde7d1349723f5711e0cce2d16b3c6559a`**, passes all **75 JVM tests**, debug APK and instrumentation APK builds in **13 seconds** (73 tasks). The renamed test deterministically installs B or a fresh A in the actual SDK before A's app-owned request, waits for captured HTTP headers, then changes app ownership while holding the response. It covers `create_poll`, `join_poll`, `save_availability`, `get_availability` and `finalize_poll`, requires exactly one original-A Authorization value, and requires stale completion to be a cancellation rather than an arbitrary failure. All five RPC paths across both replacement cases passed **100 repeated JUnit executions** (1,000 request scenarios). Logs: `/private/tmp/session-review-comments-android-final3-build.log`, `/private/tmp/session-review-comments-android-repeat-after.log`.
+
+An intermediate fixture using a custom SDK access-token provider with the Auth plugin was rejected by the pinned SDK and discarded. The final fixture uses its normal Auth/PostgREST plugins and no custom token provider. The initial wrong-header regression failed the exact-header assertion before the production fix; that failing run is retained in `/private/tmp/session-review-comments-android-final-build.log` and is excluded from passing evidence.
+
+The complete current implementation snapshot is `c578fd4`; its iOS subtree is still exactly the 119-test source `90e4db3`. This follow-up was implemented and reviewed directly. It starts no device, server or provider. Prior Android callback/recreation instrumentation remains applicable to unchanged Activity/auth/router/instrumentation sources; no new emulator result is claimed for RPC transport. Current exact-head CI is maintained in PR #72.
+
+The Android build used the same isolated offline command recorded in `android.md`:
+
+```bash
+JAVA_HOME=/private/tmp/meeting-fix-jdk21/jdk-21.0.12.1+1/Contents/Home \
+ANDROID_HOME=/private/tmp/meeting-fix-android-sdk \
+GRADLE_USER_HOME=/private/tmp/session-integration-gradle \
+apps/android/gradlew -p apps/android --no-daemon --offline \
+  -PdisableCrashlyticsMappingUpload=true \
+  :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
+```
+
+The retained harness `/private/tmp/RepeatCredentialRace.java` runs `JUnitCore.run(Request.method(AuthSdkTransportTest.class, "commandDispatchKeepsTheOriginatingCredentialWhenSdkAlreadyHasReplacementSession"))` 100 times and exits on the first unsuccessful result. Its classpath points to this clone's compiled production/test artifacts and the pinned SDK dependencies:
+
+```bash
+TASK_REVIEW_FIXED_CP="$(cat /private/tmp/session-review-comments-fixed-classpath.txt)"
+/private/tmp/meeting-fix-jdk21/jdk-21.0.12.1+1/Contents/Home/bin/javac \
+  -cp "$TASK_REVIEW_FIXED_CP" /private/tmp/RepeatCredentialRace.java
+/private/tmp/meeting-fix-jdk21/jdk-21.0.12.1+1/Contents/Home/bin/java \
+  -cp "$TASK_REVIEW_FIXED_CP" RepeatCredentialRace 100
+```
