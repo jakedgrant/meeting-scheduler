@@ -391,7 +391,9 @@ struct PollDetailView: View {
                                                   preservingDraft: true, using: pollService)
                             },
                             onSuccess: { _ in applySavedSnapshot() },
-                            isCurrent: { generation == viewGeneration }
+                            isCurrent: {
+                                generation == viewGeneration && displayedAccountId == authService.currentUserId
+                            }
                         )
                     }
                     .disabled(editor.isLoading || editor.isSaving)
