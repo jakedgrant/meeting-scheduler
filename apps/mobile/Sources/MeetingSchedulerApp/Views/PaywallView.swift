@@ -3,6 +3,7 @@ import Shared
 import RevenueCat
 
 struct PaywallView: View {
+    @Environment(\.authService) private var authService
     @Environment(\.dismiss) var dismiss
     @Environment(\.purchaseService) var purchaseService
 
@@ -146,39 +147,33 @@ struct PaywallView: View {
 
     private func purchase() {
         guard let package = selectedPackage else { return }
-
         isPurchasing = true
         errorMessage = nil
-
-        Task {
-            do {
-                _ = try await purchaseService.purchase(package: package)
-                dismiss()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isPurchasing = false
-        }
+        authService.performSessionTask(
+            operation: { _ in _ = try await purchaseService.purchase(package: package) },
+            onSuccess: { _ in dismiss() },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isPurchasing = false }
+        )
     }
 
     private func restorePurchases() {
         isPurchasing = true
         errorMessage = nil
-
-        Task {
-            do {
-                _ = try await purchaseService.restorePurchases()
+        authService.performSessionTask(
+            operation: { _ in _ = try await purchaseService.restorePurchases() },
+            onSuccess: { _ in
                 if purchaseService.hasProAccess {
                     dismiss()
                 } else {
                     errorMessage = "No purchases to restore"
                 }
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isPurchasing = false
-        }
+            },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isPurchasing = false }
+        )
     }
+
 }
 
 // MARK: - PackageCard

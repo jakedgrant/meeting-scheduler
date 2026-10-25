@@ -11,6 +11,7 @@ struct TimeOption: Identifiable {
 struct CreatePollView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.pollService) var pollService
+    @Environment(\.authService) private var authService
 
     @State var title = ""
     @State var description = ""
@@ -60,8 +61,8 @@ struct CreatePollView: View {
             }
             .interactiveDismissDisabled(isLoading)
         }
-        .task(id: AuthService.shared.currentUserId) {
-            editor.selectAccount(AuthService.shared.currentUserId)
+        .task(id: authService.currentUserId) {
+            editor.selectAccount(authService.currentUserId)
             restoreDraft(editor.pending?.payload)
         }
         .onAppear {
@@ -303,13 +304,10 @@ struct CreatePollView: View {
             useEventPass: useEventPass
         )
         guard let payload else { return }
-        let identity = AuthService.shared.currentUserId
-        Task {
-            guard AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
-            await editor.submit(payload, using: pollService)
-            guard AuthService.shared.currentUserId == identity, !Task.isCancelled else { return }
-            if editor.result != nil { dismiss() }
-        }
+        authService.performSessionTask(
+            operation: { _ in await editor.submit(payload, using: pollService) },
+            onSuccess: { _ in if editor.result != nil { dismiss() } }
+        )
     }
 
     private func restoreDraft(_ payload: PollCreationPayload?) {

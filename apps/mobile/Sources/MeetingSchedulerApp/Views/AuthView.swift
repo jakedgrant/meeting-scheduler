@@ -114,45 +114,34 @@ struct AuthView: View {
     private func signInWithGoogle() {
         isLoading = true
         errorMessage = nil
-
-        Task {
-            do {
-                try await authService.signInWithGoogle()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithGoogle() },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
     }
 
     private func signInWithApple() {
         isLoading = true
         errorMessage = nil
-
-        Task {
-            do {
-                try await authService.signInWithApple()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithApple() },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
     }
 
     private func signInWithMagicLink() {
         isLoading = true
         errorMessage = nil
-
-        Task {
-            do {
-                try await authService.signInWithMagicLink(email: email)
-                showMagicLinkSent = true
-            } catch {
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithMagicLink(email: email) },
+            onSuccess: { _ in showMagicLinkSent = true },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
     }
+
 }
 
 #Preview {

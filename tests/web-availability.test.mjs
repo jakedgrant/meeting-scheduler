@@ -38,7 +38,8 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { value: disk, writable: true, configurable: true });
   state.supabase = {
-    async rpc(name, args) {
+    rpc(name, args) {
+      const response = (async () => {
       state.calls.push({ name, args: structuredClone(args) });
       if (state.handler) {
         const result = await state.handler(name, args);
@@ -49,10 +50,12 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
       if (name === 'get_guest_poll_detail') return { data: { participant_id: participantId, poll, time_options: [option], participants: [state.participant], responses: [] }, error: null };
       if (name === 'get_availability') return { data: state.version, error: null };
       throw Error(`Unexpected RPC ${name}`);
+      })();
+      return Object.assign(response, { abortSignal() { return this; } });
     },
     from(table) {
       const data = table === 'polls' ? poll : table === 'poll_time_options' ? [option] : table === 'poll_participants' ? [state.participant] : [];
-      return { select() { return this; }, eq() { return this; }, in() { return this; }, order() { return this; }, single: async () => ({ data, error: null }), then(resolve) { return Promise.resolve({ data, error: null }).then(resolve); } };
+      return { abortSignal() { return this; }, select() { return this; }, eq() { return this; }, in() { return this; }, order() { return this; }, single: async () => ({ data, error: null }), then(resolve) { return Promise.resolve({ data, error: null }).then(resolve); } };
     },
     channel() { return { on() { return this; }, subscribe() { return this; } }; }, removeChannel() {}
   };

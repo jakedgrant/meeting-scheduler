@@ -152,26 +152,20 @@ struct SettingsView: View {
 
     private func signOut() {
         isSigningOut = true
-
-        Task {
-            do {
-                try await authService.signOut()
-            } catch {
-                print("Sign out failed: \(error)")
-            }
-            isSigningOut = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signOut() },
+            onFailure: { print("Sign out failed: \($0)") },
+            onCompletion: { isSigningOut = false }
+        )
     }
 
     private func restorePurchases() {
-        Task {
-            do {
-                _ = try await purchaseService.restorePurchases()
-            } catch {
-                print("Restore failed: \(error)")
-            }
-        }
+        authService.performSessionTask(
+            operation: { _ in _ = try await purchaseService.restorePurchases() },
+            onFailure: { print("Restore failed: \($0)") }
+        )
     }
+
 }
 
 // MARK: - ProfileRow

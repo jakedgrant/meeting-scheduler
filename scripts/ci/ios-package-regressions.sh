@@ -41,7 +41,8 @@ XML
 # package workspace as well. No wrapper project or dependency update is needed.
 cp "$package_dir/Package.resolved" "$workspace/xcshareddata/swiftpm/Package.resolved"
 verify_lockfile() {
-  git diff --exit-code -- apps/mobile/Package.resolved
+  git diff --exit-code -- apps/mobile/Package.resolved \
+    apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
   python3 - "$package_dir/Package.resolved" "$workspace/xcshareddata/swiftpm/Package.resolved" <<'PY'
 import json, pathlib, sys
 def revisions(path):
@@ -107,4 +108,15 @@ xcodebuild "${common[@]}" \
   -resultBundlePath "$output/Regressions.xcresult" \
   test-without-building 2>&1 | tee "$output/test.log"
 
+verify_lockfile
+
+# Compile the tracked application wrapper as well as the package. Shared auth,
+# calendar and billing changes must remain wired into the shipping entry point.
+xcodebuild -project "$repo_root/apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj" \
+  -scheme MeetingScheduler -configuration Debug \
+  -derivedDataPath "$output/WrapperDerivedData" \
+  -clonedSourcePackagesDirPath "$output/SourcePackages" \
+  -disableAutomaticPackageResolution -onlyUsePackageVersionsFromResolvedFile \
+  -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO \
+  build 2>&1 | tee "$output/wrapper-build.log"
 verify_lockfile

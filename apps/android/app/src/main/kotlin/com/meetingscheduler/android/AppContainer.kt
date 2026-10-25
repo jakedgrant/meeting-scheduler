@@ -26,11 +26,39 @@ class AppContainer(
         null
     }
 
-    val authService = AuthService(applicationScope, billingIdentity = purchaseService)
+    private val authAttemptPreferences = application.getSharedPreferences("auth_attempt_v1", 0)
+    val authService = AuthService(applicationScope, billingIdentity = purchaseService,
+        attempts = object : com.meetingscheduler.android.services.AuthAttemptStore {
+            override fun read(): com.meetingscheduler.android.services.PendingAuthAttempt? =
+                authAttemptPreferences.getString("pending", null)?.let {
+                    runCatching { kotlinx.serialization.json.Json.decodeFromString<com.meetingscheduler.android.services.PendingAuthAttempt>(it) }.getOrNull()
+                }
+            override fun write(attempt: com.meetingscheduler.android.services.PendingAuthAttempt?) {
+                val edit = authAttemptPreferences.edit()
+                if (attempt == null) edit.remove("pending")
+                else edit.putString("pending", kotlinx.serialization.json.Json.encodeToString(com.meetingscheduler.android.services.PendingAuthAttempt.serializer(), attempt))
+                check(edit.commit()) { "Sign-in could not be saved. Try again." }
+            }
+        })
 
     val pollService = PollService(authService)
 
     val calendarService = CalendarService(application, authService, applicationScope)
+
+    init {
+        val recovery = application.getSharedPreferences("availability_recovery_v1", 0)
+        pollService.availabilityRecovery = com.meetingscheduler.android.services.AvailabilityRecoveryStore(
+            read = { recovery.getString(it, null) },
+            write = { key, value -> check(recovery.edit().putString(key, value).commit()) { "Your response could not be saved for retry." } },
+        )
+        authService.onBoundary {
+            pollService.resetSession()
+            calendarService.resetSession()
+        }
+        // Auth restoration may have completed synchronously before registration.
+        pollService.resetSession()
+        calendarService.resetSession()
+    }
 }
 
 /**

@@ -17,6 +17,45 @@ final class AvailabilityEditorTests: XCTestCase {
         return editor
     }
 
+    func testFailedOperationSurvivesAccountReplacementAndScreenRecreation() async {
+        let service = MockPollService(), a = UUID(), b = UUID()
+        service.availabilityLoader = { _, _, _ in self.snapshot() }
+        let original = AvailabilityEditor()
+        original.selectAccount(a, pollId: pollId)
+        await original.load(pollId: pollId, participantId: participantId, using: service)
+        original.comment = "A draft"
+        original.responses[optionId] = .maybe
+        var operations: [SaveAvailabilityRequest] = []
+        var writes = 0
+        var committed: AvailabilitySnapshot?
+        service.availabilitySaver = { request in
+            operations.append(request)
+            if let committed { return committed }
+            writes += 1
+            committed = self.snapshot(version: 2, comment: request.comment)
+            throw URLError(.timedOut)
+        }
+        await original.save(pollId: pollId, participantId: participantId, using: service)
+        original.selectAccount(nil, pollId: pollId)
+        XCTAssertEqual(original.comment, "")
+        let recreated = AvailabilityEditor()
+        recreated.selectAccount(b, pollId: pollId)
+        XCTAssertEqual(recreated.comment, "")
+        XCTAssertNil(recreated.saved)
+        recreated.selectAccount(a, pollId: pollId)
+        XCTAssertEqual(recreated.comment, "A draft")
+        XCTAssertEqual(recreated.responses[optionId], .maybe)
+        await recreated.load(pollId: pollId, participantId: participantId, using: service)
+        await recreated.save(pollId: pollId, participantId: participantId, using: service)
+        XCTAssertEqual(operations.count, 2)
+        XCTAssertEqual(operations[0].requestId, operations[1].requestId)
+        XCTAssertEqual(operations[0].expectedVersion, operations[1].expectedVersion)
+        XCTAssertEqual(operations[0].responses, operations[1].responses)
+        XCTAssertEqual(operations[0].comment, operations[1].comment)
+        XCTAssertEqual(writes, 1)
+        XCTAssertEqual(recreated.saved?.version, 2)
+    }
+
     func testFailureKeepsDraftAndSavedStateAndRetryUsesSameRequestId() async {
         let service = MockPollService()
         let editor = await loadedEditor(service)

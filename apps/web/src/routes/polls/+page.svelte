@@ -1,10 +1,13 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user, profile, signOut } from '$lib/stores/auth';
 	import { polls, createdPolls, joinedPolls, pollsLoading, loadMyPolls, loadPollByCode } from '$lib/stores/polls';
-	import { loadSubscription } from '$lib/stores/subscription';
 	import { supabase, type PollTimeOption } from '$lib/supabase';
+
+	import { createSessionWork } from '$lib/session-scope';
+	const work = createSessionWork();
+	onDestroy(() => work.dispose());
 
 	let joinCode = $state('');
 	let joinError = $state('');
@@ -19,16 +22,28 @@
 	});
 
 	onMount(() => {
-		loadMyPolls().then(() => {
-			loadTimeRangesAndParticipants();
+		let account: string | null | undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const stop = user.subscribe(value => {
+			const next = value?.id ?? null;
+			if (account === next) return;
+			account = next;
+			work.invalidate();
+			if (timer) clearTimeout(timer);
+			pollTimeRanges = {}; participantCounts = {};
+			joinCode = ''; joinError = ''; joinLoading = false;
+			if (!next) return;
+			const isCurrent = work.capture();
+			timer = setTimeout(() => {
+				void loadMyPolls().then(() => { if (isCurrent()) return loadTimeRangesAndParticipants(); });
+			}, 0);
 		});
-		// Load subscription separately without blocking poll display
-		loadSubscription().catch((err) => {
-			console.error('Failed to load subscription:', err);
-		});
+		return () => { if (timer) clearTimeout(timer); stop(); };
 	});
 
 	async function loadTimeRangesAndParticipants() {
+		const isCurrent = work.capture();
+		const signal = work.signal();
 		const allPolls = [...$createdPolls, ...$joinedPolls];
 		const timeRanges: Record<string, { earliest: Date; latest: Date } | null> = {};
 		const counts: Record<string, number> = {};
@@ -40,6 +55,7 @@
 					const { data: timeOptions, error } = await supabase
 						.from('poll_time_options')
 						.select('*')
+						.abortSignal(signal)
 						.eq('poll_id', poll.id)
 						.order('start_time', { ascending: true });
 
@@ -56,11 +72,14 @@
 					timeRanges[poll.id] = null;
 				}
 
+				if (!isCurrent()) return;
+
 				// Load participant count
 				try {
 					const { count, error } = await supabase
 						.from('poll_participants')
 						.select('id', { count: 'exact', head: true })
+						.abortSignal(signal)
 						.eq('poll_id', poll.id);
 
 					if (!error) {
@@ -75,13 +94,14 @@
 			})
 		);
 
-		pollTimeRanges = timeRanges;
-		participantCounts = counts;
+		if (isCurrent()) {
+			pollTimeRanges = timeRanges;
+			participantCounts = counts;
+		}
 	}
 
 	async function handleSignOut() {
-		await signOut();
-		goto('/');
+		if (await signOut()) goto('/');
 	}
 
 	async function handleJoinByCode() {
@@ -97,11 +117,13 @@
 			return;
 		}
 
+		const isCurrent = work.capture();
 		joinError = '';
 		joinLoading = true;
 
 		try {
 			const poll = await loadPollByCode(code);
+			if (!isCurrent()) return;
 
 			if (!poll) {
 				joinError = 'Poll not found. Please check the code.';
@@ -117,9 +139,9 @@
 			goto(`/polls/${poll.id}`);
 		} catch (err) {
 			console.error('Failed to join poll:', err);
-			joinError = 'Failed to join poll. Please try again.';
+			if (isCurrent()) joinError = 'Failed to join poll. Please try again.';
 		} finally {
-			joinLoading = false;
+			if (isCurrent()) joinLoading = false;
 		}
 	}
 

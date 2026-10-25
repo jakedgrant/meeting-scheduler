@@ -3,6 +3,7 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { user } from '$lib/stores/auth';
+	import { sessionIdentity } from '$lib/session-scope';
 	import {
 		currentPoll,
 		currentPollTimeOptions,
@@ -13,8 +14,7 @@
 		availabilityLoadError,
 		guestNotice,
 		pollsLoading,
-		loadPoll,
-		cleanupPollRealtime,
+		ownPollDetail,
 		updatePollStatus,
 		setSelectedFinalDate,
 		joinPoll,
@@ -42,6 +42,7 @@
 	let joiningPoll = $state(false);
 	let joinError = $state('');
 
+	let detail: ReturnType<typeof ownPollDetail> | undefined;
 	const pageSession = createPollPageSession();
 	const editor = createAvailabilityEditor({ save: saveAvailability, load: loadAvailability });
 	const localResponses = $derived($editor.responses);
@@ -85,28 +86,43 @@
 	);
 
 	onMount(() => {
+		detail = ownPollDetail();
+		let account: string | null | undefined;
+		const stop = user.subscribe(value => {
+			if (account === (value?.id ?? null)) return;
+			account = value?.id ?? null;
+			editor.setOwner(value?.id ?? null);
+			pageSession.invalidate();
+			joiningPoll = false; joinError = ''; anonymousName = ''; commentError = '';
+			selectingFinalDate = false; showCalendarDropdown = false;
+		});
 		mounted = true;
 		clockTimer = setInterval(() => { now = Date.now(); }, 1000);
+		return stop;
 	});
 
 	onDestroy(() => {
 		pageSession.invalidate();
 		clearInterval(clockTimer);
-		cleanupPollRealtime();
+		editor.invalidate();
+		detail?.dispose();
 	});
 
 	$effect(() => {
-		const identity = $user?.id;
+		const identity = $sessionIdentity.generation;
 		if (mounted && pollId) {
 			pageSession.activate();
 			joiningPoll = false;
 			joinError = '';
-			void loadPoll(pollId);
+			void detail?.load(pollId);
 		}
 	});
 
 	// The editor ignores refreshes while dirty, so Realtime cannot replace a draft.
-	$effect(() => { editor.initialize($currentAvailability); });
+	$effect(() => {
+		editor.setOwner($user?.id ?? ($currentGuest ? `guest:${$currentGuest.participantId}` : null));
+		editor.initialize($currentAvailability);
+	});
 
 	// Check for calendar conflicts when poll loads and calendar is enabled
 	$effect(() => {
@@ -167,7 +183,7 @@
 		try {
 			await pageSession.joinAndReload(
 				() => joinPoll(joinedPollId, anonymousName.trim() || undefined),
-				() => isCurrent() ? loadPoll(joinedPollId) : Promise.resolve()
+				() => isCurrent() ? (detail?.load(joinedPollId) ?? Promise.resolve()) : Promise.resolve()
 			);
 		} catch (err) {
 			if (isCurrent()) joinError = err instanceof Error ? err.message : 'Failed to join poll';
@@ -252,14 +268,14 @@
 			return;
 		}
 
+		const isCurrent = pageSession.capture();
 		selectingFinalDate = true;
 		try {
 			await setSelectedFinalDate(pollId, timeOption.id);
 		} catch (err) {
-			console.error('Failed to set final date:', err);
-			alert('Failed to set final date. Please try again.');
+			if (isCurrent()) alert('Failed to set final date. Please try again.');
 		} finally {
-			selectingFinalDate = false;
+			if (isCurrent()) selectingFinalDate = false;
 		}
 	}
 
@@ -539,7 +555,7 @@
 
 				{#if $availabilityLoadError}
 					<p class="error" role="alert">{$availabilityLoadError}</p>
-					<button class="btn secondary" onclick={() => loadPoll(pollId)}>Retry loading responses</button>
+					<button class="btn secondary" onclick={() => detail?.load(pollId)}>Retry loading responses</button>
 				{/if}
 				{#if $editor.error}
 					<p class="error" role="alert">{$editor.error}</p>

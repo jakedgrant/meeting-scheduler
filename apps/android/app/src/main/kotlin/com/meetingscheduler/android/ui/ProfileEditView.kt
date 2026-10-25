@@ -70,6 +70,8 @@ fun ProfileEditView(
                     TextButton(
                         onClick = {
                             scope.launch {
+                                val owner = authService.currentUser?.id
+                                val generation = authService.identityGeneration
                                 isSaving = true
                                 errorMessage = null
                                 try {
@@ -78,11 +80,13 @@ fun ProfileEditView(
                                         avatarUrl = avatarUrl.ifBlank { null },
                                         timezone = timezone
                                     )
-                                    showSuccessDialog = true
+                                    if (authService.isCurrent(owner, generation)) showSuccessDialog = true
+                                } catch (e: kotlinx.coroutines.CancellationException) { throw e
                                 } catch (e: Exception) {
-                                    errorMessage = "Failed to update profile: ${e.message}"
+                                    if (authService.isCurrent(owner, generation)) errorMessage = "Failed to update profile: ${e.message}"
+                                } finally {
+                                    if (authService.isCurrent(owner, generation)) isSaving = false
                                 }
-                                isSaving = false
                             }
                         },
                         enabled = !isSaving

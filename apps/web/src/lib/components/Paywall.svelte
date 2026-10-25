@@ -1,7 +1,12 @@
 <script lang="ts">
 	import { offerings, purchase, loadOfferings, subscriptionLoading } from '$lib/stores/subscription';
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import type { Package } from '@revenuecat/purchases-js';
+
+	import { createSessionWork } from '$lib/session-scope';
+	import { user } from '$lib/stores/auth';
+	const work = createSessionWork();
+	onDestroy(() => work.dispose());
 
 	interface Props {
 		onClose?: () => void;
@@ -15,7 +20,17 @@
 	let selectedPackage = $state<Package | null>(null);
 
 	onMount(() => {
-		loadOfferings();
+		let account: string | null | undefined;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const stop = user.subscribe(value => {
+			if (account === (value?.id ?? null)) return;
+			account = value?.id ?? null;
+			work.invalidate();
+			selectedPackage = null; purchasing = false; error = '';
+			if (timer) clearTimeout(timer);
+			if (account) timer = setTimeout(() => { void loadOfferings(); }, 0);
+		});
+		return () => { if (timer) clearTimeout(timer); stop(); };
 	});
 
 	function formatPrice(pkg: Package): string {
@@ -49,18 +64,19 @@
 			return;
 		}
 
+		const isCurrent = work.capture();
 		purchasing = true;
 		error = '';
 
 		try {
 			const success = await purchase(selectedPackage);
-			if (success) {
+			if (success && isCurrent()) {
 				onSuccess?.();
 			}
 		} catch (err) {
-			error = err instanceof Error ? err.message : 'Purchase failed';
+			if (isCurrent()) error = err instanceof Error ? err.message : 'Purchase failed';
 		} finally {
-			purchasing = false;
+			if (isCurrent()) purchasing = false;
 		}
 	}
 </script>

@@ -1,6 +1,7 @@
 import { writable, get } from 'svelte/store'
 import { supabase, type Poll, type PollTimeOption, type PollParticipant, type AvailabilityResponse } from '$lib/supabase'
 import { user } from './auth'
+import { captureSession } from '$lib/session-scope'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import {
   GUEST_ACCESS_LOST_MESSAGE,
@@ -44,6 +45,9 @@ let requestedPollId: string | null = null
 let identityGeneration = 0
 let listGeneration = 0
 let lastUserId: string | null = null
+let detailOwner = 0
+let listAbort = new AbortController()
+let detailAbort = new AbortController()
 
 // Invalidate in-flight reads and current detail at every account transition.
 user.subscribe(value => {
@@ -52,6 +56,8 @@ user.subscribe(value => {
   lastUserId = userId
   identityGeneration++
   listGeneration++
+  listAbort.abort()
+  listAbort = new AbortController()
   cleanupPollRealtime()
   polls.set([])
   createdPolls.set([])
@@ -64,9 +70,15 @@ function capabilityForPoll(pollId: string) {
   return capability ?? null
 }
 
+function sessionRpc(name: string, args?: Record<string, unknown> | CreationOperation, signal = captureSession().signal) {
+  return supabase.rpc(name, args).abortSignal(signal)
+}
+
 // Load user's polls (both created and participated)
 export async function loadParticipatedPolls() {
   const generation = ++listGeneration
+  listAbort.abort()
+  listAbort = new AbortController()
   const currentUser = get(user)
   if (!currentUser) {
     createdPolls.set([])
@@ -79,7 +91,7 @@ export async function loadParticipatedPolls() {
   const identity = identityGeneration
 
   try {
-    const { data, error } = await supabase.rpc('get_user_participated_polls')
+    const { data, error } = await sessionRpc('get_user_participated_polls', undefined, listAbort.signal)
 
     if (identity !== identityGeneration || generation !== listGeneration) return
     if (error) throw error
@@ -104,9 +116,11 @@ export async function loadMyPolls() {
 
 // Load a poll by share code
 export async function loadPollByCode(code: string): Promise<Poll | null> {
+  const identity = identityGeneration
   try {
-    const { data, error } = await supabase.rpc('get_poll_by_code', { code: code.toUpperCase() })
+    const { data, error } = await sessionRpc('get_poll_by_code', { code: code.toUpperCase() })
 
+    if (identity !== identityGeneration) return null
     if (error) throw error
     if (!data || data.length === 0) return null
 
@@ -143,10 +157,10 @@ function dropGuestCapability(pollId: string, expectedToken: string) {
 // Signed-out guests cannot read participant rows; they load the poll through
 // their capability. Returns false when the caller should use the normal path.
 async function loadGuestPoll(pollId: string, guest: GuestCapability, generation: number): Promise<boolean> {
-  const { data, error } = await supabase.rpc('get_guest_poll_detail', {
+  const { data, error } = await sessionRpc('get_guest_poll_detail', {
     participant_uuid: guest.participantId,
     guest_token: guest.token
-  })
+  }, detailAbort.signal)
   if (generation !== loadGeneration) return true
   if (error) {
     if (isGuestAccessDenied(error)) {
@@ -169,14 +183,16 @@ async function loadGuestPoll(pollId: string, guest: GuestCapability, generation:
   if (generation !== loadGeneration) return true
   // Guests receive no participant/response Realtime events; they refresh on load and after saves.
   if (realtimeChannel) {
-    supabase.removeChannel(realtimeChannel)
-    realtimeChannel = null
+    detachRealtime()
   }
   return true
 }
 
 // Load a single poll with all related data
 export async function loadPoll(pollId: string) {
+  detailAbort.abort()
+  detailAbort = new AbortController()
+  const signal = AbortSignal.any([detailAbort.signal, captureSession().signal])
   pollsLoading.set(true)
   const generation = ++loadGeneration
   requestedPollId = pollId
@@ -196,6 +212,7 @@ export async function loadPoll(pollId: string) {
     const { data: pollData, error: pollError } = await supabase
       .from('polls')
       .select('*')
+      .abortSignal(signal)
       .eq('id', pollId)
       .single()
 
@@ -207,6 +224,7 @@ export async function loadPoll(pollId: string) {
     const { data: timeOptions, error: timeError } = await supabase
       .from('poll_time_options')
       .select('*')
+      .abortSignal(signal)
       .eq('poll_id', pollId)
       .order('start_time', { ascending: true })
 
@@ -218,6 +236,7 @@ export async function loadPoll(pollId: string) {
     const { data: participants, error: partError } = await supabase
       .from('poll_participants')
       .select('*, profiles(display_name)')
+      .abortSignal(signal)
       .eq('poll_id', pollId)
 
     if (generation !== loadGeneration) return
@@ -230,6 +249,7 @@ export async function loadPoll(pollId: string) {
       const { data: responses, error: respError } = await supabase
         .from('availability_responses')
         .select('*')
+        .abortSignal(signal)
         .in('participant_id', participantIds)
 
       if (generation !== loadGeneration) return
@@ -259,10 +279,8 @@ export async function loadPoll(pollId: string) {
 // Set up realtime updates for a poll
 function setupRealtimeForPoll(pollId: string) {
   // Clean up existing subscription
-  if (realtimeChannel) {
-    supabase.removeChannel(realtimeChannel)
-  }
-
+  detachRealtime()
+  const generation = loadGeneration
   realtimeChannel = supabase
     .channel(`poll-${pollId}`)
     .on(
@@ -275,7 +293,7 @@ function setupRealtimeForPoll(pollId: string) {
       },
       () => {
         // Reload participants when changes occur
-        loadPollParticipants(pollId)
+        if (generation === loadGeneration) void loadPollParticipants(pollId).catch(() => {})
       }
     )
     .on(
@@ -287,7 +305,7 @@ function setupRealtimeForPoll(pollId: string) {
       },
       () => {
         // Reload responses when changes occur
-        loadPollResponses(pollId)
+        if (generation === loadGeneration) void loadPollResponses(pollId).catch(() => {})
       }
     )
     .subscribe()
@@ -298,6 +316,7 @@ async function loadPollParticipants(pollId: string) {
   const { data, error } = await supabase
     .from('poll_participants')
     .select('*, profiles(display_name)')
+    .abortSignal(detailAbort.signal)
     .eq('poll_id', pollId)
 
   if (generation === loadGeneration && get(currentPoll)?.id === pollId && !error && data) {
@@ -318,6 +337,7 @@ async function loadPollResponses(pollId: string) {
   const { data, error } = await supabase
     .from('availability_responses')
     .select('*')
+    .abortSignal(detailAbort.signal)
     .in('participant_id', participantIds)
 
   if (generation === loadGeneration && get(currentPoll)?.id === pollId && !error && data) {
@@ -330,7 +350,7 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
   const currentUser = get(user)
   if (!currentUser) throw { code: '42501' }
   const identity = identityGeneration
-  const { data, error } = await supabase.rpc('create_poll', operation)
+  const { data, error } = await sessionRpc('create_poll', operation)
   if (identity !== identityGeneration || get(user)?.id !== currentUser.id) throw { code: 'ACCOUNT_CHANGED' }
   if (error) throw error
   const result = data as CreationResult
@@ -354,11 +374,15 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
 
 // Update poll status
 export async function updatePollStatus(pollId: string, status: Poll['status']) {
+  const identity = identityGeneration
+  const generation = loadGeneration
   const { error } = await supabase
     .from('polls')
     .update({ status })
+    .abortSignal(captureSession().signal)
     .eq('id', pollId)
 
+  if (identity !== identityGeneration || generation !== loadGeneration || get(currentPoll)?.id !== pollId) return
   if (error) {
     console.error('Failed to update poll status:', error)
     throw error
@@ -372,11 +396,12 @@ export async function updatePollStatus(pollId: string, status: Poll['status']) {
 export async function setSelectedFinalDate(pollId: string, timeOptionId: string) {
   const identity = identityGeneration
   const generation = loadGeneration
-  const { data, error } = await supabase.rpc('finalize_poll', {
+  const { data, error } = await sessionRpc('finalize_poll', {
     poll_uuid: pollId, time_option_uuid: timeOptionId
   })
+  if (identity !== identityGeneration || generation !== loadGeneration) return
   if (error) throw error
-  if (identity === identityGeneration && generation === loadGeneration && get(currentPoll)?.id === pollId) currentPoll.set(data as Poll)
+  if (get(currentPoll)?.id === pollId) currentPoll.set(data as Poll)
 }
 
 // Keep the token before sending a join: a lost reply must not create another guest.
@@ -388,7 +413,7 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
   savePendingGuestToken(browserStorage(), pollId, token)
   const identity = identityGeneration
   const generation = loadGeneration
-  const { data, error } = await supabase.rpc('join_poll_as_guest', {
+  const { data, error } = await sessionRpc('join_poll_as_guest', {
     poll_uuid: pollId, display_name: name ?? '', contact_email: email ?? null, guest_token: token
   })
   if (error) {
@@ -418,7 +443,7 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
 export async function joinPoll(pollId: string, name?: string, email?: string): Promise<PollParticipant> {
   try {
     if (!get(user)) return await joinPollAsGuest(pollId, name, email)
-    const { data, error } = await supabase.rpc('join_poll', { poll_uuid: pollId })
+    const { data, error } = await sessionRpc('join_poll', { poll_uuid: pollId })
     if (error) throw error
     return (data as { participant: PollParticipant }).participant
   } catch (error) {
@@ -442,9 +467,9 @@ export async function loadAvailability(pollId: string, participantId: string): P
   const identity = identityGeneration
   const generation = loadGeneration
   const requestIdentity = availabilityIdentity(pollId, participantId)
-  const { data, error } = await supabase.rpc('get_availability', {
+  const { data, error } = await sessionRpc('get_availability', {
     poll_uuid: pollId, ...requestIdentity
-  })
+  }, detailAbort.signal)
   if (error) {
     if (identity === identityGeneration && generation === loadGeneration && requestIdentity.guest_token && isGuestAccessDenied(error)) {
       dropGuestCapability(pollId, requestIdentity.guest_token)
@@ -492,7 +517,7 @@ export async function saveAvailability(save: AvailabilitySave): Promise<Availabi
   const identity = identityGeneration
   const generation = loadGeneration
   const requestIdentity = availabilityIdentity(save.pollId, save.participantId)
-  const { data, error } = await supabase.rpc('save_availability', {
+  const { data, error } = await sessionRpc('save_availability', {
     poll_uuid: save.pollId, request_id: save.requestId,
     expected_version: save.expectedVersion, responses: save.responses, comment: save.comment,
     ...requestIdentity
@@ -508,13 +533,34 @@ export async function saveAvailability(save: AvailabilitySave): Promise<Availabi
   return snapshot
 }
 
+function detachRealtime() {
+  const channel = realtimeChannel
+  realtimeChannel = null
+  if (channel) {
+    // Local state invalidates synchronously. SDK work waits for an auth callback
+    // to release its lock and always removes only the captured old channel.
+    setTimeout(() => { void Promise.resolve(supabase.removeChannel(channel)).catch(() => {}) }, 0)
+  }
+}
+
+/** A previous route's unmount cannot clear a newer route's poll state. */
+export function ownPollDetail() {
+  const owner = ++detailOwner
+  cleanupPollRealtime()
+  return {
+    load: (pollId: string) => owner === detailOwner ? loadPoll(pollId) : Promise.resolve(),
+    dispose() { if (owner === detailOwner) { detailOwner++; cleanupPollRealtime() } }
+  }
+}
+
 // Clean up realtime subscription
 export function cleanupPollRealtime() {
+  detailAbort.abort()
+  detailAbort = new AbortController()
   loadGeneration++
   requestedPollId = null
   if (realtimeChannel) {
-    supabase.removeChannel(realtimeChannel)
-    realtimeChannel = null
+    detachRealtime()
   }
   currentPoll.set(null)
   currentPollTimeOptions.set([])

@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        routeIntent(intent)
 
         setContent {
             MeetingSchedulerTheme {
@@ -49,7 +50,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val uri = intent.data
+        routeIntent(intent)
+    }
+
+    private fun routeIntent(intent: Intent?) {
+        val uri = intent?.data
+        if (uri != null && container.authService.callbackRouter.route(uri.toString())) return
         if (uri?.scheme == "meetingscheduler" && uri.host == "calendar" && uri.path == "/callback") {
             // Treat the link as a signal only; verify connection state with the API.
             lifecycleScope.launch { container.calendarService.refreshGoogleCalendarConnection() }

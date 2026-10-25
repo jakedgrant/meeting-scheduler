@@ -12,6 +12,7 @@ public struct ContentView: View {
                 loadingView
             } else if authService.isAuthenticated {
                 MainTabView()
+                    .id(authService.sessionGeneration)
             } else {
                 AuthView()
             }

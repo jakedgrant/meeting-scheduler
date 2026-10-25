@@ -86,9 +86,9 @@ jobs:
           }
           JSON
 
-      - name: Debug build and unit tests
+      - name: Debug and instrumentation builds; unit tests
         run: |
-          ./gradlew --no-daemon :app:assembleDebug :app:testDebugUnitTest
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest
           apksigner verify --print-certs app/build/outputs/apk/debug/app-debug.apk \
             | tee "$RUNNER_TEMP/debug-certs.txt"
           grep -q "CN=Android Debug" "$RUNNER_TEMP/debug-certs.txt"

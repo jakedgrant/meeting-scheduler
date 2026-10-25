@@ -1,4 +1,4 @@
-import { writable, derived, get } from 'svelte/store'
+import { writable, derived } from 'svelte/store'
 import type { CustomerInfo, Package } from '@revenuecat/purchases-js'
 import { supabase, type Subscription } from '$lib/supabase'
 import {
@@ -8,8 +8,8 @@ import {
   hasProAccess as checkProAccess,
   hasTeamAccess as checkTeamAccess
 } from '$lib/revenuecat'
-import { user } from './auth'
 import { browser } from '$app/environment'
+import { captureSession, sessionIdentity } from '$lib/session-scope'
 
 // Subscription stores
 export const subscription = writable<Subscription | null>(null)
@@ -22,77 +22,99 @@ export const hasProAccess = derived(customerInfo, ($customerInfo) => checkProAcc
 export const hasTeamAccess = derived(customerInfo, ($customerInfo) => checkTeamAccess($customerInfo))
 export const isPremium = derived(hasProAccess, ($hasProAccess) => $hasProAccess)
 
-// Load subscription data from both Supabase (server of record) and RevenueCat (for purchases)
+let request = 0
+let offeringsRequest = 0
+let reloadTimer: ReturnType<typeof setTimeout> | undefined
+sessionIdentity.subscribe(() => {
+  request++
+  offeringsRequest++
+  if (reloadTimer) clearTimeout(reloadTimer)
+  reloadTimer = undefined
+  subscription.set(null)
+  customerInfo.set(null)
+  offerings.set([])
+  subscriptionLoading.set(false)
+})
+
+/** Mount owns the deferred listener; subscribing itself never acquires the auth lock. */
+let subscriptionOwners = 0
+let stopSubscription: (() => void) | undefined
+export function watchSubscription() {
+  if (!browser) return () => {}
+  if (++subscriptionOwners === 1) {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stop = sessionIdentity.subscribe(identity => {
+      if (timer) clearTimeout(timer)
+      if (identity.accountId) timer = setTimeout(() => { void loadSubscription() }, 0)
+    })
+    stopSubscription = () => {
+      if (timer) clearTimeout(timer)
+      if (reloadTimer) clearTimeout(reloadTimer)
+      stop()
+      request++
+      offeringsRequest++
+    }
+  }
+  let disposed = false
+  return () => {
+    if (disposed) return
+    disposed = true
+    if (--subscriptionOwners === 0) { stopSubscription?.(); stopSubscription = undefined }
+  }
+}
+
+// Supabase remains the server of record. Provider state is only a purchase projection.
 export async function loadSubscription() {
   if (!browser) return
-
+  const scope = captureSession()
+  const revision = ++request
+  if (!scope.accountId) return
+  const current = () => scope.isCurrent() && revision === request
   subscriptionLoading.set(true)
-
   try {
-    // Get current user
-    const currentUser = get(user)
-
-    if (!currentUser) {
-      subscription.set(null)
-      customerInfo.set(null)
-      return
-    }
-
-    // Load from Supabase (source of truth for subscription status)
+    const { data, error } = await supabase.from('subscriptions').select('*')
+      .eq('user_id', scope.accountId).abortSignal(scope.signal).single()
+    if (!current()) return
+    subscription.set(error ? null : data as Subscription | null)
     try {
-      const { data: subData, error } = await supabase
-        .from('subscriptions')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .single()
-
-      if (error && error.code !== 'PGRST116') {
-        // PGRST116 is "no rows returned" which is normal for users without a subscription
-        console.error('Subscription query error:', error)
-      }
-      subscription.set(subData as Subscription | null)
-    } catch (subErr) {
-      console.error('Failed to query subscriptions table:', subErr)
-      // Continue without subscription data - it's optional
-      subscription.set(null)
-    }
-
-    // Also get RevenueCat customer info for purchase flows
-    const info = await getCustomerInfo()
-    customerInfo.set(info)
-
-  } catch (err) {
-    console.error('Failed to load subscription:', err)
+      const info = await getCustomerInfo()
+      if (current()) customerInfo.set(info)
+    } catch { if (current()) customerInfo.set(null) }
+  } catch {
+    if (current()) { subscription.set(null); customerInfo.set(null) }
   } finally {
-    subscriptionLoading.set(false)
+    if (current()) subscriptionLoading.set(false)
   }
 }
 
-// Load available packages for purchase
 export async function loadOfferings() {
   if (!browser) return
-
+  const scope = captureSession()
+  const revision = ++offeringsRequest
+  if (!scope.accountId) return
   try {
     const packages = await getOfferings()
-    offerings.set(packages)
-  } catch (err) {
-    console.error('Failed to load offerings:', err)
+    if (scope.isCurrent() && revision === offeringsRequest) offerings.set(packages)
+  } catch {
+    if (scope.isCurrent() && revision === offeringsRequest) offerings.set([])
   }
 }
 
-// Purchase a subscription package
 export async function purchase(pkg: Package): Promise<boolean> {
+  const scope = captureSession()
+  if (!scope.accountId) return false
   try {
-    const newCustomerInfo = await purchasePackage(pkg)
-    if (newCustomerInfo) {
-      customerInfo.set(newCustomerInfo)
-      // Reload subscription from Supabase after webhook processes
-      setTimeout(() => loadSubscription(), 2000)
-      return true
-    }
-    return false
-  } catch (err) {
-    console.error('Purchase failed:', err)
-    throw err
+    const info = await purchasePackage(pkg)
+    if (!scope.isCurrent() || !info) return false
+    customerInfo.set(info)
+    if (reloadTimer) clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(() => {
+      reloadTimer = undefined
+      if (scope.isCurrent()) void loadSubscription()
+    }, 2000)
+    return true
+  } catch (error) {
+    if (!scope.isCurrent()) return false
+    throw error
   }
 }

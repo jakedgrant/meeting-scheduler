@@ -154,25 +154,19 @@ struct ProfileEditView: View {
         isSaving = true
         errorMessage = nil
 
-        Task {
-            do {
+        authService.performSessionTask(
+            operation: { _ in
                 try await authService.updateProfile(
                     displayName: displayName.isEmpty ? nil : displayName,
                     avatarUrl: avatarUrl.isEmpty ? nil : avatarUrl,
                     timezone: timezone
                 )
 
-                await MainActor.run {
-                    isSaving = false
-                    showSuccessAlert = true
-                }
-            } catch {
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = "Failed to update profile: \(error.localizedDescription)"
-                }
-            }
-        }
+            },
+            onSuccess: { _ in showSuccessAlert = true },
+            onFailure: { errorMessage = "Failed to update profile: \($0.localizedDescription)" },
+            onCompletion: { isSaving = false }
+        )
     }
 }
 

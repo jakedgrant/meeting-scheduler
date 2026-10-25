@@ -41,7 +41,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="meetingscheduler"
-                    android:host="auth" />
+                    android:host="auth"
+                    android:path="/callback" />
             </intent-filter>
         </activity>
 

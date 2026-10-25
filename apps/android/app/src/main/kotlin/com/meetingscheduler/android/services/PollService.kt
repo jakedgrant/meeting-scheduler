@@ -8,6 +8,7 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.rpc
 import kotlinx.datetime.Instant
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -31,15 +32,23 @@ private data class JoinPollResult(val participant: PollParticipant, val created:
 interface PollSessionIdentity {
     val pollUserId: String?
     val identityGeneration: Long
+    val pollAccessToken: String? get() = null
+}
+
+private class AccountRequestIdentity(val accountKey: String, val token: String?) :
+    kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    companion object Key : kotlin.coroutines.CoroutineContext.Key<AccountRequestIdentity>
 }
 
 /** Process-lifetime poll state (F13); callers own the coroutine that runs each request. */
+@OptIn(io.github.jan.supabase.annotations.SupabaseInternal::class, io.github.jan.supabase.annotations.SupabaseExperimental::class)
 class PollService(
     private val authService: PollSessionIdentity,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
+    private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
 ) {
-    private val supabase by lazy { SupabaseService.client }
+    private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())
@@ -54,6 +63,8 @@ class PollService(
     private var creationRevision = 0L
     private var pollStateAccountKey: String? = null
 
+    fun resetSession() { selectPollAccount() }
+
     private fun selectPollAccount() {
         if (pollStateAccountKey == creationAccountKey) return
         pollStateAccountKey = creationAccountKey
@@ -63,6 +74,36 @@ class PollService(
         joinedPolls = emptyList()
         isLoading = false
     }
+
+    private suspend fun <T> withSession(action: suspend () -> T): T {
+        val key = creationAccountKey
+        if (creationAccountId == null) throw PollError.NotAuthenticated
+        try {
+            val identity = AccountRequestIdentity(key, authService.pollAccessToken)
+            val result = kotlinx.coroutines.withContext(identity) { action() }
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
+            return result
+        } catch (error: Exception) {
+            if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
+            throw error
+        }
+    }
+
+    private suspend fun requestCredential(): String {
+        val identity = checkNotNull(kotlinx.coroutines.currentCoroutineContext()[AccountRequestIdentity])
+        if (identity.accountKey != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed before dispatch")
+        return identity.token ?: throw PollError.NotAuthenticated
+    }
+
+    private suspend inline fun <reified T : Any> accountRpc(function: String, parameters: T): io.github.jan.supabase.postgrest.result.PostgrestResult {
+        val credential = requestCredential()
+        return accountPostgrest(supabase, credential).rpc(function, parameters)
+    }
+
+    var availabilityRecovery: AvailabilityRecoveryStore? = null
+    fun availabilitySession(pollId: String): AvailabilitySaveSession =
+        availabilityRecovery?.open(checkNotNull(creationAccountId), pollId) ?: AvailabilitySaveSession()
 
     // MARK: - Formatting
 
@@ -79,30 +120,35 @@ class PollService(
         if (authService.pollUserId == null) return
 
         val accountKey = creationAccountKey
-        val revision = creationRevision
+        val revision = ++creationRevision
+        val requestIdentity = AccountRequestIdentity(accountKey, authService.pollAccessToken)
         isLoading = true
         try {
-            val response = listTransport?.invoke()?.let { ParticipatedPollsResponse(it.first, it.second) }
-                ?: supabase.postgrest.rpc("get_user_participated_polls", buildJsonObject { })
-                    .decodeAs<ParticipatedPollsResponse>()
+            val response = kotlinx.coroutines.withContext(requestIdentity) {
+                listTransport?.invoke()?.let { ParticipatedPollsResponse(it.first, it.second) }
+                    ?: accountRpc("get_user_participated_polls", buildJsonObject { }).decodeAs<ParticipatedPollsResponse>()
+            }
 
             if (creationAccountKey != accountKey || creationRevision != revision) return
             createdPolls = response.createdPolls
             joinedPolls = response.joinedPolls
             myPolls = createdPolls + joinedPolls
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             println("Failed to load polls: ${e.message}")
             if (creationAccountKey != accountKey || creationRevision != revision) return
             createdPolls = emptyList()
             joinedPolls = emptyList()
+            myPolls = emptyList()
         } finally {
-            isLoading = false
+            if (creationAccountKey == accountKey && creationRevision == revision) isLoading = false
         }
     }
 
-    suspend fun loadPoll(id: String): Poll? {
-        return try {
-            supabase
+    suspend fun loadPoll(id: String): Poll? = withSession {
+        return@withSession try {
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("polls")
                 .select {
                     filter {
@@ -116,13 +162,12 @@ class PollService(
         }
     }
 
-    suspend fun loadPollByCode(code: String): PollLookupResponse? {
-        return try {
+    suspend fun loadPollByCode(code: String): PollLookupResponse? = withSession {
+        return@withSession try {
             val params = buildJsonObject {
                 put("code", code.uppercase())
             }
-            val response = supabase.postgrest
-                .rpc("get_poll_by_code", params)
+            val response = accountRpc("get_poll_by_code", params)
                 .decodeList<PollLookupResponse>()
 
             response.firstOrNull()
@@ -137,12 +182,12 @@ class PollService(
     val creationAccountId: String? get() = authService.pollUserId
     val creationAccountKey: String get() = "${creationAccountId}:${authService.identityGeneration}"
 
-    suspend fun createPoll(request: PollCreationRequest): PollCreationResult {
+    suspend fun createPoll(request: PollCreationRequest): PollCreationResult = withSession {
         selectPollAccount()
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         val response = try {
-            createTransport?.invoke(request) ?: supabase.postgrest.rpc("create_poll", request).decodeAs<PollCreationResult>()
+            createTransport?.invoke(request) ?: accountRpc("create_poll", request).decodeAs<PollCreationResult>()
         } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
             if (error.code in setOf("42501", "22023", "P0001", "P0002", "22000", "54000")) {
                 throw CreationRejected(requireNotNull(error.code))
@@ -154,16 +199,18 @@ class PollService(
             && response.timeOptions.all { it.pollId == response.poll.id }) { "Creation returned an invalid poll or options." }
         // Install only the authoritative result, once even after a lost reply/replay.
         creationRevision += 1
+        isLoading = false
         createdPolls = listOf(response.poll) + createdPolls.filterNot { it.id == response.poll.id }
         myPolls = listOf(response.poll) + myPolls.filterNot { it.id == response.poll.id }
-        return response
+        return@withSession response
     }
 
     // MARK: - Time Options
 
-    suspend fun loadTimeOptions(pollId: String): List<PollTimeOption> {
-        return try {
-            supabase
+    suspend fun loadTimeOptions(pollId: String): List<PollTimeOption> = withSession {
+        return@withSession try {
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("poll_time_options")
                 .select {
                     filter {
@@ -180,12 +227,14 @@ class PollService(
 
     // MARK: - Poll Status
 
-    suspend fun updatePollStatus(pollId: String, status: PollStatus) {
+    suspend fun updatePollStatus(pollId: String, status: PollStatus) = withSession {
+        val key = creationAccountKey
+        val credential = requestCredential()
         val update = buildJsonObject {
             put("status", status.name.lowercase())
         }
 
-        supabase
+        accountPostgrest(supabase, credential)
             .from("polls")
             .update(update) {
                 filter {
@@ -193,26 +242,31 @@ class PollService(
                 }
             }
 
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
         // Update local state
         myPolls = myPolls.map { poll ->
             if (poll.id == pollId) poll.copy(status = status) else poll
         }
     }
 
-    suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll {
-        val saved = supabase.postgrest.rpc("finalize_poll", buildJsonObject {
+    suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = withSession {
+        val key = creationAccountKey
+        val saved = accountRpc("finalize_poll", buildJsonObject {
             put("poll_uuid", pollId)
             put("time_option_uuid", timeOptionId)
         }).decodeAs<Poll>()
+        if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
         myPolls = myPolls.map { if (it.id == pollId) saved else it }
-        return saved
+        return@withSession saved
     }
 
     // MARK: - Participants
 
-    suspend fun loadParticipants(pollId: String): List<PollParticipant> {
-        return try {
-            supabase
+    suspend fun loadParticipants(pollId: String): List<PollParticipant> = withSession {
+        return@withSession try {
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("poll_participants")
                 .select(columns = io.github.jan.supabase.postgrest.query.Columns.raw("*, profiles(display_name)")) {
                     filter {
@@ -226,15 +280,15 @@ class PollService(
         }
     }
 
-    suspend fun joinPoll(pollId: String): PollParticipant {
+    suspend fun joinPoll(pollId: String): PollParticipant = withSession {
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         try {
-            val participant = supabase.postgrest.rpc("join_poll", buildJsonObject { put("poll_uuid", pollId) })
+            val participant = accountRpc("join_poll", buildJsonObject { put("poll_uuid", pollId) })
                 .decodeAs<JoinPollResult>().participant
             if (creationAccountKey != accountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             check(participant.pollId == pollId && participant.userId == userId) { "Join returned a different membership." }
-            return participant
+            return@withSession participant
         } catch (error: Exception) {
             if (creationAccountKey != accountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             if (error is io.github.jan.supabase.postgrest.exception.PostgrestRestException && error.code == "P0003") {
@@ -246,11 +300,12 @@ class PollService(
 
     // MARK: - Availability Responses
 
-    suspend fun loadResponses(timeOptionIds: List<String>): List<AvailabilityResponse> {
-        if (timeOptionIds.isEmpty()) return emptyList()
+    suspend fun loadResponses(timeOptionIds: List<String>): List<AvailabilityResponse> = withSession {
+        if (timeOptionIds.isEmpty()) return@withSession emptyList()
 
-        return try {
-            supabase
+        return@withSession try {
+            val credential = requestCredential()
+            accountPostgrest(supabase, credential)
                 .from("availability_responses")
                 .select {
                     filter {
@@ -264,12 +319,13 @@ class PollService(
         }
     }
 
-    suspend fun getAvailability(pollId: String): AvailabilitySnapshot =
-        supabase.postgrest.rpc("get_availability", buildJsonObject {
+    suspend fun getAvailability(pollId: String): AvailabilitySnapshot = withSession {
+        accountRpc("get_availability", buildJsonObject {
             put("poll_uuid", pollId)
         }).decodeAs<AvailabilitySnapshot>()
+    }
 
-    suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot {
+    suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot = withSession {
         val params = buildJsonObject {
             put("poll_uuid", pollId)
             put("request_id", request.requestId)
@@ -285,8 +341,8 @@ class PollService(
                 }
             }
         }
-        return try {
-            supabase.postgrest.rpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
+        return@withSession try {
+            accountRpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
         } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
             if (error.code == "PT409") throw AvailabilityVersionConflict()
             throw error
