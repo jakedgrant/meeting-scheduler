@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'apps/mobile/**'
+      - 'packages/shared-config/date-time-fixtures.json'
       - '.github/workflows/ios-package-regressions.yml'
       - 'scripts/ci/ios-package-regressions.sh'
   push:
     branches: [main]
     paths:
       - 'apps/mobile/**'
+      - 'packages/shared-config/date-time-fixtures.json'
       - '.github/workflows/ios-package-regressions.yml'
       - 'scripts/ci/ios-package-regressions.sh'
   workflow_dispatch:

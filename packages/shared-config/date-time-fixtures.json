@@ -1,0 +1,349 @@
+{
+  "version": 1,
+  "contract": "docs/date-time-contract.md",
+  "generator": "scripts/generate-date-time-fixtures.py",
+  "date_ranges": [
+    {
+      "name": "Chicago fall-back week",
+      "start": "2026-10-31",
+      "end": "2026-11-03",
+      "dates": [
+        "2026-10-31",
+        "2026-11-01",
+        "2026-11-02",
+        "2026-11-03"
+      ]
+    },
+    {
+      "name": "Chicago spring-forward week",
+      "start": "2026-03-07",
+      "end": "2026-03-10",
+      "dates": [
+        "2026-03-07",
+        "2026-03-08",
+        "2026-03-09",
+        "2026-03-10"
+      ]
+    },
+    {
+      "name": "Single date",
+      "start": "2026-11-01",
+      "end": "2026-11-01",
+      "dates": [
+        "2026-11-01"
+      ]
+    },
+    {
+      "name": "Year boundary",
+      "start": "2026-12-30",
+      "end": "2027-01-02",
+      "dates": [
+        "2026-12-30",
+        "2026-12-31",
+        "2027-01-01",
+        "2027-01-02"
+      ]
+    },
+    {
+      "name": "Leap day",
+      "start": "2028-02-27",
+      "end": "2028-03-01",
+      "dates": [
+        "2028-02-27",
+        "2028-02-28",
+        "2028-02-29",
+        "2028-03-01"
+      ]
+    },
+    {
+      "name": "Reversed range",
+      "start": "2026-11-03",
+      "end": "2026-11-01",
+      "dates": []
+    }
+  ],
+  "timed_options": [
+    {
+      "name": "Chicago standard time",
+      "zone": "America/Chicago",
+      "date": "2026-11-02",
+      "start": "09:00",
+      "end": "10:00",
+      "start_time": "2026-11-02T15:00:00Z",
+      "end_time": "2026-11-02T16:00:00Z"
+    },
+    {
+      "name": "Chicago daylight time",
+      "zone": "America/Chicago",
+      "date": "2026-10-30",
+      "start": "09:00",
+      "end": "10:00",
+      "start_time": "2026-10-30T14:00:00Z",
+      "end_time": "2026-10-30T15:00:00Z"
+    },
+    {
+      "name": "Chicago spring-forward day",
+      "zone": "America/Chicago",
+      "date": "2026-03-08",
+      "start": "09:00",
+      "end": "10:00",
+      "start_time": "2026-03-08T14:00:00Z",
+      "end_time": "2026-03-08T15:00:00Z"
+    },
+    {
+      "name": "Chicago fall-back day",
+      "zone": "America/Chicago",
+      "date": "2026-11-01",
+      "start": "09:00",
+      "end": "10:00",
+      "start_time": "2026-11-01T15:00:00Z",
+      "end_time": "2026-11-01T16:00:00Z"
+    },
+    {
+      "name": "Repeated hour uses earlier offset",
+      "zone": "America/Chicago",
+      "date": "2026-11-01",
+      "start": "01:30",
+      "end": "01:45",
+      "start_time": "2026-11-01T06:30:00Z",
+      "end_time": "2026-11-01T06:45:00Z"
+    },
+    {
+      "name": "Range spanning the repeated hour",
+      "zone": "America/Chicago",
+      "date": "2026-11-01",
+      "start": "01:30",
+      "end": "02:00",
+      "start_time": "2026-11-01T06:30:00Z",
+      "end_time": "2026-11-01T08:00:00Z"
+    },
+    {
+      "name": "Start in spring-forward gap",
+      "zone": "America/Chicago",
+      "date": "2026-03-08",
+      "start": "02:30",
+      "end": "03:30",
+      "error": "nonexistent_local_time"
+    },
+    {
+      "name": "End in spring-forward gap",
+      "zone": "America/Chicago",
+      "date": "2026-03-08",
+      "start": "01:00",
+      "end": "02:15",
+      "error": "nonexistent_local_time"
+    },
+    {
+      "name": "End before start",
+      "zone": "America/Chicago",
+      "date": "2026-11-02",
+      "start": "10:00",
+      "end": "09:00",
+      "error": "end_not_after_start"
+    },
+    {
+      "name": "Equal start and end",
+      "zone": "America/Chicago",
+      "date": "2026-11-02",
+      "start": "10:00",
+      "end": "10:00",
+      "error": "end_not_after_start"
+    },
+    {
+      "name": "Half-hour offset",
+      "zone": "Asia/Kolkata",
+      "date": "2026-11-01",
+      "start": "09:00",
+      "end": "10:00",
+      "start_time": "2026-11-01T03:30:00Z",
+      "end_time": "2026-11-01T04:30:00Z"
+    },
+    {
+      "name": "Southern hemisphere daylight time",
+      "zone": "Pacific/Auckland",
+      "date": "2026-11-01",
+      "start": "09:00",
+      "end": "10:00",
+      "start_time": "2026-10-31T20:00:00Z",
+      "end_time": "2026-10-31T21:00:00Z"
+    },
+    {
+      "name": "Previous UTC date",
+      "zone": "Pacific/Auckland",
+      "date": "2026-11-01",
+      "start": "08:00",
+      "end": "23:45",
+      "start_time": "2026-10-31T19:00:00Z",
+      "end_time": "2026-11-01T10:45:00Z"
+    },
+    {
+      "name": "UTC",
+      "zone": "UTC",
+      "date": "2026-11-01",
+      "start": "23:00",
+      "end": "23:45",
+      "start_time": "2026-11-01T23:00:00Z",
+      "end_time": "2026-11-01T23:45:00Z"
+    }
+  ],
+  "all_day_options": [
+    {
+      "name": "Chicago 25-hour day",
+      "zone": "America/Chicago",
+      "date": "2026-11-01",
+      "start_time": "2026-11-01T05:00:00Z",
+      "end_time": "2026-11-02T06:00:00Z"
+    },
+    {
+      "name": "Chicago 23-hour day",
+      "zone": "America/Chicago",
+      "date": "2026-03-08",
+      "start_time": "2026-03-08T06:00:00Z",
+      "end_time": "2026-03-09T05:00:00Z"
+    },
+    {
+      "name": "Chicago ordinary day",
+      "zone": "America/Chicago",
+      "date": "2026-11-03",
+      "start_time": "2026-11-03T06:00:00Z",
+      "end_time": "2026-11-04T06:00:00Z"
+    },
+    {
+      "name": "Half-hour offset",
+      "zone": "Asia/Kolkata",
+      "date": "2026-11-01",
+      "start_time": "2026-10-31T18:30:00Z",
+      "end_time": "2026-11-01T18:30:00Z"
+    },
+    {
+      "name": "Ahead of UTC",
+      "zone": "Pacific/Auckland",
+      "date": "2026-11-01",
+      "start_time": "2026-10-31T11:00:00Z",
+      "end_time": "2026-11-01T11:00:00Z"
+    },
+    {
+      "name": "Missing local midnight",
+      "zone": "America/Santiago",
+      "date": "2026-09-06",
+      "start_time": "2026-09-06T04:00:00Z",
+      "end_time": "2026-09-07T03:00:00Z"
+    },
+    {
+      "name": "Day before missing midnight",
+      "zone": "America/Santiago",
+      "date": "2026-09-05",
+      "start_time": "2026-09-05T04:00:00Z",
+      "end_time": "2026-09-06T04:00:00Z"
+    },
+    {
+      "name": "UTC",
+      "zone": "UTC",
+      "date": "2026-11-01",
+      "start_time": "2026-11-01T00:00:00Z",
+      "end_time": "2026-11-02T00:00:00Z"
+    }
+  ],
+  "deadlines": [
+    {
+      "name": "Chicago end of due date",
+      "zone": "America/Chicago",
+      "date": "2026-11-03",
+      "closes_at": "2026-11-04T06:00:00Z"
+    },
+    {
+      "name": "Chicago due on fall-back eve",
+      "zone": "America/Chicago",
+      "date": "2026-10-31",
+      "closes_at": "2026-11-01T05:00:00Z"
+    },
+    {
+      "name": "Ahead of UTC",
+      "zone": "Pacific/Auckland",
+      "date": "2026-11-01",
+      "closes_at": "2026-11-01T11:00:00Z"
+    },
+    {
+      "name": "Next day has missing midnight",
+      "zone": "America/Santiago",
+      "date": "2026-09-05",
+      "closes_at": "2026-09-06T04:00:00Z"
+    }
+  ],
+  "option_dates": [
+    {
+      "name": "Exclusive all-day end",
+      "zone": "America/Chicago",
+      "start_time": "2026-11-01T05:00:00Z",
+      "end_time": "2026-11-02T06:00:00Z",
+      "is_all_day": true,
+      "date": "2026-11-01"
+    },
+    {
+      "name": "Legacy 23:59 all-day end",
+      "zone": "America/Chicago",
+      "start_time": "2026-11-01T05:00:00Z",
+      "end_time": "2026-11-02T05:59:00Z",
+      "is_all_day": true,
+      "date": "2026-11-01"
+    },
+    {
+      "name": "Ahead of UTC",
+      "zone": "Pacific/Auckland",
+      "start_time": "2026-10-31T11:00:00Z",
+      "end_time": "2026-11-01T11:00:00Z",
+      "is_all_day": true,
+      "date": "2026-11-01"
+    },
+    {
+      "name": "Missing local midnight",
+      "zone": "America/Santiago",
+      "start_time": "2026-09-06T04:00:00Z",
+      "end_time": "2026-09-07T03:00:00Z",
+      "is_all_day": true,
+      "date": "2026-09-06"
+    }
+  ],
+  "exports": [
+    {
+      "name": "All-day exclusive end",
+      "zone": "America/Chicago",
+      "start_time": "2026-11-01T05:00:00Z",
+      "end_time": "2026-11-02T06:00:00Z",
+      "is_all_day": true,
+      "ics_start": "DTSTART;VALUE=DATE:20261101",
+      "ics_end": "DTEND;VALUE=DATE:20261102",
+      "google_dates": "20261101/20261102"
+    },
+    {
+      "name": "All-day legacy 23:59 end",
+      "zone": "America/Chicago",
+      "start_time": "2026-11-01T05:00:00Z",
+      "end_time": "2026-11-02T05:59:00Z",
+      "is_all_day": true,
+      "ics_start": "DTSTART;VALUE=DATE:20261101",
+      "ics_end": "DTEND;VALUE=DATE:20261102",
+      "google_dates": "20261101/20261102"
+    },
+    {
+      "name": "All-day ahead of UTC",
+      "zone": "Pacific/Auckland",
+      "start_time": "2026-10-31T11:00:00Z",
+      "end_time": "2026-11-01T11:00:00Z",
+      "is_all_day": true,
+      "ics_start": "DTSTART;VALUE=DATE:20261101",
+      "ics_end": "DTEND;VALUE=DATE:20261102",
+      "google_dates": "20261101/20261102"
+    },
+    {
+      "name": "Timed",
+      "zone": "America/Chicago",
+      "start_time": "2026-11-02T15:00:00Z",
+      "end_time": "2026-11-02T16:00:00Z",
+      "is_all_day": false,
+      "ics_start": "DTSTART:20261102T150000Z",
+      "ics_end": "DTEND:20261102T160000Z",
+      "google_dates": "20261102T150000Z/20261102T160000Z"
+    }
+  ]
+}

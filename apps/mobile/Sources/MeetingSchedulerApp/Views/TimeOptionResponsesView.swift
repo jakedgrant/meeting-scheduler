@@ -4,6 +4,7 @@ import Shared
 struct TimeOptionResponsesView: View {
     let pollId: UUID
     let timeOption: PollTimeOption
+    let pollTimeZone: String
     @Environment(\.pollService) var pollService
 
     @State var participants: [PollParticipant] = []
@@ -65,7 +66,7 @@ struct TimeOptionResponsesView: View {
     private var timeOptionInfoSection: some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
-                Text(timeOption.startTime, style: .date)
+                Text(timeOption.displayDate(pollTimeZone: pollTimeZone), style: .date)
                     .font(.headline)
                 if timeOption.isAllDay {
                     Text("All day")
@@ -205,7 +206,8 @@ struct ResponseRow: View {
                 endTime: Date().addingTimeInterval(3600),
                 isAllDay: false,
                 createdAt: Date()
-            )
+            ),
+            pollTimeZone: "UTC"
         )
     }
     .environment(\.pollService, MockPollService.withSamplePolls)

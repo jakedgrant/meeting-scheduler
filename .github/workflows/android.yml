@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'apps/android/**'
+      - 'packages/shared-config/date-time-fixtures.json'
       - '.github/workflows/android.yml'
   push:
     branches: [main]
     paths:
       - 'apps/android/**'
+      - 'packages/shared-config/date-time-fixtures.json'
       - '.github/workflows/android.yml'
 
 permissions:

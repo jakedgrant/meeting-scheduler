@@ -1,6 +1,14 @@
 /**
  * Calendar utilities for generating calendar event files
  */
+import { addDays, allDayDate } from './date-time';
+
+export interface CalendarEventTimes {
+	startTime: string; // ISO instant
+	endTime: string; // ISO instant
+	isAllDay?: boolean;
+	timezone?: string; // Poll zone; required to place an all-day date
+}
 
 /**
  * Formats a date for iCalendar format (YYYYMMDDTHHMMSSZ in UTC)
@@ -16,6 +24,18 @@ function formatICalDate(date: Date): string {
 }
 
 /**
+ * DTSTART/DTEND values. An all-day option is one calendar date in the poll's
+ * zone, exported as a floating DATE with an exclusive next-day end.
+ */
+export function eventDates({ startTime, endTime, isAllDay, timezone }: CalendarEventTimes): { start: string; end: string; allDay: boolean } {
+	if (isAllDay && timezone) {
+		const date = allDayDate({ start_time: startTime }, timezone);
+		return { start: date.replaceAll('-', ''), end: addDays(date, 1).replaceAll('-', ''), allDay: true };
+	}
+	return { start: formatICalDate(new Date(startTime)), end: formatICalDate(new Date(endTime)), allDay: false };
+}
+
+/**
  * Escapes text for iCalendar format
  */
 function escapeICalText(text: string): string {
@@ -25,17 +45,13 @@ function escapeICalText(text: string): string {
 /**
  * Generates an ICS (iCalendar) file for a meeting
  */
-export function generateICS(params: {
+export function generateICS(params: CalendarEventTimes & {
 	title: string;
 	description?: string;
 	location?: string;
-	startTime: string; // ISO date string
-	endTime: string; // ISO date string
 }): string {
-	const { title, description, location, startTime, endTime } = params;
-
-	const startDate = new Date(startTime);
-	const endDate = new Date(endTime);
+	const { title, description, location } = params;
+	const dates = eventDates(params);
 	const now = new Date();
 
 	const icsContent = [
@@ -45,8 +61,8 @@ export function generateICS(params: {
 		'CALSCALE:GREGORIAN',
 		'METHOD:PUBLISH',
 		'BEGIN:VEVENT',
-		`DTSTART:${formatICalDate(startDate)}`,
-		`DTEND:${formatICalDate(endDate)}`,
+		dates.allDay ? `DTSTART;VALUE=DATE:${dates.start}` : `DTSTART:${dates.start}`,
+		dates.allDay ? `DTEND;VALUE=DATE:${dates.end}` : `DTEND:${dates.end}`,
 		`DTSTAMP:${formatICalDate(now)}`,
 		`UID:${Date.now()}@meetingscheduler.app`,
 		`SUMMARY:${escapeICalText(title)}`,
@@ -81,25 +97,19 @@ export function downloadICS(icsContent: string, filename: string = 'meeting.ics'
 /**
  * Generates a Google Calendar URL
  */
-export function generateGoogleCalendarUrl(params: {
+export function generateGoogleCalendarUrl(params: CalendarEventTimes & {
 	title: string;
 	description?: string;
 	location?: string;
-	startTime: string; // ISO date string
-	endTime: string; // ISO date string
 }): string {
-	const { title, description, location, startTime, endTime } = params;
+	const { title, description, location } = params;
+	const dates = eventDates(params);
 
-	const startDate = new Date(startTime);
-	const endDate = new Date(endTime);
-
-	// Google Calendar uses format: YYYYMMDDTHHmmssZ
-	const formatGoogleDate = (date: Date) => formatICalDate(date).replace(/[-:]/g, '');
-
+	// Google Calendar uses YYYYMMDDTHHmmssZ, or YYYYMMDD with an exclusive end for all-day events.
 	const params_obj = new URLSearchParams({
 		action: 'TEMPLATE',
 		text: title,
-		dates: `${formatGoogleDate(startDate)}/${formatGoogleDate(endDate)}`,
+		dates: `${dates.start}/${dates.end}`,
 		...(description && { details: description }),
 		...(location && { location })
 	});

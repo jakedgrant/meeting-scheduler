@@ -5,6 +5,7 @@
 	import { createPoll } from '$lib/stores/polls';
 	import { createPollCreation } from '$lib/poll-creation';
 	import { createSessionWork } from '$lib/session-scope';
+	import { addDays, currentZone, dateRange, formatCalendarDate, today } from '$lib/date-time';
 	const work = createSessionWork();
 	const creation = createPollCreation({ create: createPoll });
 	onMount(() => user.subscribe(value => creation.setOwner(value?.id ?? null)));
@@ -55,10 +56,7 @@
 			return;
 		}
 
-		const startDate = new Date(rangeStartDate);
-		const endDate = new Date(rangeEndDate);
-
-		if (startDate > endDate) {
+		if (rangeStartDate > rangeEndDate) {
 			error = 'Start date must be before or equal to end date';
 			return;
 		}
@@ -69,26 +67,18 @@
 			return;
 		}
 
-		// Generate time options for each date in the range
-		const newOptions: TimeOption[] = [];
-		const currentDate = new Date(startDate);
+		// One option per calendar date. Date-only arithmetic keeps clock changes
+		// from skipping or repeating a date.
+		const newOptions: TimeOption[] = dateRange(rangeStartDate, rangeEndDate).map(date => ({
+			id: crypto.randomUUID(),
+			date,
+			startTime: rangeStartTime,
+			endTime: rangeEndTime
+		}));
 
-		while (currentDate <= endDate) {
-			newOptions.push({
-				id: crypto.randomUUID(),
-				date: currentDate.toISOString().split('T')[0],
-				startTime: rangeStartTime,
-				endTime: rangeEndTime
-			});
-			currentDate.setDate(currentDate.getDate() + 1);
-		}
-
-		// Add all new options to the list and sort chronologically
-		creation.edit({ timeOptions: [...timeOptions.filter(option => option.date), ...newOptions].sort((a, b) => {
-			const dateA = new Date(`${a.date}T${a.startTime}`);
-			const dateB = new Date(`${b.date}T${b.startTime}`);
-			return dateA.getTime() - dateB.getTime();
-		}) });
+		// Add all new options to the list and sort by date, then wall time
+		creation.edit({ timeOptions: [...timeOptions.filter(option => option.date), ...newOptions].sort((a, b) =>
+			`${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`)) });
 
 		// Reset the range fields
 		rangeStartDate = '';
@@ -134,25 +124,12 @@
 		if (isCurrent() && result) goto(`/polls/${result.poll.id}`);
 	}
 
-	// Generate next 14 days for date picker
-	function getDateOptions(): { value: string; label: string }[] {
-		const options = [];
-		const today = new Date();
-		for (let i = 0; i < 14; i++) {
-			const date = new Date(today);
-			date.setDate(today.getDate() + i);
-			const value = date.toISOString().split('T')[0];
-			const label = date.toLocaleDateString('en-US', {
-				weekday: 'short',
-				month: 'short',
-				day: 'numeric'
-			});
-			options.push({ value, label });
-		}
-		return options;
-	}
-
-	const dateOptions = getDateOptions();
+	// Next 14 calendar dates in this browser's zone, the zone new options use
+	const firstDate = today(currentZone());
+	const dateOptions = Array.from({ length: 14 }, (_, i) => {
+		const value = addDays(firstDate, i);
+		return { value, label: formatCalendarDate(value, { weekday: 'short', month: 'short', day: 'numeric' }) };
+	});
 
 	// Generate time options in 15-minute increments
 	function getTimeOptions(): string[] {
@@ -253,10 +230,10 @@
 					type="date"
 					value={dueDate}
 					oninput={(event) => creation.edit({ dueDate: event.currentTarget.value })}
-					min={new Date().toISOString().split('T')[0]}
+					min={firstDate}
 					disabled={locked}
 				/>
-				<p class="help-text">Set a deadline for participants to respond by</p>
+				<p class="help-text">Participants can respond through the end of this day</p>
 			</div>
 
 			<div class="form-group checkbox-group">

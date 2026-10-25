@@ -26,6 +26,7 @@
 	import { createAvailabilityEditor } from '$lib/availability-editor';
 	import { createPollPageSession } from '$lib/poll-page-session';
 	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
+	import { allDayDate, formatCalendarDate } from '$lib/date-time';
 
 	const pollId = $derived($page.params.id as string);
 
@@ -152,10 +153,23 @@
 		};
 	}
 
-	function formatDateTime(isoString: string) {
+	// All-day options are calendar dates in the poll's zone; timed options are
+	// instants shown in the viewer's zone.
+	function formatOptionDate(option: { start_time: string; is_all_day: boolean }, options: Intl.DateTimeFormatOptions) {
+		return option.is_all_day && $currentPoll
+			? formatCalendarDate(allDayDate(option, $currentPoll.timezone), options)
+			: new Date(option.start_time).toLocaleDateString('en-US', options);
+	}
+
+	// Finalization copies the chosen option's interval onto the poll.
+	const sameInstant = (a: string | null | undefined, b: string) => !!a && new Date(a).getTime() === new Date(b).getTime();
+	const selectedOption = $derived($currentPollTimeOptions.find(option =>
+		sameInstant($currentPoll?.selected_start_time, option.start_time) && sameInstant($currentPoll?.selected_end_time, option.end_time)));
+
+	function formatDateTime(isoString: string, option?: { start_time: string; is_all_day: boolean }) {
 		const date = new Date(isoString);
 		return {
-			date: date.toLocaleDateString('en-US', {
+			date: formatOptionDate(option ?? { start_time: isoString, is_all_day: false }, {
 				weekday: 'short',
 				month: 'short',
 				day: 'numeric'
@@ -243,7 +257,7 @@
 		const startDate = new Date(timeOption.start_time);
 		const endDate = new Date(timeOption.end_time);
 
-		const dateStr = startDate.toLocaleDateString('en-US', {
+		const dateStr = formatOptionDate(timeOption, {
 			month: 'long',
 			day: 'numeric',
 			year: 'numeric'
@@ -287,7 +301,9 @@
 			description: $currentPoll.description || undefined,
 			location: $currentPoll.location || undefined,
 			startTime: $currentPoll.selected_start_time,
-			endTime: $currentPoll.selected_end_time
+			endTime: $currentPoll.selected_end_time,
+			isAllDay: selectedOption?.is_all_day ?? false,
+			timezone: $currentPoll.timezone
 		});
 
 		const filename = `${$currentPoll.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.ics`;
@@ -303,7 +319,9 @@
 			description: $currentPoll.description || undefined,
 			location: $currentPoll.location || undefined,
 			startTime: $currentPoll.selected_start_time,
-			endTime: $currentPoll.selected_end_time
+			endTime: $currentPoll.selected_end_time,
+			isAllDay: selectedOption?.is_all_day ?? false,
+			timezone: $currentPoll.timezone
 		});
 
 		window.open(url, '_blank');
@@ -410,7 +428,7 @@
 		{/if}
 
 		{#if $currentPoll.selected_start_time && $currentPoll.selected_end_time}
-			{@const selectedFormatted = formatDateTime($currentPoll.selected_start_time)}
+			{@const selectedFormatted = formatDateTime($currentPoll.selected_start_time, selectedOption)}
 			{@const selectedEndFormatted = formatDateTime($currentPoll.selected_end_time)}
 			<div class="final-date-display">
 				<div class="final-date-header">
@@ -436,7 +454,7 @@
 				<div class="final-date-card">
 					<div class="final-date-info">
 						<div class="date">{selectedFormatted.date}</div>
-						<div class="time">{selectedFormatted.time} - {selectedEndFormatted.time}</div>
+						<div class="time">{selectedOption?.is_all_day ? 'All day' : `${selectedFormatted.time} - ${selectedEndFormatted.time}`}</div>
 					</div>
 				</div>
 			</div>
@@ -446,7 +464,7 @@
 				<p class="selection-prompt">Choose the best time based on availability:</p>
 				<div class="time-options-list">
 					{#each sortedTimeOptions as option}
-						{@const formatted = formatDateTime(option.start_time)}
+						{@const formatted = formatDateTime(option.start_time, option)}
 						{@const endFormatted = formatDateTime(option.end_time)}
 						{@const stats = getResponsesForTimeOption(option.id)}
 
@@ -483,7 +501,7 @@
 
 				<div class="time-options-list">
 					{#each $currentPollTimeOptions as option}
-						{@const formatted = formatDateTime(option.start_time)}
+						{@const formatted = formatDateTime(option.start_time, option)}
 						{@const endFormatted = formatDateTime(option.end_time)}
 						{@const stats = getResponsesForTimeOption(option.id)}
 						{@const myResponse = localResponses[option.id]?.status}
