@@ -24,6 +24,12 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const flush = async () => { for (let turn = 0; turn < 3; turn++) await new Promise(resolve => setTimeout(resolve, 0)); };
 const disk = () => { const values = new Map(); return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }; };
 let sequence = 0;
+const summaryPage = (polls, role) => ({ data: { items: polls.map(poll => ({ poll, role, participant_count: 0, time_option_count: 0, earliest_start: null, latest_start: null })), has_more: false, next_cursor: null, total_count: polls.length }, error: null });
+const pollDetail = poll => ({ data: { poll, time_options: [], participants: [], time_option_count: 0, participant_count: 0 }, error: null });
+// F19 read RPCs answer for the account that issued the request.
+const defaultRpc = (name, args, account) => name === 'get_poll_detail' ? pollDetail({ id: args.poll_uuid, creator_id: account })
+  : name === 'list_poll_responses' || name === 'list_poll_summaries' ? summaryPage([], args?.role_filter)
+  : { data: null, error: null };
 
 // Run real stores/controllers, provider reconciliation and Svelte SSR. Inject
 // only platform environment, SDK transport and provider SDK; no server/port.
@@ -69,7 +75,7 @@ async function fixture(t, { browser = true } = {}) {
       sdk(`rpc:${name}`);
       const request = { name, args, account: state.account, signal: null };
       (state.rpcRequests ??= []).push(request);
-      const response = (async () => state.rpc?.(name, args) ?? { data: null, error: null })();
+      const response = (async () => (await state.rpc?.(name, args)) ?? defaultRpc(name, args, request.account))();
       return Object.assign(response, { abortSignal(signal) { request.signal = signal; return this; } });
     },
     functions: { invoke(name, options) { sdk(`function:${name}`); return state.invoke?.(name, options) ?? Promise.resolve({ data: status(state.account), error: null }); } },
@@ -719,29 +725,29 @@ for (const path of ['A-B', 'A-logout-A', 'A-B-A']) for (const outcome of ['succe
   mount(); state.emit('SIGNED_IN', sessionFor(accountA)); await flush();
   const list = deferred(), detail = deferred();
   let firstList = true, firstDetail = true;
-  state.rpc = name => {
-    assert.equal(name, 'get_user_participated_polls');
-    if (firstList) { firstList = false; return list.promise; }
-    return { data: { created_polls: [{ id: 'CURRENT', creator_id: state.account }], joined_polls: [] }, error: null };
-  };
-  state.query = request => {
-    if (request.table === 'polls' && firstDetail) { firstDetail = false; return detail.promise; }
-    return { data: request.table === 'polls' ? { id: request.eq.id, creator_id: request.account } : request.table === 'profiles' ? { id: request.eq.id } : [], error: null };
+  state.rpc = (name, args) => {
+    if (name === 'list_poll_summaries') {
+      if (firstList) { firstList = false; return list.promise; }
+      return summaryPage(args.role_filter === 'owner' ? [{ id: 'CURRENT', creator_id: state.account }] : [], args.role_filter);
+    }
+    if (name === 'get_poll_detail' && firstDetail) { firstDetail = false; return detail.promise; }
+    assert.ok(['list_poll_summaries', 'get_poll_detail', 'list_poll_responses'].includes(name), name);
   };
   const oldList = actual.polls.loadParticipatedPolls();
   const oldDetail = actual.polls.loadPoll('OLD');
   await Promise.resolve();
-  const oldListRequest = state.rpcRequests.at(-1);
-  const oldDetailRequest = state.requests.findLast(request => request.table === 'polls');
+  const oldListRequests = state.rpcRequests.filter(request => request.name === 'list_poll_summaries');
+  const oldDetailRequest = state.rpcRequests.findLast(request => request.name === 'get_poll_detail');
+  assert.equal(oldListRequests.length, 2, 'one first page per section, independent of history size');
   state.emit(path === 'A-logout-A' ? 'SIGNED_OUT' : 'SIGNED_IN', path === 'A-logout-A' ? null : sessionFor(accountB));
   if (path !== 'A-B') state.emit('SIGNED_IN', sessionFor(accountA));
   await flush();
   await actual.polls.loadParticipatedPolls();
   await actual.polls.loadPoll('CURRENT');
-  assert.equal(oldListRequest.signal.aborted, true);
+  for (const request of oldListRequests) assert.equal(request.signal.aborted, true);
   assert.equal(oldDetailRequest.signal.aborted, true);
-  list.resolve(outcome === 'success' ? { data: { created_polls: [{ id: 'OLD' }], joined_polls: [] }, error: null } : { data: null, error: Error('old list failure') });
-  detail.resolve(outcome === 'success' ? { data: { id: 'OLD', creator_id: accountA }, error: null } : { data: null, error: Error('old detail failure') });
+  list.resolve(outcome === 'success' ? summaryPage([{ id: 'OLD', creator_id: accountA }], 'owner') : { data: null, error: Error('old list failure') });
+  detail.resolve(outcome === 'success' ? pollDetail({ id: 'OLD', creator_id: accountA }) : { data: null, error: Error('old detail failure') });
   await Promise.all([oldList, oldDetail]);
   assert.equal(actual.get(actual.polls.currentPoll).id, 'CURRENT');
   assert.deepEqual(actual.get(actual.polls.createdPolls).map(poll => poll.id), ['CURRENT']);

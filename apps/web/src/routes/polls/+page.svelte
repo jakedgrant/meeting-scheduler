@@ -2,8 +2,10 @@
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { user, profile, signOut } from '$lib/stores/auth';
-	import { polls, createdPolls, joinedPolls, pollsLoading, loadMyPolls, loadPollByCode } from '$lib/stores/polls';
-	import { supabase, type PollTimeOption } from '$lib/supabase';
+	import {
+		createdPolls, joinedPolls, pollsLoading, pollsLoadError, pollSummaries, pollListSections,
+		loadMyPolls, loadMorePolls, loadPollByCode
+	} from '$lib/stores/polls';
 
 	import { createSessionWork } from '$lib/session-scope';
 	const work = createSessionWork();
@@ -12,8 +14,6 @@
 	let joinCode = $state('');
 	let joinError = $state('');
 	let joinLoading = $state(false);
-	let pollTimeRanges = $state<Record<string, { earliest: Date; latest: Date } | null>>({});
-	let participantCounts = $state<Record<string, number>>({});
 
 	$effect(() => {
 		if ($user === null) {
@@ -30,75 +30,15 @@
 			account = next;
 			work.invalidate();
 			if (timer) clearTimeout(timer);
-			pollTimeRanges = {}; participantCounts = {};
 			joinCode = ''; joinError = ''; joinLoading = false;
 			if (!next) return;
 			const isCurrent = work.capture();
 			timer = setTimeout(() => {
-				void loadMyPolls().then(() => { if (isCurrent()) return loadTimeRangesAndParticipants(); });
+				if (isCurrent()) void loadMyPolls();
 			}, 0);
 		});
 		return () => { if (timer) clearTimeout(timer); stop(); };
 	});
-
-	async function loadTimeRangesAndParticipants() {
-		const isCurrent = work.capture();
-		const signal = work.signal();
-		const allPolls = [...$createdPolls, ...$joinedPolls];
-		const timeRanges: Record<string, { earliest: Date; latest: Date } | null> = {};
-		const counts: Record<string, number> = {};
-
-		await Promise.all(
-			allPolls.map(async (poll) => {
-				// Load time options
-				try {
-					const { data: timeOptions, error } = await supabase
-						.from('poll_time_options')
-						.select('*')
-						.abortSignal(signal)
-						.eq('poll_id', poll.id)
-						.order('start_time', { ascending: true });
-
-					if (!error && timeOptions && timeOptions.length > 0) {
-						const options = timeOptions as PollTimeOption[];
-						const earliest = new Date(options[0].start_time);
-						const latest = new Date(options[options.length - 1].start_time);
-						timeRanges[poll.id] = { earliest, latest };
-					} else {
-						timeRanges[poll.id] = null;
-					}
-				} catch (err) {
-					console.error(`Failed to load time options for poll ${poll.id}:`, err);
-					timeRanges[poll.id] = null;
-				}
-
-				if (!isCurrent()) return;
-
-				// Load participant count
-				try {
-					const { count, error } = await supabase
-						.from('poll_participants')
-						.select('id', { count: 'exact', head: true })
-						.abortSignal(signal)
-						.eq('poll_id', poll.id);
-
-					if (!error) {
-						counts[poll.id] = count ?? 0;
-					} else {
-						counts[poll.id] = 0;
-					}
-				} catch (err) {
-					console.error(`Failed to load participants for poll ${poll.id}:`, err);
-					counts[poll.id] = 0;
-				}
-			})
-		);
-
-		if (isCurrent()) {
-			pollTimeRanges = timeRanges;
-			participantCounts = counts;
-		}
-	}
 
 	async function handleSignOut() {
 		if (await signOut()) goto('/');
@@ -151,8 +91,9 @@
 	}
 
 	function formatTimeRange(pollId: string): string {
-		const range = pollTimeRanges[pollId];
-		if (!range) return 'No time options';
+		const summary = $pollSummaries[pollId];
+		if (!summary?.earliest_start || !summary.latest_start) return 'No time options';
+		const range = { earliest: new Date(summary.earliest_start), latest: new Date(summary.latest_start) };
 
 		const formatTime = (date: Date) => {
 			return date.toLocaleString('en-US', {
@@ -165,6 +106,11 @@
 		};
 
 		return `${formatTime(range.earliest)} - ${formatTime(range.latest)}`;
+	}
+
+	function participantLabel(pollId: string): string {
+		const count = $pollSummaries[pollId]?.participant_count ?? 0;
+		return `${count} participant${count !== 1 ? 's' : ''}`;
 	}
 
 	function getStatusBadgeClass(status: string): string {
@@ -180,6 +126,18 @@
 		}
 	}
 </script>
+
+{#snippet loadMore(role: 'owner' | 'member', shown: number)}
+	{@const section = $pollListSections[role]}
+	{#if section.nextCursor}
+		<div class="load-more">
+			<span>Showing {shown} of {section.total}</span>
+			<button type="button" class="btn" disabled={section.loadingMore} onclick={() => loadMorePolls(role)}>
+				{section.loadingMore ? 'Loading...' : 'Load more'}
+			</button>
+		</div>
+	{/if}
+{/snippet}
 
 <div class="dashboard">
 	<header>
@@ -220,9 +178,16 @@
 			</form>
 		</div>
 
+		{#if $pollsLoadError}
+			<p class="error-message" role="alert">
+				{$pollsLoadError}
+				<button type="button" class="btn" onclick={() => loadMyPolls()}>Retry</button>
+			</p>
+		{/if}
+
 		{#if $pollsLoading}
 			<div class="loading">Loading polls...</div>
-		{:else if $createdPolls.length === 0 && $joinedPolls.length === 0}
+		{:else if $createdPolls.length === 0 && $joinedPolls.length === 0 && !$pollsLoadError}
 			<div class="empty-state">
 				<h2>No polls yet</h2>
 				<p>Create your first poll to start scheduling meetings.</p>
@@ -246,11 +211,12 @@
 							{/if}
 							<div class="poll-footer">
 								<span class="time-range">{formatTimeRange(poll.id)}</span>
-								<span class="participant-count">{participantCounts[poll.id] || 0} participant{(participantCounts[poll.id] || 0) !== 1 ? 's' : ''}</span>
+								<span class="participant-count">{participantLabel(poll.id)}</span>
 							</div>
 						</a>
 					{/each}
 				</div>
+				{@render loadMore('owner', $createdPolls.length)}
 			{/if}
 
 			{#if $joinedPolls.length > 0}
@@ -267,11 +233,12 @@
 							{/if}
 							<div class="poll-footer">
 								<span class="time-range">{formatTimeRange(poll.id)}</span>
-								<span class="participant-count">{participantCounts[poll.id] || 0} participant{(participantCounts[poll.id] || 0) !== 1 ? 's' : ''}</span>
+								<span class="participant-count">{participantLabel(poll.id)}</span>
 							</div>
 						</a>
 					{/each}
 				</div>
+				{@render loadMore('member', $joinedPolls.length)}
 			{/if}
 		{/if}
 	</main>
@@ -554,6 +521,15 @@
 	.time-range {
 		color: #666;
 		font-weight: 500;
+	}
+
+	.load-more {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 1rem;
+		margin: 1rem 0 2rem;
+		color: #666;
 	}
 
 	.participant-count {

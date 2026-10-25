@@ -19,11 +19,29 @@ import {
 } from '$lib/guest-capability'
 import type { AvailabilitySave, AvailabilitySnapshot } from '$lib/availability-editor'
 import type { CreationOperation, CreationResult } from '$lib/poll-creation'
+import { IncompleteReadError, checkedPage, readAllPages, type Page } from '$lib/paged-read'
 
 // Poll stores
 export const polls = writable<Poll[]>([])
 export const createdPolls = writable<Poll[]>([])
 export const joinedPolls = writable<Poll[]>([])
+
+// Database-computed list fields, keyed by poll id (list_poll_summaries).
+export interface PollSummary {
+  participant_count: number
+  time_option_count: number
+  earliest_start: string | null
+  latest_start: string | null
+}
+type SummaryRow = PollSummary & { poll: Poll; role: 'owner' | 'member' }
+export type PollListRole = 'owner' | 'member'
+export interface PollListSection { total: number; nextCursor: string | null; loadingMore: boolean }
+const emptySection = (): PollListSection => ({ total: 0, nextCursor: null, loadingMore: false })
+export const pollSummaries = writable<Record<string, PollSummary>>({})
+export const pollListSections = writable<Record<PollListRole, PollListSection>>({ owner: emptySection(), member: emptySection() })
+export const pollsLoadError = writable<string | null>(null)
+export const POLL_LIST_PAGE_SIZE = 50
+const RESPONSE_PAGE_SIZE = 1000
 export const currentPoll = writable<Poll | null>(null)
 export const currentPollTimeOptions = writable<PollTimeOption[]>([])
 export const currentPollParticipants = writable<PollParticipant[]>([])
@@ -44,6 +62,8 @@ let loadGeneration = 0
 let requestedPollId: string | null = null
 let identityGeneration = 0
 let listGeneration = 0
+// Full reloads and account changes only; a creation does not invalidate older pages.
+let listReset = 0
 let lastUserId: string | null = null
 let detailOwner = 0
 let listAbort = new AbortController()
@@ -56,13 +76,21 @@ user.subscribe(value => {
   lastUserId = userId
   identityGeneration++
   listGeneration++
+  listReset++
   listAbort.abort()
   listAbort = new AbortController()
   cleanupPollRealtime()
+  resetPollList()
+})
+
+function resetPollList() {
   polls.set([])
   createdPolls.set([])
   joinedPolls.set([])
-})
+  pollSummaries.set({})
+  pollListSections.set({ owner: emptySection(), member: emptySection() })
+  pollsLoadError.set(null)
+}
 
 function capabilityForPoll(pollId: string) {
   const capability = guestCapabilities.get(pollId) ?? readGuestCapability(browserStorage(), pollId)
@@ -74,38 +102,91 @@ function sessionRpc(name: string, args?: Record<string, unknown> | CreationOpera
   return supabase.rpc(name, args).abortSignal(signal)
 }
 
-// Load user's polls (both created and participated)
+async function fetchSummaryPage(role: PollListRole, cursor: string | null, signal: AbortSignal) {
+  const { data, error } = await sessionRpc('list_poll_summaries', {
+    role_filter: role, page_size: POLL_LIST_PAGE_SIZE, page_cursor: cursor
+  }, signal)
+  if (error) throw error
+  const page = checkedPage<SummaryRow>(data)
+  if (page.items.some(item => !item?.poll?.id || item.role !== role || !Number.isSafeInteger(item.participant_count))) {
+    throw new IncompleteReadError()
+  }
+  return page
+}
+
+function summaryOf(item: SummaryRow): PollSummary {
+  const { participant_count, time_option_count, earliest_start, latest_start } = item
+  return { participant_count, time_option_count, earliest_start, latest_start }
+}
+
+function applySummaryPage(role: PollListRole, page: Page<SummaryRow>, append: boolean) {
+  const target = role === 'owner' ? createdPolls : joinedPolls
+  target.update(rows => {
+    const incoming = page.items.map(item => item.poll)
+    const base = append ? rows.filter(row => !incoming.some(poll => poll.id === row.id)) : []
+    return [...base, ...incoming]
+  })
+  pollSummaries.update(map => ({
+    ...map, ...Object.fromEntries(page.items.map(item => [item.poll.id, summaryOf(item)]))
+  }))
+  pollListSections.update(sections => ({
+    ...sections,
+    // Later pages omit the total; keep the first page's value.
+    [role]: { total: page.total_count ?? sections[role].total, nextCursor: page.next_cursor, loadingMore: false }
+  }))
+  polls.set([...get(createdPolls), ...get(joinedPolls)])
+}
+
+// Load the first page of created and joined polls: two requests regardless of
+// history size. Further pages load on demand through loadMorePolls.
 export async function loadParticipatedPolls() {
+  listReset++
   const generation = ++listGeneration
   listAbort.abort()
   listAbort = new AbortController()
   const currentUser = get(user)
   if (!currentUser) {
-    createdPolls.set([])
-    joinedPolls.set([])
-    polls.set([])
+    resetPollList()
     return
   }
 
   pollsLoading.set(true)
+  pollsLoadError.set(null)
   const identity = identityGeneration
+  const signal = listAbort.signal
 
   try {
-    const { data, error } = await sessionRpc('get_user_participated_polls', undefined, listAbort.signal)
-
+    const [owned, member] = await Promise.all([
+      fetchSummaryPage('owner', null, signal), fetchSummaryPage('member', null, signal)
+    ])
     if (identity !== identityGeneration || generation !== listGeneration) return
-    if (error) throw error
-
-    const created = data?.created_polls || []
-    const joined = data?.joined_polls || []
-
-    createdPolls.set(created as Poll[])
-    joinedPolls.set(joined as Poll[])
-    polls.set([...(created as Poll[]), ...(joined as Poll[])])
+    pollSummaries.set({})
+    applySummaryPage('owner', owned, false)
+    applySummaryPage('member', member, false)
   } catch (err) {
-    console.error('Failed to load polls:', err)
+    if (identity !== identityGeneration || generation !== listGeneration) return
+    console.error('Failed to load polls')
+    pollsLoadError.set('Could not load your polls. Please retry.')
   } finally {
     if (identity === identityGeneration && generation === listGeneration) pollsLoading.set(false)
+  }
+}
+
+// Append the next page of one section. A full reload or account change drops it.
+export async function loadMorePolls(role: PollListRole) {
+  const section = get(pollListSections)[role]
+  if (!section.nextCursor || section.loadingMore || !get(user)) return
+  const generation = listReset
+  const identity = identityGeneration
+  pollListSections.update(sections => ({ ...sections, [role]: { ...sections[role], loadingMore: true } }))
+  try {
+    const page = await fetchSummaryPage(role, section.nextCursor, listAbort.signal)
+    if (identity !== identityGeneration || generation !== listReset) return
+    applySummaryPage(role, page, true)
+  } catch {
+    if (identity !== identityGeneration || generation !== listReset) return
+    pollListSections.update(sections => ({ ...sections, [role]: { ...sections[role], loadingMore: false } }))
+    pollsLoadError.set('Could not load more polls. Please retry.')
   }
 }
 
@@ -208,58 +289,21 @@ export async function loadPoll(pollId: string) {
     currentGuest.set(null)
     if (guest && await loadGuestPoll(pollId, guest, generation)) return
 
-    // Load poll
-    const { data: pollData, error: pollError } = await supabase
-      .from('polls')
-      .select('*')
-      .abortSignal(signal)
-      .eq('id', pollId)
-      .single()
-
+    // Poll, options and participants arrive together with their counts.
+    const { data: detailData, error: detailError } = await sessionRpc('get_poll_detail', { poll_uuid: pollId }, signal)
     if (generation !== loadGeneration) return
-    if (pollError) throw pollError
-    currentPoll.set(pollData as Poll)
+    if (detailError) throw detailError
+    const detail = checkedDetail(detailData, pollId)
+    currentPoll.set(detail.poll)
+    currentPollTimeOptions.set(detail.time_options)
+    currentPollParticipants.set(detail.participants)
 
-    // Load time options
-    const { data: timeOptions, error: timeError } = await supabase
-      .from('poll_time_options')
-      .select('*')
-      .abortSignal(signal)
-      .eq('poll_id', pollId)
-      .order('start_time', { ascending: true })
-
+    // Responses can exceed one page; show them only once traversal is complete.
+    const responses = await readPollResponses(pollId, signal)
     if (generation !== loadGeneration) return
-    if (timeError) throw timeError
-    currentPollTimeOptions.set(timeOptions as PollTimeOption[])
+    currentPollResponses.set(responses)
 
-    // Load participants with their profiles
-    const { data: participants, error: partError } = await supabase
-      .from('poll_participants')
-      .select('*, profiles(display_name)')
-      .abortSignal(signal)
-      .eq('poll_id', pollId)
-
-    if (generation !== loadGeneration) return
-    if (partError) throw partError
-    currentPollParticipants.set(participants as PollParticipant[])
-
-    // Load responses
-    const participantIds = participants.map(p => p.id)
-    if (participantIds.length > 0) {
-      const { data: responses, error: respError } = await supabase
-        .from('availability_responses')
-        .select('*')
-        .abortSignal(signal)
-        .in('participant_id', participantIds)
-
-      if (generation !== loadGeneration) return
-      if (respError) throw respError
-      currentPollResponses.set(responses as AvailabilityResponse[])
-    } else {
-      currentPollResponses.set([])
-    }
-
-    const ownParticipant = (participants as PollParticipant[]).find(participant => participant.user_id === get(user)?.id)
+    const ownParticipant = detail.participants.find(participant => participant.user_id === get(user)?.id)
     if (ownParticipant) await loadCurrentAvailability(pollId, ownParticipant.id, generation)
     else currentAvailability.set(null)
     if (generation !== loadGeneration) return
@@ -326,23 +370,38 @@ async function loadPollParticipants(pollId: string) {
 
 async function loadPollResponses(pollId: string) {
   const generation = loadGeneration
-  const participants = get(currentPollParticipants)
-  const participantIds = participants.map(p => p.id)
-
-  if (participantIds.length === 0) {
-    currentPollResponses.set([])
-    return
+  const responses = await readPollResponses(pollId, detailAbort.signal)
+  if (generation === loadGeneration && get(currentPoll)?.id === pollId) {
+    currentPollResponses.set(responses)
   }
+}
 
-  const { data, error } = await supabase
-    .from('availability_responses')
-    .select('*')
-    .abortSignal(detailAbort.signal)
-    .in('participant_id', participantIds)
+interface PollDetail {
+  poll: Poll
+  time_options: PollTimeOption[]
+  participants: PollParticipant[]
+  time_option_count: number
+  participant_count: number
+}
 
-  if (generation === loadGeneration && get(currentPoll)?.id === pollId && !error && data) {
-    currentPollResponses.set(data as AvailabilityResponse[])
+function checkedDetail(data: unknown, pollId: string): PollDetail {
+  const detail = data as PollDetail
+  if (!detail?.poll || detail.poll.id !== pollId
+      || !Array.isArray(detail.time_options) || detail.time_options.length !== detail.time_option_count
+      || !Array.isArray(detail.participants) || detail.participants.length !== detail.participant_count) {
+    throw new IncompleteReadError()
   }
+  return detail
+}
+
+function readPollResponses(pollId: string, signal: AbortSignal) {
+  return readAllPages<AvailabilityResponse>(async cursor => {
+    const { data, error } = await sessionRpc('list_poll_responses', {
+      poll_uuid: pollId, page_size: RESPONSE_PAGE_SIZE, page_cursor: cursor
+    }, signal)
+    if (error) throw error
+    return checkedPage<AvailabilityResponse>(data)
+  }, response => `${response.participant_id}:${response.time_option_id}`)
 }
 
 // The server validates and commits options, quota and any pass in one transaction.
@@ -365,8 +424,16 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
   // A list requested before creation may contain a pre-commit snapshot.
   listGeneration++
   pollsLoading.set(false)
+  const starts = result.time_options.map(option => option.start_time).sort((a, b) => Date.parse(a) - Date.parse(b))
+  const listed = get(createdPolls).some(row => row.id === result.poll.id)
   createdPolls.update(rows => [result.poll, ...rows.filter(row => row.id !== result.poll.id)])
   polls.update(rows => [result.poll, ...rows.filter(row => row.id !== result.poll.id)])
+  // The creator is not a participant until they join.
+  pollSummaries.update(map => ({ ...map, [result.poll.id]: {
+    participant_count: map[result.poll.id]?.participant_count ?? 0, time_option_count: starts.length,
+    earliest_start: starts[0] ?? null, latest_start: starts.at(-1) ?? null
+  } }))
+  if (!listed) pollListSections.update(sections => ({ ...sections, owner: { ...sections.owner, total: sections.owner.total + 1 } }))
   currentPoll.set(result.poll)
   currentPollTimeOptions.set(result.time_options)
   return result

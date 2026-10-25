@@ -49,6 +49,8 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
       if (name === 'join_poll') return { data: { participant: state.participant, created: false }, error: null };
       if (name === 'get_guest_poll_detail') return { data: { participant_id: participantId, poll, time_options: [option], participants: [state.participant], responses: [] }, error: null };
       if (name === 'get_availability') return { data: state.version, error: null };
+      if (name === 'get_poll_detail') return { data: { poll, time_options: [option], participants: [state.participant], time_option_count: 1, participant_count: 1 }, error: null };
+      if (name === 'list_poll_responses') return { data: { items: [], has_more: false, next_cursor: null, total_count: 0 }, error: null };
       throw Error(`Unexpected RPC ${name}`);
       })();
       return Object.assign(response, { abortSignal() { return this; } });

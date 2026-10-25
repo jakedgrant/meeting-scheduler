@@ -1,6 +1,16 @@
 # Architecture remediation progress
 
-Updated October 24, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+Updated October 25, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+
+## F19 bounded reads, October 25
+
+Started from main at `1cb2001`, which contains the merged #72. F21 is in PR #73, and F16's all-day policy depends on F21's date contract, so this delivery starts the F19 → F18 → F20 chain instead. One agent did the work directly, with no subagents.
+
+Additive migration `20261025062518_bounded_read_apis.sql`, created with the Supabase CLI, adds `list_poll_summaries`, `get_poll_detail` and `list_poll_responses`. It makes `polls.created_at` non-null after a backfill and adds a creator/created-at keyset index. The [read contracts](read-contracts.md) document the cursor format, size limits, snapshot behaviour and the completeness checks clients must make. The web list and detail readers use the new RPCs. The list asks for one page per section instead of `1 + 2N` requests, and the detail traverses every response page and rejects a mismatched total. This also covers the web part of F18.
+
+Local results: all **152** in-process database tests pass (10 new), plus **5** new and **137** existing web tests. Web check shows 0 errors and 5 pre-existing warnings. Mutation checks confirmed that the new suites catch an inclusive keyset comparison, millisecond cursor precision, and a missing web total check. No simulator, emulator, local server or hosted resource was used. The PostgreSQL concurrency suites did not run because this delivery changes no write path.
+
+Still open: iOS/Android readers, guest-detail response paging, retiring `get_user_participated_polls`, and representative query-plan/payload measurement. F20 remains queued behind this. No merge, deployment or hosted change is authorized.
 
 ## F12/F14/F22 session lifecycle delivery, October 24
 
