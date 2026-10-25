@@ -10,11 +10,9 @@ struct AppleCalendarToggle: View {
             isOn: Binding(
                 get: { calendarService.appleCalendarEnabled },
                 set: { enabled in
-                    let session = authService.sessionGeneration
-                    Task {
-                        guard session == authService.sessionGeneration, !Task.isCancelled else { return }
+                    authService.performSessionTask(operation: { _ in
                         await calendarService.setAppleCalendarEnabled(enabled)
-                    }
+                    })
                 }
             ),
             icon: "calendar",

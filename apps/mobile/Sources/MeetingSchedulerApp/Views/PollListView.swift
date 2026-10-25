@@ -184,39 +184,31 @@ struct PollListView: View {
     }
 
     private func handleJoinByCode() {
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            isJoining = true
-            joinError = nil
-
-            let code = joinCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-
-            guard code.count == 6 else {
-                joinError = "Code must be 6 characters"
-                isJoining = false
-                return
-            }
-
-            guard let poll = await pollService.loadPollByCode(code) else {
-                joinError = "Poll not found. Please check the code."
-                isJoining = false
-                return
-            }
-
-            guard session == authService.sessionGeneration else { return }
-            if poll.status == .closed || poll.status == .archived {
-                joinError = "This poll is closed and cannot accept new participants."
-                isJoining = false
-                return
-            }
-
-            showJoinByCode = false
-            joinCode = ""
-            joinError = nil
-            isJoining = false
-            navigateToPoll = poll.id
+        joinError = nil
+        let code = joinCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard code.count == 6 else {
+            joinError = "Code must be 6 characters"
+            return
         }
+        isJoining = true
+        authService.performSessionTask(
+            operation: { _ in await pollService.loadPollByCode(code) },
+            onSuccess: { poll in
+                guard let poll else {
+                    joinError = "Poll not found. Please check the code."
+                    return
+                }
+                guard poll.status != .closed && poll.status != .archived else {
+                    joinError = "This poll is closed and cannot accept new participants."
+                    return
+                }
+                showJoinByCode = false
+                joinCode = ""
+                joinError = nil
+                navigateToPoll = poll.id
+            },
+            onCompletion: { isJoining = false }
+        )
     }
 
     private func handleCreatePoll() {

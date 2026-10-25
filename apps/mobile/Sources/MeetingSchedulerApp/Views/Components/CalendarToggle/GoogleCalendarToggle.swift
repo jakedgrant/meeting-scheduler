@@ -10,11 +10,9 @@ struct GoogleCalendarToggle: View {
             isOn: Binding(
                 get: { calendarService.googleCalendarEnabled },
                 set: { enabled in
-                    let session = authService.sessionGeneration
-                    Task {
-                        guard session == authService.sessionGeneration, !Task.isCancelled else { return }
+                    authService.performSessionTask(operation: { _ in
                         await calendarService.setGoogleCalendarEnabled(enabled)
-                    }
+                    })
                 }
             ),
             icon: "globe",

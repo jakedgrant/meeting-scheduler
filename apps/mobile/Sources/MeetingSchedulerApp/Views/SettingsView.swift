@@ -152,32 +152,20 @@ struct SettingsView: View {
 
     private func signOut() {
         isSigningOut = true
-
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                try await authService.signOut()
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                print("Sign out failed: \(error)")
-            }
-            isSigningOut = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signOut() },
+            onFailure: { print("Sign out failed: \($0)") },
+            onCompletion: { isSigningOut = false }
+        )
     }
 
     private func restorePurchases() {
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                _ = try await purchaseService.restorePurchases()
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                print("Restore failed: \(error)")
-            }
-        }
+        authService.performSessionTask(
+            operation: { _ in _ = try await purchaseService.restorePurchases() },
+            onFailure: { print("Restore failed: \($0)") }
+        )
     }
+
 }
 
 // MARK: - ProfileRow

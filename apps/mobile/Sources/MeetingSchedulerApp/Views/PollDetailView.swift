@@ -384,15 +384,15 @@ struct PollDetailView: View {
                 Text(message).foregroundStyle(.red).accessibilityIdentifier("availability-save-error")
                 if let participant = myParticipant, editor.saved == nil || editor.needsConflictReview {
                     Button(editor.needsConflictReview ? "Load Latest Saved Responses" : "Retry Loading Responses") {
-                        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-                            let generation = viewGeneration
-                            await editor.load(pollId: pollId, participantId: participant.id,
-                                              preservingDraft: true, using: pollService)
-                            guard generation == viewGeneration, displayedAccountId == authService.currentUserId else { return }
-                            applySavedSnapshot()
-                        }
+                        let generation = viewGeneration
+                        authService.performSessionTask(
+                            operation: { _ in
+                                await editor.load(pollId: pollId, participantId: participant.id,
+                                                  preservingDraft: true, using: pollService)
+                            },
+                            onSuccess: { _ in applySavedSnapshot() },
+                            isCurrent: { generation == viewGeneration }
+                        )
                     }
                     .disabled(editor.isLoading || editor.isSaving)
                 }
@@ -511,42 +511,34 @@ struct PollDetailView: View {
 
     private func updateStatus(_ status: PollStatus) {
         let generation = viewGeneration
-        let account = authService.currentUserId
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                try await pollService.updatePollStatus(pollId: pollId, status: status)
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
+        authService.performSessionTask(
+            operation: { _ in try await pollService.updatePollStatus(pollId: pollId, status: status) },
+            onSuccess: { _ in
                 poll?.status = status
                 actionError = nil
-            } catch {
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
-                actionError = "The poll status could not be changed. Try again."
-            }
-        }
+            },
+            onFailure: { _ in actionError = "The poll status could not be changed. Try again." },
+            isCurrent: { generation == viewGeneration }
+        )
     }
 
     private func joinPoll() {
         let generation = viewGeneration
-        let account = authService.currentUserId
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
+        authService.performSessionTask(
+            operation: { scope in
                 let participant = try await pollService.joinPoll(pollId: pollId, anonymousName: nil)
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
+                try scope.checkCancellation()
                 myParticipant = participant
                 if !participants.contains(where: { $0.id == participant.id }) { participants.append(participant) }
                 await editor.load(pollId: pollId, participantId: participant.id, using: pollService)
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
+            },
+            onSuccess: { _ in
                 applySavedSnapshot()
                 actionError = nil
-            } catch {
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
-                actionError = "The poll could not be joined. Reload the poll and try again."
-            }
-        }
+            },
+            onFailure: { _ in actionError = "The poll could not be joined. Reload the poll and try again." },
+            isCurrent: { generation == viewGeneration }
+        )
     }
 
     private func validateComment() -> Bool {
@@ -561,35 +553,27 @@ struct PollDetailView: View {
     private func saveResponses() {
         guard let participant = myParticipant, validateComment(), canRespond else { return }
         let generation = viewGeneration
-        let account = authService.currentUserId
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            await editor.save(pollId: pollId, participantId: participant.id, using: pollService)
-            guard generation == viewGeneration, account == authService.currentUserId else { return }
-            if editor.didSave { applySavedSnapshot() }
-        }
+        authService.performSessionTask(
+            operation: { _ in await editor.save(pollId: pollId, participantId: participant.id, using: pollService) },
+            onSuccess: { _ in if editor.didSave { applySavedSnapshot() } },
+            isCurrent: { generation == viewGeneration }
+        )
     }
 
     private func selectFinalDate() {
         guard let option = finalTimeOption, !isSelectingFinalDate else { return }
         let generation = viewGeneration
-        let account = authService.currentUserId
         isSelectingFinalDate = true
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            defer { if generation == viewGeneration { isSelectingFinalDate = false } }
-            do {
-                let finalized = try await pollService.finalizePoll(pollId: pollId, timeOptionId: option.id)
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
+        authService.performSessionTask(
+            operation: { _ in try await pollService.finalizePoll(pollId: pollId, timeOptionId: option.id) },
+            onSuccess: { finalized in
                 poll = finalized
                 actionError = nil
-            } catch {
-                guard generation == viewGeneration, account == authService.currentUserId else { return }
-                actionError = "The final time could not be confirmed. Reload the poll and try again."
-            }
-        }
+            },
+            onFailure: { _ in actionError = "The final time could not be confirmed. Reload the poll and try again." },
+            onCompletion: { isSelectingFinalDate = false },
+            isCurrent: { generation == viewGeneration }
+        )
     }
 
     private func sharePoll() {
@@ -739,11 +723,7 @@ struct FinalDateDisplay: View {
         }
         .alert("Add to Calendar", isPresented: $showAddToCalendarAlert) {
             Button("Add Event", role: nil) {
-                let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-                    await addToCalendar()
-                }
+                addToCalendar()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -756,19 +736,21 @@ struct FinalDateDisplay: View {
         }
     }
 
-    private func addToCalendar() async {
-        let success = await calendarService.addEventToCalendar(
-            title: pollTitle,
-            startDate: selectedStart,
-            endDate: selectedEnd,
-            notes: pollDescription,
-            location: pollLocation
+    private func addToCalendar() {
+        authService.performSessionTask(
+            operation: { _ in
+                await calendarService.addEventToCalendar(
+                    title: pollTitle,
+                    startDate: selectedStart,
+                    endDate: selectedEnd,
+                    notes: pollDescription,
+                    location: pollLocation
+                )
+            },
+            onSuccess: { success in if success { addingToCalendar = true } }
         )
-
-        if success {
-            addingToCalendar = true
-        }
     }
+
 }
 
 // MARK: - FinalDateSelectionView

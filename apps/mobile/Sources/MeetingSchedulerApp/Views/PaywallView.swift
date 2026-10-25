@@ -147,47 +147,33 @@ struct PaywallView: View {
 
     private func purchase() {
         guard let package = selectedPackage else { return }
-
         isPurchasing = true
         errorMessage = nil
-
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                _ = try await purchaseService.purchase(package: package)
-                guard session == authService.sessionGeneration else { return }
-                dismiss()
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                errorMessage = error.localizedDescription
-            }
-            isPurchasing = false
-        }
+        authService.performSessionTask(
+            operation: { _ in _ = try await purchaseService.purchase(package: package) },
+            onSuccess: { _ in dismiss() },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isPurchasing = false }
+        )
     }
 
     private func restorePurchases() {
         isPurchasing = true
         errorMessage = nil
-
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                _ = try await purchaseService.restorePurchases()
-                guard session == authService.sessionGeneration else { return }
+        authService.performSessionTask(
+            operation: { _ in _ = try await purchaseService.restorePurchases() },
+            onSuccess: { _ in
                 if purchaseService.hasProAccess {
                     dismiss()
                 } else {
                     errorMessage = "No purchases to restore"
                 }
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                errorMessage = error.localizedDescription
-            }
-            isPurchasing = false
-        }
+            },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isPurchasing = false }
+        )
     }
+
 }
 
 // MARK: - PackageCard

@@ -154,30 +154,19 @@ struct ProfileEditView: View {
         isSaving = true
         errorMessage = nil
 
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
+        authService.performSessionTask(
+            operation: { _ in
                 try await authService.updateProfile(
                     displayName: displayName.isEmpty ? nil : displayName,
                     avatarUrl: avatarUrl.isEmpty ? nil : avatarUrl,
                     timezone: timezone
                 )
 
-                guard session == authService.sessionGeneration else { return }
-                await MainActor.run {
-                    isSaving = false
-                    showSuccessAlert = true
-                }
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                guard session == authService.sessionGeneration else { return }
-                await MainActor.run {
-                    isSaving = false
-                    errorMessage = "Failed to update profile: \(error.localizedDescription)"
-                }
-            }
-        }
+            },
+            onSuccess: { _ in showSuccessAlert = true },
+            onFailure: { errorMessage = "Failed to update profile: \($0.localizedDescription)" },
+            onCompletion: { isSaving = false }
+        )
     }
 }
 

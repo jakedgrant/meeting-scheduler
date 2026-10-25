@@ -114,55 +114,34 @@ struct AuthView: View {
     private func signInWithGoogle() {
         isLoading = true
         errorMessage = nil
-
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                try await authService.signInWithGoogle()
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithGoogle() },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
     }
 
     private func signInWithApple() {
         isLoading = true
         errorMessage = nil
-
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                try await authService.signInWithApple()
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithApple() },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
     }
 
     private func signInWithMagicLink() {
         isLoading = true
         errorMessage = nil
-
-        let session = authService.sessionGeneration
-        Task {
-            guard session == authService.sessionGeneration, !Task.isCancelled else { return }
-            do {
-                try await authService.signInWithMagicLink(email: email)
-                guard session == authService.sessionGeneration else { return }
-                showMagicLinkSent = true
-            } catch {
-                guard session == authService.sessionGeneration else { return }
-                errorMessage = error.localizedDescription
-            }
-            isLoading = false
-        }
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithMagicLink(email: email) },
+            onSuccess: { _ in showMagicLinkSent = true },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
     }
+
 }
 
 #Preview {
