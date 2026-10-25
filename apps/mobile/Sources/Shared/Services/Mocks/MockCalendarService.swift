@@ -58,6 +58,7 @@ public final class MockCalendarService: CalendarServiceProtocol {
         title: String,
         startDate: Date,
         endDate: Date,
+        isAllDay: Bool,
         notes: String?,
         location: String?
     ) async -> Bool {

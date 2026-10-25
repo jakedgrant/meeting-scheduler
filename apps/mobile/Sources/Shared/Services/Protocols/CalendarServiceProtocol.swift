@@ -28,6 +28,7 @@ public protocol CalendarServiceProtocol: AnyObject, Observable, Sendable {
         title: String,
         startDate: Date,
         endDate: Date,
+        isAllDay: Bool,
         notes: String?,
         location: String?
     ) async -> Bool

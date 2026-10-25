@@ -296,13 +296,25 @@ struct CreatePollView: View {
 
     private func createPoll() {
         errorMessage = nil
-        let payload = editor.mustResolvePending ? editor.pending?.payload : PollCreationPayload(
-            title: title, description: description.isEmpty ? nil : description,
-            location: location.isEmpty ? nil : location, timezone: TimeZone.current.identifier,
-            closesAt: hasDueDate ? dueDate : nil,
-            timeOptions: buildTimeOptions().map { PollCreationOption(startTime: $0.start, endTime: $0.end, isAllDay: $0.isAllDay) },
-            useEventPass: useEventPass
-        )
+        let payload: PollCreationPayload?
+        if editor.mustResolvePending {
+            payload = editor.pending?.payload
+        } else {
+            // Picker values are wall times in this device's zone, which the poll records.
+            let zone = TimeZone.current
+            do {
+                payload = PollCreationPayload(
+                    title: title, description: description.isEmpty ? nil : description,
+                    location: location.isEmpty ? nil : location, timezone: zone.identifier,
+                    closesAt: hasDueDate ? CalendarDay(dueDate ?? Date(), in: zone).deadline(in: zone) : nil,
+                    timeOptions: try buildTimeOptions(in: zone),
+                    useEventPass: useEventPass
+                )
+            } catch {
+                errorMessage = error.localizedDescription
+                return
+            }
+        }
         guard let payload else { return }
         authService.performSessionTask(
             operation: { _ in await editor.submit(payload, using: pollService) },
@@ -314,39 +326,27 @@ struct CreatePollView: View {
         title = payload?.title ?? ""
         description = payload?.description ?? ""
         location = payload?.location ?? ""
-        dueDate = payload?.closesAt
+        // A stored deadline is the start of the day after the due date.
+        let zone = payload.flatMap { TimeZone(identifier: $0.timezone) } ?? .current
+        dueDate = payload?.closesAt.map { CalendarDay.dueDate(for: $0, in: zone).pickerDate() }
         hasDueDate = dueDate != nil
         useEventPass = payload?.useEventPass ?? false
         isAllDay = payload?.timeOptions.first?.isAllDay ?? false
-        timeOptions = payload?.timeOptions.map { TimeOption(date: $0.startTime, startTime: $0.startTime, endTime: $0.endTime) } ?? [TimeOption()]
+        timeOptions = payload?.timeOptions.map {
+            TimeOption(date: $0.isAllDay ? CalendarDay($0.startTime, in: zone).pickerDate() : $0.startTime, startTime: $0.startTime, endTime: $0.endTime)
+        } ?? [TimeOption()]
         errorMessage = nil
     }
 
-    private func buildTimeOptions() -> [(start: Date, end: Date, isAllDay: Bool)] {
-        timeOptions.map { option -> (start: Date, end: Date, isAllDay: Bool) in
-            let calendar = Calendar.current
-
-            let start: Date
-            let end: Date
-
-            if isAllDay {
-                start = calendar.date(bySettingHour: 0, minute: 0, second: 0, of: option.date) ?? option.date
-                end = calendar.date(bySettingHour: 23, minute: 59, second: 0, of: option.date) ?? option.date
-            } else {
-                let startComponents = calendar.dateComponents([.hour, .minute], from: option.startTime)
-                start = calendar.date(bySettingHour: startComponents.hour ?? 9,
-                                      minute: startComponents.minute ?? 0,
-                                      second: 0,
-                                      of: option.date) ?? option.date
-
-                let endComponents = calendar.dateComponents([.hour, .minute], from: option.endTime)
-                end = calendar.date(bySettingHour: endComponents.hour ?? 10,
-                                    minute: endComponents.minute ?? 0,
-                                    second: 0,
-                                    of: option.date) ?? option.date
-            }
-
-            return (start: start, end: end, isAllDay: isAllDay)
+    /// Each option's picked date and wall times, resolved in zone (docs/date-time-contract.md).
+    private func buildTimeOptions(in zone: TimeZone) throws(CalendarTimeError) -> [PollCreationOption] {
+        let calendar = Calendar.current
+        return try timeOptions.map { option throws(CalendarTimeError) in
+            let day = CalendarDay(option.date, in: calendar.timeZone)
+            if isAllDay { return .allDay(on: day, in: zone) }
+            let start = calendar.dateComponents([.hour, .minute], from: option.startTime)
+            let end = calendar.dateComponents([.hour, .minute], from: option.endTime)
+            return try .timed(on: day, start: (start.hour ?? 9, start.minute ?? 0), end: (end.hour ?? 10, end.minute ?? 0), in: zone)
         }
     }
 }
