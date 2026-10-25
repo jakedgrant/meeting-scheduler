@@ -2,6 +2,16 @@
 
 Updated October 25, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F19 bounded reads, October 25
+
+Started from main at `1cb2001`, which contains the merged #72. F21 was then in PR #73, and F16's all-day policy depends on F21's date contract, so this delivery starts the F19 → F18 → F20 chain instead. The branch was later merged with main at `da5fa3a` (#73 merged); F21's migration `20261025021513` orders before this one. One agent did the work directly, with no subagents.
+
+Additive migration `20261025062518_bounded_read_apis.sql`, created with the Supabase CLI, adds `list_poll_summaries`, `get_poll_detail` and `list_poll_responses`. It makes `polls.created_at` non-null after a backfill and adds a creator/created-at keyset index. The [read contracts](read-contracts.md) document the cursor format, size limits, snapshot behaviour and the completeness checks clients must make. The web list and detail readers use the new RPCs. The list asks for one page per section instead of `1 + 2N` requests, and the detail traverses every response page and rejects a mismatched total. This also covers the web part of F18.
+
+Local results: all **152** in-process database tests pass (10 new), plus **5** new and **137** existing web tests. Web check shows 0 errors and 5 pre-existing warnings. Mutation checks confirmed that the new suites catch an inclusive keyset comparison, millisecond cursor precision, and a missing web total check. No simulator, emulator, local server or hosted resource was used. The PostgreSQL concurrency suites did not run because this delivery changes no write path. After merging main at `da5fa3a`, the combined tree passes all **159** database tests and **151** web tests (including F21's), with web check (0 errors) and build.
+
+Still open: iOS/Android readers, guest-detail response paging, retiring `get_user_participated_polls`, and representative query-plan/payload measurement. F20 remains queued behind this. No merge, deployment or hosted change is authorized.
+
 ## F21 date/time contract delivery, October 24
 
 Baseline is `origin/main` at `1cb2001` (PR #72 merged). F21 is the next queued step; F16 calendar coverage follows it because it uses the all-day bounds. One agent implemented and validated it directly, without subagents, on branch `claude/f21-date-time-contract` (implementation commit `09fc202`).

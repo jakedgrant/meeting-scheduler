@@ -97,24 +97,34 @@ test('one creation RPC applies authoritative complete state and never writes tab
 
 test('a delayed list snapshot from before creation cannot erase authoritative success', async t => {
   const { actual, state } = await fixture(t);
+  const page = (rows, role) => ({ data: { items: rows.map(row => ({ poll: row, role, participant_count: 3,
+    time_option_count: 1, earliest_start: option.start_time, latest_start: option.start_time })),
+  has_more: false, next_cursor: null, total_count: rows.length }, error: null });
   let finishList;
-  state.handler = name => name === 'get_user_participated_polls'
-    ? new Promise(resolve => { finishList = resolve; })
+  const pendingList = new Promise(resolve => { finishList = resolve; });
+  state.handler = (name, args) => name === 'list_poll_summaries'
+    ? pendingList.then(() => page([], args.role_filter))
     : { data: result, error: null };
   const loadingList = actual.loadParticipatedPolls();
   assert.equal(actual.get(actual.pollsLoading), true);
   const editor = editorFor(actual);
   await editor.submit();
   assert.equal(actual.get(actual.pollsLoading), false);
-  finishList({ data: { created_polls: [], joined_polls: [] }, error: null });
+  finishList();
   await loadingList;
   assert.deepEqual(actual.get(actual.createdPolls), [poll]);
   assert.deepEqual(actual.get(actual.polls), [poll]);
   assert.deepEqual(actual.get(actual.currentPoll), poll);
+  // The returned options supply the list row until the next server page.
+  assert.deepEqual(actual.get(actual.pollSummaries)[poll.id], { participant_count: 0, time_option_count: 1,
+    earliest_start: option.start_time, latest_start: option.start_time });
+  assert.equal(actual.get(actual.pollListSections).owner.total, 1);
   // A later, fresh server load may still reconcile normal list state.
-  state.handler = () => ({ data: { created_polls: [poll], joined_polls: [] }, error: null });
+  state.handler = (_name, args) => page(args.role_filter === 'owner' ? [poll] : [], args.role_filter);
   await actual.loadParticipatedPolls();
   assert.deepEqual(actual.get(actual.createdPolls), [poll]);
+  assert.equal(actual.get(actual.pollSummaries)[poll.id].participant_count, 3);
+  assert.equal(actual.get(actual.pollListSections).owner.total, 1);
 });
 
 for (const storage of [disk()]) {
