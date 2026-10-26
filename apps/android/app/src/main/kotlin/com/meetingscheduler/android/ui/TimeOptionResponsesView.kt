@@ -51,11 +51,14 @@ fun TimeOptionResponsesView(
     pollService: PollService,
     onNavigateBack: () -> Unit
 ) {
-    var timeOption by remember { mutableStateOf<PollTimeOption?>(null) }
-    var pollTimeZone by remember { mutableStateOf("UTC") }
-    var participants by remember { mutableStateOf<List<PollParticipant>>(emptyList()) }
-    var responses by remember { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    val accountKey = pollService.creationAccountKey
+    var loadError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
+    var loadRevision by remember(pollId, accountKey) { mutableStateOf(0) }
+    var timeOption by remember(pollId, accountKey) { mutableStateOf<PollTimeOption?>(null) }
+    var pollTimeZone by remember(pollId, accountKey) { mutableStateOf("UTC") }
+    var participants by remember(pollId, accountKey) { mutableStateOf<List<PollParticipant>>(emptyList()) }
+    var responses by remember(pollId, accountKey) { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
+    var isLoading by remember(pollId, accountKey) { mutableStateOf(true) }
 
     val groupedResponses = remember(responses, participants) {
         val optionResponses = responses.filter { it.timeOptionId == timeOptionId }
@@ -81,17 +84,19 @@ fun TimeOptionResponsesView(
         )
     }
 
-    LaunchedEffect(pollId, timeOptionId) {
+    LaunchedEffect(pollId, timeOptionId, accountKey, loadRevision) {
         isLoading = true
-        val allTimeOptions = pollService.loadTimeOptions(pollId)
-        timeOption = allTimeOptions.firstOrNull { it.id == timeOptionId }
-        // All-day dates are read in the poll's zone.
-        if (timeOption?.isAllDay == true) pollTimeZone = pollService.loadPoll(pollId)?.timezone ?: "UTC"
-
-        participants = pollService.loadParticipants(pollId)
-        responses = pollService.loadResponses(allTimeOptions.map { it.id })
-
-        isLoading = false
+        loadError = null
+        participants = emptyList(); responses = emptyList(); timeOption = null
+        try {
+            val detail = pollService.loadPollDetail(pollId)
+            timeOption = detail.timeOptions.firstOrNull { it.id == timeOptionId }
+            pollTimeZone = detail.poll.timezone
+            participants = detail.participants
+            responses = detail.responses
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) { loadError = "Responses could not be loaded completely. Please retry." }
+        finally { isLoading = false }
     }
 
     Scaffold(
@@ -114,6 +119,11 @@ fun TimeOptionResponsesView(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
+            }
+        } else if (loadError != null) {
+            Column(Modifier.padding(padding).padding(24.dp)) {
+                Text(loadError!!)
+                TextButton(onClick = { loadRevision += 1 }) { Text("Retry") }
             }
         } else {
             LazyColumn(

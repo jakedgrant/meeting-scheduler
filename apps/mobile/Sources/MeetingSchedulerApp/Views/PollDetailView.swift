@@ -82,7 +82,13 @@ struct PollDetailView: View {
             } else if let poll = poll {
                 pollContent(poll)
             } else {
-                ContentUnavailableView("Poll not found", systemImage: "exclamationmark.triangle")
+                ContentUnavailableView {
+                    Label("Poll unavailable", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(pollService.pollDetailErrors[pollId] ?? String(localized: "This poll could not be found."))
+                } actions: {
+                    Button("Retry") { Task { await loadPollData() } }
+                }
             }
         }
         .navigationTitle(displaysCurrentIdentity ? (poll?.title ?? "Poll") : "Poll")

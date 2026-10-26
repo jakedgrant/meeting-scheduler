@@ -6,6 +6,10 @@ struct TimeOptionResponsesView: View {
     let timeOption: PollTimeOption
     let pollTimeZone: String
     @Environment(\.pollService) var pollService
+    @Environment(\.authService) private var authService
+    @State private var loadError: String?
+    @State private var displayedAccountId: UUID?
+    @State private var loadGeneration: UInt64 = 0
 
     @State var participants: [PollParticipant] = []
     @State var responses: [AvailabilityResponse] = []
@@ -37,8 +41,14 @@ struct TimeOptionResponsesView: View {
 
     var body: some View {
         Group {
-            if isLoading {
+            if isLoading || displayedAccountId != authService.currentUserId {
                 ProgressView("Loading responses...")
+            } else if let loadError {
+                ContentUnavailableView {
+                    Label("Responses unavailable", systemImage: "exclamationmark.triangle")
+                } description: { Text(loadError) } actions: {
+                    Button("Retry") { Task { await loadData() } }
+                }
             } else {
                 responsesList
             }
@@ -47,9 +57,10 @@ struct TimeOptionResponsesView: View {
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
-        .task {
+        .task(id: authService.currentUserId) {
             await loadData()
         }
+        .onDisappear { loadGeneration &+= 1 }
     }
 
     // MARK: - Main Content
@@ -151,13 +162,23 @@ struct TimeOptionResponsesView: View {
     // MARK: - Data Loading
 
     private func loadData() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         isLoading = true
+        defer { if generation == loadGeneration { isLoading = false } }
+        let account = authService.currentUserId
+        displayedAccountId = account
+        loadError = nil
+        participants = []; responses = []
+        let detail = await pollService.loadPollDetail(id: pollId)
+        guard generation == loadGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
+        if let detail {
+            participants = detail.participants
+            responses = detail.responses
+        } else {
+            loadError = pollService.pollDetailErrors[pollId] ?? String(localized: "Responses could not be loaded. Please retry.")
+        }
 
-        participants = await pollService.loadParticipants(pollId: pollId)
-        let participantIds = participants.map { $0.id }
-        responses = await pollService.loadResponses(participantIds: participantIds)
-
-        isLoading = false
     }
 }
 

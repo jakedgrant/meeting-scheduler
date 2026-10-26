@@ -1,0 +1,20 @@
+test-accepted.log
+Executed 141 tests, with 0 failures (0 unexpected) in 1.177 (1.207) seconds
+Executed 141 tests, with 0 failures (0 unexpected) in 1.177 (1.216) seconds
+** TEST EXECUTE SUCCEEDED ** [6.567 sec]
+
+build-accepted.log
+** TEST BUILD SUCCEEDED ** [6.530 sec]
+
+wrapper-accepted.log
+** BUILD SUCCEEDED ** [14.741 sec]
+
+f19-native-android-review.log
+BUILD SUCCESSFUL in 24s
+
+f19-native-db-reads.log
+ℹ tests 10
+ℹ pass 10
+ℹ fail 0
+
+Android JUnit XML totals: {'tests': 92, 'failures': 0, 'errors': 0, 'skipped': 0}

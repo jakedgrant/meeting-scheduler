@@ -9,6 +9,11 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     var createdPolls: [Poll] { get }
     var joinedPolls: [Poll] { get }
     var isLoading: Bool { get }
+    var isLoadingMore: Bool { get }
+    var hasMorePolls: Bool { get }
+    var listTotalCount: Int? { get }
+    var listLoadError: String? { get }
+    var pollDetailErrors: [UUID: String] { get }
 
     /// Participant counts keyed by poll ID — populated as part of loadMyPolls().
     var pollParticipantCounts: [UUID: Int] { get }
@@ -23,10 +28,12 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Load Polls
 
     func loadMyPolls() async
+    func loadMorePolls() async
+    func retryPollLoad() async
     func loadPoll(id: UUID) async -> Poll?
     func loadPollByCode(_ code: String) async -> PollLookupResponse?
 
-    /// Loads a poll with all related data (time options, participants, responses) in a single request.
+    /// Loads complete metadata and all response pages before publishing or caching detail.
     func loadPollDetail(id: UUID) async -> PollDetail?
 
     // MARK: - Create Poll

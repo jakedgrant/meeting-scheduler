@@ -38,21 +38,10 @@ fun PollListView(
     var isJoining by remember { mutableStateOf(false) }
     var navigateToPollId by remember { mutableStateOf<String?>(null) }
     var isRefreshing by remember { mutableStateOf(false) }
-    var participantCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    var pollTimeRanges by remember { mutableStateOf<Map<String, Pair<Instant, Instant>>>(emptyMap()) }
-
     val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) {
-        scope.launch {
-            pollService.loadMyPolls()
-            loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
-                participantCounts = newCounts
-            }
-            loadAllTimeRanges(pollService) { newRanges ->
-                pollTimeRanges = newRanges
-            }
-        }
+    LaunchedEffect(pollService.creationAccountKey) {
+        pollService.loadMyPolls()
     }
 
     LaunchedEffect(navigateToPollId) {
@@ -123,14 +112,8 @@ fun PollListView(
             onRefresh = {
                 scope.launch {
                     isRefreshing = true
-                    pollService.loadMyPolls()
-                    loadAllParticipantCounts(pollService, participantCounts) { newCounts ->
-                        participantCounts = newCounts
-                    }
-                    loadAllTimeRanges(pollService) { newRanges ->
-                        pollTimeRanges = newRanges
-                    }
-                    isRefreshing = false
+                    try { pollService.loadMyPolls() }
+                    finally { isRefreshing = false }
                 }
             },
             modifier = Modifier.padding(padding)
@@ -145,7 +128,7 @@ fun PollListView(
                     }
                 }
 
-                pollService.createdPolls.isEmpty() && pollService.joinedPolls.isEmpty() -> {
+                pollService.myPolls.isEmpty() && pollService.listLoadError == null -> {
                     EmptyPollsView(onCreatePoll = { handleCreatePoll() })
                 }
 
@@ -167,8 +150,8 @@ fun PollListView(
                             items(pollService.createdPolls) { poll ->
                                 PollRowView(
                                     poll = poll,
-                                    participantCount = participantCounts[poll.id] ?: 0,
-                                    timeRange = pollTimeRanges[poll.id],
+                                    participantCount = pollService.pollParticipantCounts[poll.id] ?: 0,
+                                    timeRange = pollService.pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) },
                                     pollService = pollService,
                                     isOwner = true
@@ -189,12 +172,28 @@ fun PollListView(
                             items(pollService.joinedPolls) { poll ->
                                 PollRowView(
                                     poll = poll,
-                                    participantCount = participantCounts[poll.id] ?: 0,
-                                    timeRange = pollTimeRanges[poll.id],
+                                    participantCount = pollService.pollParticipantCounts[poll.id] ?: 0,
+                                    timeRange = pollService.pollTimeRanges[poll.id],
                                     onClick = { onNavigateToPoll(poll.id) },
                                     pollService = pollService,
                                     isOwner = false
                                 )
+                            }
+                        }
+                        item {
+                            Column {
+                                pollService.listTotalCount?.let { Text("Loaded ${pollService.myPolls.size} of $it polls") }
+                                if (pollService.hasMorePolls) {
+                                    TextButton(onClick = { scope.launch { pollService.loadMorePolls() } },
+                                        enabled = !pollService.isLoadingMore && !pollService.isLoading) { Text("Load more") }
+                                }
+                                if (pollService.isLoadingMore) CircularProgressIndicator()
+                                pollService.listLoadError?.let { error ->
+                                    Text(error, color = MaterialTheme.colorScheme.error)
+                                    TextButton(onClick = { scope.launch {
+                                        pollService.retryPollLoad()
+                                    } }) { Text("Retry") }
+                                }
                             }
                         }
                     }
@@ -417,50 +416,4 @@ fun OwnerBadge() {
             color = Color(0xFF0D47A1)
         )
     }
-}
-
-// Helper function to load participant counts for all polls
-private suspend fun loadAllParticipantCounts(
-    pollService: PollService,
-    currentCounts: Map<String, Int>,
-    updateCounts: (Map<String, Int>) -> Unit
-) {
-    val allPolls = pollService.myPolls
-    val newCounts = mutableMapOf<String, Int>()
-
-    for (poll in allPolls) {
-        try {
-            val participants = pollService.loadParticipants(poll.id)
-            newCounts[poll.id] = participants.size
-        } catch (e: Exception) {
-            println("Failed to load participants for poll ${poll.id}: ${e.message}")
-            newCounts[poll.id] = currentCounts[poll.id] ?: 0
-        }
-    }
-
-    updateCounts(newCounts)
-}
-
-// Helper function to load time ranges for all polls
-private suspend fun loadAllTimeRanges(
-    pollService: PollService,
-    updateRanges: (Map<String, Pair<Instant, Instant>>) -> Unit
-) {
-    val allPolls = pollService.myPolls
-    val newRanges = mutableMapOf<String, Pair<Instant, Instant>>()
-
-    for (poll in allPolls) {
-        try {
-            val timeOptions = pollService.loadTimeOptions(poll.id)
-            if (timeOptions.isNotEmpty()) {
-                val earliest = timeOptions.first().startTime
-                val latest = timeOptions.last().startTime
-                newRanges[poll.id] = Pair(earliest, latest)
-            }
-        } catch (e: Exception) {
-            println("Failed to load time options for poll ${poll.id}: ${e.message}")
-        }
-    }
-
-    updateRanges(newRanges)
 }

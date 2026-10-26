@@ -19,14 +19,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 @Serializable
-private data class ParticipatedPollsResponse(
-    @SerialName("created_polls")
-    val createdPolls: List<Poll>,
-    @SerialName("joined_polls")
-    val joinedPolls: List<Poll>
-)
-
-@Serializable
 private data class JoinPollResult(val participant: PollParticipant, val created: Boolean)
 
 interface PollSessionIdentity {
@@ -60,6 +52,21 @@ class PollService(
     var isLoading by mutableStateOf(false)
         private set
 
+    var isLoadingMore by mutableStateOf(false)
+        private set
+    var listLoadError by mutableStateOf<String?>(null)
+        private set
+    var listTotalCount by mutableStateOf<Int?>(null)
+        private set
+    private var nextListCursor by mutableStateOf<String?>(null)
+    val hasMorePolls: Boolean get() = nextListCursor != null
+    private var listCursors = emptySet<String>()
+    private var retryLoadsMore = false
+    var pollParticipantCounts by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+    var pollTimeRanges by mutableStateOf<Map<String, Pair<Instant, Instant>>>(emptyMap())
+        private set
+
     private var creationRevision = 0L
     private var pollStateAccountKey: String? = null
 
@@ -73,6 +80,14 @@ class PollService(
         createdPolls = emptyList()
         joinedPolls = emptyList()
         isLoading = false
+        isLoadingMore = false
+        listLoadError = null
+        listTotalCount = null
+        nextListCursor = null
+        listCursors = emptySet()
+        retryLoadsMore = false
+        pollParticipantCounts = emptyMap()
+        pollTimeRanges = emptyMap()
     }
 
     private suspend fun <T> withSession(action: suspend () -> T): T {
@@ -115,34 +130,92 @@ class PollService(
 
     // MARK: - Load Polls
 
-    suspend fun loadMyPolls() {
-        selectPollAccount()
-        if (authService.pollUserId == null) return
+    suspend fun loadMyPolls() = loadPollPage(refresh = true)
 
+    suspend fun loadMorePolls() = loadPollPage(refresh = false)
+
+    suspend fun retryPollLoad() = loadPollPage(refresh = !retryLoadsMore)
+
+    private suspend fun loadPollPage(refresh: Boolean) {
+        selectPollAccount()
+        val userId = authService.pollUserId ?: return
+        if (!refresh && (isLoading || isLoadingMore || nextListCursor == null)) return
+        val cursor = if (refresh) null else nextListCursor
         val accountKey = creationAccountKey
         val revision = ++creationRevision
-        val requestIdentity = AccountRequestIdentity(accountKey, authService.pollAccessToken)
-        isLoading = true
+        val identity = AccountRequestIdentity(accountKey, authService.pollAccessToken)
+        if (refresh) {
+            isLoading = true
+            isLoadingMore = false
+        } else isLoadingMore = true
+        listLoadError = null
         try {
-            val response = kotlinx.coroutines.withContext(requestIdentity) {
-                listTransport?.invoke()?.let { ParticipatedPollsResponse(it.first, it.second) }
-                    ?: accountRpc("get_user_participated_polls", buildJsonObject { }).decodeAs<ParticipatedPollsResponse>()
+            val page = kotlinx.coroutines.withContext(identity) {
+                listTransport?.invoke()?.let { (created, joined) ->
+                    PollSummaryPage(created.map { PollSummaryRow(it, "owner", 0, 0, null, null) } +
+                        joined.map { PollSummaryRow(it, "member", 0, 0, null, null) }, false, null, created.size + joined.size)
+                } ?: accountRpc("list_poll_summaries", buildJsonObject {
+                    put("page_size", 50)
+                    cursor?.let { put("page_cursor", it) }
+                }).decodeAs<PollSummaryPage>()
             }
-
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (creationAccountKey != accountKey || creationRevision != revision) return
-            createdPolls = response.createdPolls
-            joinedPolls = response.joinedPolls
-            myPolls = createdPolls + joinedPolls
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            println("Failed to load polls: ${e.message}")
+            page.validate(userId, refresh, if (refresh) emptySet() else listCursors)
+            val old = if (refresh) emptyList() else myPolls
+            if (old.map { it.id }.toSet().intersect(page.items.map { it.poll.id }.toSet()).isNotEmpty()) throw IncompletePollRead()
+            myPolls = old + page.items.map { it.poll }
+            createdPolls = myPolls.filter { it.creatorId == userId }
+            joinedPolls = myPolls.filter { it.creatorId != userId }
+            listTotalCount = page.totalCount
+            nextListCursor = page.nextCursor
+            if (refresh) listCursors = emptySet()
+            page.nextCursor?.let { listCursors = listCursors + it }
+            pollParticipantCounts = (if (refresh) emptyMap() else pollParticipantCounts) + page.items.associate { it.poll.id to it.participantCount }
+            pollTimeRanges = (if (refresh) emptyMap() else pollTimeRanges) + page.items.mapNotNull {
+                val start = it.earliestStart; val end = it.latestStart
+                if (start != null && end != null) it.poll.id to (start to end) else null
+            }
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
             if (creationAccountKey != accountKey || creationRevision != revision) return
-            createdPolls = emptyList()
-            joinedPolls = emptyList()
-            myPolls = emptyList()
+            retryLoadsMore = !refresh
+            listLoadError = "Polls could not be loaded completely. Please retry."
         } finally {
-            if (creationAccountKey == accountKey && creationRevision == revision) isLoading = false
+            if (creationAccountKey == accountKey && creationRevision == revision) {
+                isLoading = false
+                isLoadingMore = false
+            }
         }
+    }
+
+    /** Publish only after bounded metadata and the full response traversal pass validation. */
+    suspend fun loadPollDetail(pollId: String): PollDetail = withSession {
+        val header = accountRpc("get_poll_detail", buildJsonObject { put("poll_uuid", pollId) }).decodeAs<PollDetailPage>()
+        header.validate(pollId)
+        var cursor: String? = null
+        val cursors = mutableSetOf<String>()
+        val rows = mutableListOf<AvailabilityResponse>()
+        var expected: Int? = null
+        do {
+            val page = accountRpc("list_poll_responses", buildJsonObject {
+                put("poll_uuid", pollId)
+                put("page_size", 500)
+                cursor?.let { put("page_cursor", it) }
+            }).decodeAs<PollResponsePage>()
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            page.validate(cursors)
+            if (cursor == null) expected = page.totalCount
+            val total = expected ?: throw IncompletePollRead()
+            if (total < 0 || total > header.participants.size * header.timeOptions.size) throw IncompletePollRead()
+            rows += page.items
+            if (rows.size > total || (page.hasMore && rows.size >= total)) throw IncompletePollRead()
+            cursor = page.nextCursor
+            cursor?.let { cursors.add(it) }
+        } while (cursor != null)
+        if (rows.size != expected) throw IncompletePollRead()
+        header.validateResponses(rows)
+        PollDetail(header.poll, header.timeOptions, header.participants, rows)
     }
 
     suspend fun loadPoll(id: String): Poll? = withSession {
@@ -199,7 +272,16 @@ class PollService(
             && response.timeOptions.all { it.pollId == response.poll.id }) { "Creation returned an invalid poll or options." }
         // Install only the authoritative result, once even after a lost reply/replay.
         creationRevision += 1
+        if (isLoading && listTotalCount == null) {
+            retryLoadsMore = false
+            listLoadError = "Refresh to load your poll history."
+        }
         isLoading = false
+        isLoadingMore = false
+        if (myPolls.none { it.id == response.poll.id }) listTotalCount = listTotalCount?.plus(1)
+        pollParticipantCounts = pollParticipantCounts + (response.poll.id to 0)
+        val starts = response.timeOptions.map { it.startTime }
+        pollTimeRanges = pollTimeRanges + (response.poll.id to (starts.min() to starts.max()))
         createdPolls = listOf(response.poll) + createdPolls.filterNot { it.id == response.poll.id }
         myPolls = listOf(response.poll) + myPolls.filterNot { it.id == response.poll.id }
         return@withSession response

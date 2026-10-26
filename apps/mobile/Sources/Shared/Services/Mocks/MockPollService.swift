@@ -7,6 +7,13 @@ public final class MockPollService: PollServiceProtocol {
     public var myPolls: [Poll]
     public var createdPolls: [Poll]
     public var joinedPolls: [Poll]
+    public var isLoadingMore = false
+    public var hasMorePolls = false
+    public var listTotalCount: Int? { myPolls.count }
+    public var listLoadError: String?
+    public var pollDetailErrors: [UUID: String] = [:]
+    public func loadMorePolls() async {}
+    public func retryPollLoad() async {}
     public var isLoading: Bool
 
     // Backing data returned by load methods

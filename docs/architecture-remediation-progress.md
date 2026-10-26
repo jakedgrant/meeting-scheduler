@@ -2,6 +2,12 @@
 
 Updated October 25, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F19/F18 native bounded reads continuation, October 25
+
+Started from freshly fetched main `d8cc294`, with #72, #73 and #74 in its ancestry. Branch `codex/f19-native-bounded-reads` adopts the existing F19 read RPCs on iOS and Android. Each list requests one combined page of 50 summaries, shows the total and loads more on demand. Server summary counts/ranges replace iOS's row-capped batches and Android's per-poll enrichment. Both native detail and response screens traverse response pages and validate completeness before publication; iOS saves detail only after validation. Partial list refreshes preserve unloaded cached details, and page work retains the session and request fences.
+
+Native checks, scoped review and source evidence are recorded in [the continuation evidence](architecture-remediation-evidence-2026-10-25/f19-native/README.md). This completes the native adapters in F19 step 3 and F18's native request-amplification work. Guest paging, legacy RPC retirement, query-plan/payload measurement and F20 remain outstanding. No merge, hosted deployment or provider configuration is part of this continuation.
+
 ## F19 bounded reads, October 25
 
 Started from main at `1cb2001`, which contains the merged #72. F21 was then in PR #73, and F16's all-day policy depends on F21's date contract, so this delivery starts the F19 → F18 → F20 chain instead. The branch was later merged with main at `da5fa3a` (#73 merged); F21's migration `20261025021513` orders before this one. One agent did the work directly, with no subagents.
@@ -10,7 +16,7 @@ Additive migration `20261025062518_bounded_read_apis.sql`, created with the Supa
 
 Local results: all **152** in-process database tests pass (10 new), plus **5** new and **137** existing web tests. Web check shows 0 errors and 5 pre-existing warnings. Mutation checks confirmed that the new suites catch an inclusive keyset comparison, millisecond cursor precision, and a missing web total check. No simulator, emulator, local server or hosted resource was used. The PostgreSQL concurrency suites did not run because this delivery changes no write path. After merging main at `da5fa3a`, the combined tree passes all **159** database tests and **151** web tests (including F21's), with web check (0 errors) and build.
 
-Still open: iOS/Android readers, guest-detail response paging, retiring `get_user_participated_polls`, and representative query-plan/payload measurement. F20 remains queued behind this. No merge, deployment or hosted change is authorized.
+At the initial #74 delivery, native readers were still open; the continuation above implements them. Still open: guest-detail response paging, retiring `get_user_participated_polls`, and representative query-plan/payload measurement. F20 remains queued behind this. No merge, deployment or hosted change is authorized.
 
 ## F21 date/time contract delivery, October 24
 

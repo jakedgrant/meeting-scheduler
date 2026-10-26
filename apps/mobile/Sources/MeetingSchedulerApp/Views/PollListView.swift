@@ -37,14 +37,8 @@ struct PollListView: View {
             Group {
                 if pollService.isLoading && pollService.createdPolls.isEmpty && pollService.joinedPolls.isEmpty {
                     ProgressView("Loading polls...")
-                } else if pollService.createdPolls.isEmpty && pollService.joinedPolls.isEmpty {
+                } else if pollService.myPolls.isEmpty && pollService.listLoadError == nil {
                     emptyState
-                } else if filteredPolls.isEmpty {
-                    ContentUnavailableView {
-                        Label("No \(selectedFilter.rawValue) Polls", systemImage: "calendar")
-                    } description: {
-                        Text("There are no polls in this category. Tap \(Image(systemName: "line.3.horizontal.decrease.circle")) to change categories.")
-                    }
                 } else {
                     pollList
                 }
@@ -118,7 +112,7 @@ struct PollListView: View {
 
     private var filteredPolls: [Poll] {
         let now = Date()
-        let currentUserId = AuthService.shared.currentUserId
+        let currentUserId = authService.currentUserId
         let allPolls = pollService.myPolls
 
         let filtered: [Poll]
@@ -161,8 +155,11 @@ struct PollListView: View {
 
     private var pollList: some View {
         List {
+            if filteredPolls.isEmpty && !pollService.myPolls.isEmpty {
+                ContentUnavailableView("No matches in loaded polls", systemImage: "calendar")
+            }
             ForEach(filteredPolls) { poll in
-                let isOwner = poll.creatorId == AuthService.shared.currentUserId
+                let isOwner = poll.creatorId == authService.currentUserId
                 NavigationLink(destination: PollDetailView(pollId: poll.id)) {
                     PollRowView(
                         poll: poll,
@@ -170,6 +167,26 @@ struct PollListView: View {
                         isOwner: isOwner,
                         timeRange: pollService.pollTimeRanges[poll.id]
                     )
+                }
+            }
+            Section {
+                if let total = pollService.listTotalCount {
+                    Text("Loaded \(pollService.myPolls.count) of \(total) polls")
+                        .foregroundStyle(.secondary)
+                }
+                if pollService.hasMorePolls {
+                    Text("Filters apply to loaded polls.").font(.caption).foregroundStyle(.secondary)
+                    Button("Load more") { Task { await pollService.loadMorePolls() } }
+                        .disabled(pollService.isLoading || pollService.isLoadingMore)
+                }
+                if pollService.isLoadingMore { ProgressView() }
+                if let error = pollService.listLoadError {
+                    Text(error).foregroundStyle(.red)
+                    Button("Retry") {
+                        Task {
+                            await pollService.retryPollLoad()
+                        }
+                    }
                 }
             }
         }
