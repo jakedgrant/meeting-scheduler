@@ -4,28 +4,38 @@ import Synchronization
 import XCTest
 @testable import Shared
 
-// Every test uses its own URL host and locked transport state; no network or shared session.
+// Each host has its own fixture. NSLock protects all mutable transport state,
+// including the pending reference to a Foundation callback object. release removes that
+// object once under the lock and delivers callbacks after unlocking.
 private final class ReadTransport: @unchecked Sendable {
     enum Reply { case json(Data), rejected(Int, Data), failure, deferred(XCTestExpectation) }
-    struct State {
-        var replies: [Reply] = []
-        var requests: [URLRequest] = []
-        var pending: ReadURLProtocol?
+    private let lock = NSLock()
+    private var replies: [Reply] = []
+    private var capturedRequests: [URLRequest] = []
+    private var pending: ReadURLProtocol?
+
+    func enqueue(_ replies: [Reply]) { lock.withLock { self.replies += replies } }
+    var requests: [URLRequest] { lock.withLock { capturedRequests } }
+
+    func nextReply(for request: URLRequest) -> Reply {
+        lock.withLock {
+            capturedRequests.append(request)
+            return replies.isEmpty ? .failure : replies.removeFirst()
+        }
     }
-    let state = Mutex(State())
-    func enqueue(_ replies: [Reply]) { state.withLock { $0.replies += replies } }
-    var requests: [URLRequest] { state.withLock { $0.requests } }
+
+    func hold(_ request: ReadURLProtocol) { lock.withLock { pending = request } }
+
     func release(_ data: Data) {
-        let pending = state.withLock { value -> ReadURLProtocol? in
-            defer { value.pending = nil }
-            return value.pending
+        let pending = lock.withLock {
+            defer { self.pending = nil }
+            return self.pending
         }
         pending?.reply(data)
     }
 }
 
-// No mutable subclass state; the registry and pending requests are protected by Mutex.
-private final class ReadURLProtocol: URLProtocol, @unchecked Sendable {
+private final class ReadURLProtocol: URLProtocol {
     static let transports = Mutex<[String: ReadTransport]>([:])
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -44,16 +54,13 @@ private final class ReadURLProtocol: URLProtocol, @unchecked Sendable {
             }
             captured.httpBody = data
         }
-        let reply = transport.state.withLock { state -> ReadTransport.Reply in
-            state.requests.append(captured)
-            return state.replies.isEmpty ? .failure : state.replies.removeFirst()
-        }
+        let reply = transport.nextReply(for: captured)
         switch reply {
         case .json(let data): self.reply(data)
         case .rejected(let status, let data): self.reply(data, status: status)
         case .failure: client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
         case .deferred(let ready):
-            transport.state.withLock { $0.pending = self }
+            transport.hold(self)
             ready.fulfill()
         }
     }

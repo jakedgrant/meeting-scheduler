@@ -4,7 +4,7 @@ Baseline: freshly fetched `origin/main` at `d8cc2946e9fcb5f1ff8660461cd39a435c42
 
 The [read contract](../../read-contracts.md) is implemented by both native list/detail adapters. One summary request loads the first 50 polls, with database counts/ranges and a total; later pages load on demand. Both detail and response screens use bounded metadata plus complete response traversal. These changes use the existing F19 RPCs and introduce no migration or dependency update.
 
-Source trees for the verified artifacts: `apps/mobile` `b4e35db6a03e8dcedaa9002a23f61ec4e799f59b`; `apps/android` `d9db2d7be72a825981df99ac6b0ef3bcacc2d2e1`. Supabase is unchanged at `89cc225b3f62fb5522968b91f888bc3ca972ec05`. [Extracted command results](verification.txt).
+Initial delivery source trees for the verified artifacts: `apps/mobile` `b4e35db6a03e8dcedaa9002a23f61ec4e799f59b`; `apps/android` `d9db2d7be72a825981df99ac6b0ef3bcacc2d2e1`. Supabase is unchanged at `89cc225b3f62fb5522968b91f888bc3ca972ec05`. [Extracted command results](verification.txt).
 
 ## Verification
 
@@ -31,11 +31,19 @@ The delivery used Apple Platform Swift/concurrency/testing/type-modeling guidanc
 
 Final scoped correctness and claim re-review found no remaining actionable findings. The review used source inspection and the coordinator’s reported final check results; hosted execution and UI journeys remain pending. Passing tests are bounded evidence, not a claim of a transactionally consistent multi-page snapshot.
 
+## CI fixture correction, October 26
+
+The initial iOS CI run failed before tests on Xcode 26.6 / Swift 6.3.3: storing `ReadURLProtocol` in `Mutex` state triggered an `inout sending` diagnostic. Its inherited Foundation Sendable conformance is unavailable; declaring the subclass `@unchecked Sendable` did not make that transfer valid. [Failed run](https://github.com/jakedgrant/meeting-scheduler/actions/runs/40258191938).
+
+`ReadTransport` now keeps its replies, captured requests and pending callback reference private behind `NSLock`. It removes the pending reference under the lock and delivers callbacks after unlocking. The subclass no longer declares Sendable; the host registry still uses `Mutex`. Existing readiness and completion barriers are unchanged. No application source, public contract, dependency or workflow changed.
+
+The corrected package build and all **141 iOS tests** pass locally, including all 15 transport cases. A read-only review found no actionable issue in this delta. Both installed local Xcode toolchains use Swift 6.4; the new PR CI run must establish Swift 6.3.3 compatibility. The fresh simulator `056F7014-4F80-433C-AC78-F682340DDA39` was shut down and deleted at 2026-10-26T06:36:36Z. The original shipping-source wrapper/Android/database results above remain unchanged; CI runs the complete required workflows against the updated head.
+
 ## Resources and limits
 
 Xcode 27.1 compiles the unchanged Swift 6.2 package (Swift 6 language mode), with iOS 26 deployment and the installed iOS 27.1 SDK. Derived data and a private copy of locked source packages are under `/private/tmp/f19-native-ios`. The task owns fresh iPhone 17 Pro / iOS 27.0 simulator `760B5F69-356B-481F-8723-BD45F88E8FCC`; it was shut down and deleted at 2026-10-26T02:10:12Z. No existing simulator was used.
 
-Android uses the existing JDK 21 and SDK read only, with copied Gradle cache `/private/tmp/f19-native-gradle` and the ignored CI placeholder Firebase configuration. Gradle uses `--no-daemon`. No Android emulator, device, provider, hosted database or application server was used. The SDK emits existing deprecation diagnostics; Xcode also warns about the URLProtocol Sendable conformance in transport fixtures. The new fixture has no mutable subclass state and protects its registry and queued request state with `Mutex`.
+Android uses the existing JDK 21 and SDK read only, with copied Gradle cache `/private/tmp/f19-native-gradle` and the ignored CI placeholder Firebase configuration. Gradle uses `--no-daemon`. No Android emulator, device, provider, hosted database or application server was used. The SDK emits existing deprecation diagnostics; Xcode also warns about the URLProtocol Sendable conformance in transport fixtures. The fixture has no mutable subclass state. Its registry uses `Mutex`; the CI correction below protects its queued request state and pending callback reference with `NSLock`.
 
 The database check uses in-process PGlite; it does not establish deployed grants, gateway behavior or query performance. No write path changes, so the PostgreSQL lock-race suites were not repeated. No backend, web, provider or hosted configuration changed.
 
