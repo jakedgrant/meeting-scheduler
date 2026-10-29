@@ -2,7 +2,7 @@ import { writable, get } from 'svelte/store'
 import { supabase, type Poll, type PollTimeOption, type PollParticipant, type AvailabilityResponse } from '$lib/supabase'
 import { user } from './auth'
 import { captureSession } from '$lib/session-scope'
-import type { RealtimeChannel } from '@supabase/supabase-js'
+import { startPollRefresh } from '$lib/poll-refresh'
 import {
   GUEST_ACCESS_LOST_MESSAGE,
   browserStorage,
@@ -54,10 +54,13 @@ export const guestNotice = writable<string | null>(null)
 
 export const currentAvailability = writable<AvailabilitySnapshot | null>(null)
 export const availabilityLoadError = writable<string | null>(null)
+export const pollRefreshError = writable<string | null>(null)
 
 const guestCapabilities = new Map<string, GuestCapability>()
 const pendingGuestTokens = new Map<string, string>()
-let realtimeChannel: RealtimeChannel | null = null
+let pollUpdates: ReturnType<typeof startPollRefresh> | null = null
+// A background read begun before a local mutation cannot publish over it.
+let detailRevision = 0
 let loadGeneration = 0
 let requestedPollId: string | null = null
 let identityGeneration = 0
@@ -262,15 +265,14 @@ async function loadGuestPoll(pollId: string, guest: GuestCapability, generation:
   currentPollResponses.set(detail.responses)
   await loadCurrentAvailability(pollId, detail.participant_id, generation)
   if (generation !== loadGeneration) return true
-  // Guests receive no participant/response Realtime events; they refresh on load and after saves.
-  if (realtimeChannel) {
-    detachRealtime()
-  }
+  // Guest response paging is separate work; keep guest reads on load/after saves.
   return true
 }
 
 // Load a single poll with all related data
 export async function loadPoll(pollId: string) {
+  stopPollUpdates()
+  pollRefreshError.set(null)
   detailAbort.abort()
   detailAbort = new AbortController()
   const signal = AbortSignal.any([detailAbort.signal, captureSession().signal])
@@ -308,8 +310,8 @@ export async function loadPoll(pollId: string) {
     else currentAvailability.set(null)
     if (generation !== loadGeneration) return
 
-    // Set up realtime subscription
-    setupRealtimeForPoll(pollId)
+    // Refetch only this authorized poll; unrelated database activity does no work.
+    if (get(user)) pollUpdates = startPollRefresh(() => refreshPoll(pollId, generation))
 
   } catch (err) {
     if (generation !== loadGeneration) return
@@ -320,59 +322,39 @@ export async function loadPoll(pollId: string) {
   }
 }
 
-// Set up realtime updates for a poll
-function setupRealtimeForPoll(pollId: string) {
-  // Clean up existing subscription
-  detachRealtime()
-  const generation = loadGeneration
-  realtimeChannel = supabase
-    .channel(`poll-${pollId}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'poll_participants',
-        filter: `poll_id=eq.${pollId}`
-      },
-      () => {
-        // Reload participants when changes occur
-        if (generation === loadGeneration) void loadPollParticipants(pollId).catch(() => {})
-      }
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'availability_responses'
-      },
-      () => {
-        // Reload responses when changes occur
-        if (generation === loadGeneration) void loadPollResponses(pollId).catch(() => {})
-      }
-    )
-    .subscribe()
-}
-
-async function loadPollParticipants(pollId: string) {
-  const generation = loadGeneration
-  const { data, error } = await supabase
-    .from('poll_participants')
-    .select('*, profiles(display_name)')
-    .abortSignal(detailAbort.signal)
-    .eq('poll_id', pollId)
-
-  if (generation === loadGeneration && get(currentPoll)?.id === pollId && !error && data) {
-    currentPollParticipants.set(data as PollParticipant[])
-  }
-}
-
-async function loadPollResponses(pollId: string) {
-  const generation = loadGeneration
-  const responses = await readPollResponses(pollId, detailAbort.signal)
-  if (generation === loadGeneration && get(currentPoll)?.id === pollId) {
+// Background reads publish only after every collection and the member snapshot
+// are complete. The editor keeps dirty drafts at their original save version.
+async function refreshPoll(pollId: string, generation: number) {
+  const revision = detailRevision
+  const isCurrent = () => generation === loadGeneration && revision === detailRevision
+  const signal = AbortSignal.any([detailAbort.signal, captureSession().signal])
+  try {
+    const { data, error } = await sessionRpc('get_poll_detail', { poll_uuid: pollId }, signal)
+    if (!isCurrent()) return
+    if (error) throw error
+    const detail = checkedDetail(data, pollId)
+    const responses = await readPollResponses(pollId, signal)
+    if (!isCurrent()) return
+    const participant = detail.participants.find(row => row.user_id === get(user)?.id)
+    const snapshot = participant ? await loadAvailability(pollId, participant.id) : null
+    if (!isCurrent()) return
+    currentPoll.set(detail.poll)
+    // Republishing identical options would repeat the page's calendar/provider check.
+    if (JSON.stringify(get(currentPollTimeOptions)) !== JSON.stringify(detail.time_options)) {
+      currentPollTimeOptions.set(detail.time_options)
+    }
+    currentPollParticipants.set(detail.participants)
     currentPollResponses.set(responses)
+    currentAvailability.set(snapshot)
+    availabilityLoadError.set(null)
+    pollRefreshError.set(null)
+  } catch (error) {
+    if (!isCurrent()) return
+    if ((error as { code?: string })?.code === '42501') {
+      cleanupPollRealtime()
+      return
+    }
+    pollRefreshError.set('Could not refresh this poll. Displayed results may be out of date. Retry before responding.')
   }
 }
 
@@ -441,6 +423,7 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
 
 // Update poll status
 export async function updatePollStatus(pollId: string, status: Poll['status']) {
+  detailRevision++
   const identity = identityGeneration
   const generation = loadGeneration
   const { error } = await supabase
@@ -456,11 +439,13 @@ export async function updatePollStatus(pollId: string, status: Poll['status']) {
   }
 
   // Update local state
+  detailRevision++
   currentPoll.update(p => p ? { ...p, status } : null)
 }
 
 // Finalization returns the authoritative poll row and closes the poll atomically.
 export async function setSelectedFinalDate(pollId: string, timeOptionId: string) {
+  detailRevision++
   const identity = identityGeneration
   const generation = loadGeneration
   const { data, error } = await sessionRpc('finalize_poll', {
@@ -468,6 +453,7 @@ export async function setSelectedFinalDate(pollId: string, timeOptionId: string)
   })
   if (identity !== identityGeneration || generation !== loadGeneration) return
   if (error) throw error
+  detailRevision++
   if (get(currentPoll)?.id === pollId) currentPoll.set(data as Poll)
 }
 
@@ -556,6 +542,7 @@ function checkedSnapshot(data: unknown, pollId: string, participantId: string): 
 }
 
 function applyAvailability(snapshot: AvailabilitySnapshot) {
+  detailRevision++
   currentAvailability.set(snapshot)
   currentPollParticipants.update(participants => participants.map(participant =>
     participant.id === snapshot.participant_id ? { ...participant, comment: snapshot.comment } : participant
@@ -581,6 +568,7 @@ async function loadCurrentAvailability(pollId: string, participantId: string, ge
 
 // The complete draft and comment commit together. Never apply optimistic rows.
 export async function saveAvailability(save: AvailabilitySave): Promise<AvailabilitySnapshot> {
+  detailRevision++
   const identity = identityGeneration
   const generation = loadGeneration
   const requestIdentity = availabilityIdentity(save.pollId, save.participantId)
@@ -600,14 +588,9 @@ export async function saveAvailability(save: AvailabilitySave): Promise<Availabi
   return snapshot
 }
 
-function detachRealtime() {
-  const channel = realtimeChannel
-  realtimeChannel = null
-  if (channel) {
-    // Local state invalidates synchronously. SDK work waits for an auth callback
-    // to release its lock and always removes only the captured old channel.
-    setTimeout(() => { void Promise.resolve(supabase.removeChannel(channel)).catch(() => {}) }, 0)
-  }
+function stopPollUpdates() {
+  pollUpdates?.stop()
+  pollUpdates = null
 }
 
 /** A previous route's unmount cannot clear a newer route's poll state. */
@@ -616,19 +599,18 @@ export function ownPollDetail() {
   cleanupPollRealtime()
   return {
     load: (pollId: string) => owner === detailOwner ? loadPoll(pollId) : Promise.resolve(),
+    refresh() { if (owner === detailOwner) pollUpdates?.refresh() },
     dispose() { if (owner === detailOwner) { detailOwner++; cleanupPollRealtime() } }
   }
 }
 
-// Clean up realtime subscription
+// Retain the cleanup API used by route/session owners; updates now use bounded refetches.
 export function cleanupPollRealtime() {
   detailAbort.abort()
   detailAbort = new AbortController()
   loadGeneration++
   requestedPollId = null
-  if (realtimeChannel) {
-    detachRealtime()
-  }
+  stopPollUpdates()
   currentPoll.set(null)
   currentPollTimeOptions.set([])
   currentPollParticipants.set([])
@@ -637,5 +619,6 @@ export function cleanupPollRealtime() {
   guestNotice.set(null)
   currentAvailability.set(null)
   availabilityLoadError.set(null)
+  pollRefreshError.set(null)
   pollsLoading.set(false)
 }

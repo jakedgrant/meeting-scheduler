@@ -188,7 +188,7 @@ test('combined auth composition holds no dependent SDK work under lock; repeated
   assert.equal(actual.get(actual.billing.customerInfo), null);
   assert.equal(actual.get(actual.calendar.calendarAccountEmail), null);
   await flush();
-  assert.equal(state.removed.length, 1, 'owned realtime listener disposed outside lock');
+  assert.equal(state.channels.length, 0, 'poll detail opens no broad Realtime listener');
   assert.equal(actual.rc.getPurchases(), null);
 });
 

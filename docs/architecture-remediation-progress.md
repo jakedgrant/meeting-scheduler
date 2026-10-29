@@ -1,6 +1,16 @@
 # Architecture remediation progress
 
-Updated October 25, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+Updated October 29, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+
+## F20 scoped poll updates, October 29
+
+Started from fetched main `2c53482`, which contains merged #75 and the web/native F19/F18 readers. Branch `codex/f20-scoped-poll-updates` takes the next step in the F19 → F18 → F20 chain. One implementation agent owns the change.
+
+The web member detail page replaces its participant/response Realtime subscriptions with authorized refetching of the viewed poll. It waits 30 seconds after each completed refresh, pauses while hidden or offline, and coalesces focus/online/visibility events with a 250 ms delay. A refresh reads poll/options/participants, all response pages, and the member's versioned availability before publication. Local save/status/finalization results and route/account ownership fence obsolete reads. Dirty editor drafts retain their original expected version; clean editors accept the latest snapshot. Refresh failures retain the previous complete state, show a retry notice, and disable response controls until a successful read. Access denial clears visible detail and stops updates.
+
+This chooses the bounded-refetch alternative in F20. Updates are delayed by the refresh cadence and request duration; they are not push delivery. Guest refresh remains on load/after saves until guest response paging is implemented. No schema or authorization policy changes are needed. See [read contracts](read-contracts.md#web-live-updates-f20) for limits and tests.
+
+Local checks pass: **167 web tests**, web check (0 errors, 5 existing warnings), and production build. Simplification and independent architecture/reuse and prose reviews are complete. Independent correctness review is complete after the scoped retry repair and documentation correction. Review fixes keep manual retries on the retained-state scheduler and avoid republishing identical options, which would repeat calendar-provider checks. No simulator, emulator, server, database service, or hosted resource was used. Hosted multi-client verification and PR CI remain later gates; no merge or deployment is included.
 
 ## F19/F18 native bounded reads continuation, October 25
 
@@ -16,7 +26,7 @@ Additive migration `20261025062518_bounded_read_apis.sql`, created with the Supa
 
 Local results: all **152** in-process database tests pass (10 new), plus **5** new and **137** existing web tests. Web check shows 0 errors and 5 pre-existing warnings. Mutation checks confirmed that the new suites catch an inclusive keyset comparison, millisecond cursor precision, and a missing web total check. No simulator, emulator, local server or hosted resource was used. The PostgreSQL concurrency suites did not run because this delivery changes no write path. After merging main at `da5fa3a`, the combined tree passes all **159** database tests and **151** web tests (including F21's), with web check (0 errors) and build.
 
-At the initial #74 delivery, native readers were still open; the continuation above implements them. Still open: guest-detail response paging, retiring `get_user_participated_polls`, and representative query-plan/payload measurement. F20 remains queued behind this. No merge, deployment or hosted change is authorized.
+At the initial #74 delivery, native readers were still open; the continuation above implements them. Still open: guest-detail response paging, retiring `get_user_participated_polls`, and representative query-plan/payload measurement. F20 was queued at this checkpoint; the October 29 delivery above implements member detail refreshes. No merge, deployment or hosted change is authorized.
 
 ## F21 date/time contract delivery, October 24
 

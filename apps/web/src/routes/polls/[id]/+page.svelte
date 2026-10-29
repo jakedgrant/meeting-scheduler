@@ -12,6 +12,7 @@
 		currentGuest,
 		currentAvailability,
 		availabilityLoadError,
+		pollRefreshError,
 		guestNotice,
 		pollsLoading,
 		ownPollDetail,
@@ -56,7 +57,7 @@
 	const pollAcceptsResponses = $derived(
 		$currentPoll?.status === 'active' && (!$currentPoll.closes_at || new Date($currentPoll.closes_at).getTime() > now)
 	);
-	const canRespond = $derived(!!myParticipant && pollAcceptsResponses && !!$editor.snapshot && !$availabilityLoadError);
+	const canRespond = $derived(!!myParticipant && pollAcceptsResponses && !!$editor.snapshot && !$availabilityLoadError && !$pollRefreshError);
 
 	const MAX_COMMENT_LENGTH = 500;
 
@@ -119,7 +120,7 @@
 		}
 	});
 
-	// The editor ignores refreshes while dirty, so Realtime cannot replace a draft.
+	// The editor ignores refreshes while dirty, so background refreshes cannot replace a draft.
 	$effect(() => {
 		editor.setOwner($user?.id ?? ($currentGuest ? `guest:${$currentGuest.participantId}` : null));
 		editor.initialize($currentAvailability);
@@ -344,6 +345,10 @@
 			<a href="/polls">Back to Polls</a>
 		</div>
 	{:else}
+		{#if $pollRefreshError}
+			<p class="error" role="alert">{$pollRefreshError}</p>
+			<button class="btn secondary" onclick={() => detail?.refresh()}>Retry refreshing poll</button>
+		{/if}
 		<header>
 			<a href="/polls" class="back-link">&larr; Back to Polls</a>
 			<div class="poll-header">

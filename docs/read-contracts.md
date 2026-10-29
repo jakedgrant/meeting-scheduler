@@ -93,7 +93,7 @@ Clients must therefore:
 
 | Client | Status |
 | --- | --- |
-| Web | Adopted. The list asks for the first page of each section (two requests regardless of history size) and appends pages with **Load more**; it no longer makes two table requests per poll. Detail uses `get_poll_detail` plus full response traversal, and the realtime response reload uses the same traversal. A failed or incomplete read shows an error with a retry button, not an empty history. See `apps/web/src/lib/paged-read.ts` and `tests/web-paged-reads.test.mjs`. |
+| Web | Adopted. The list asks for the first page of each section (two requests regardless of history size) and appends pages with **Load more**; it no longer makes two table requests per poll. Detail uses `get_poll_detail` plus full response traversal, and background detail refreshes use the same traversal. Failed or incomplete list reads and background detail refreshes show an error with a retry action. See `apps/web/src/lib/paged-read.ts` and `tests/web-paged-reads.test.mjs`. |
 | iOS | Adopted in the native continuation. The list reads one combined summary page (50 polls), exposes the current total and **Load more**, and uses summary counts/ranges directly. Filters apply to loaded polls. Both detail and response screens consume validated `get_poll_detail` metadata and traverse response pages before caching or displaying them. |
 | Android | Adopted in the native continuation. One combined summary page populates both list sections, with the total and **Load more**. No per-poll enrichment runs. Detail and response screens use `get_poll_detail` and validated response traversal. |
 
@@ -103,10 +103,22 @@ The native adapters reject mismatched metadata counts, duplicate response IDs/pa
 
 On iOS a partial list replaces only cached list membership. It does not delete unloaded details. Only an authoritative, complete first page reconciles deletion across the cache. A full traversal is not a database snapshot, so reaching the last page does not authorize deleting details for polls absent from that traversal. Transport failures retain the prior complete detail fallback; an invalid or incomplete payload shows a retry error instead. Cursors and totals are not persisted: reopening offline shows cached polls with a load error and retry, rather than claiming the history is complete.
 
+## Web live updates (F20)
+
+Signed-in detail pages use bounded refetching instead of Postgres Changes subscriptions. There is no channel listening to other polls' response activity. Each refresh calls `get_poll_detail`, follows all `list_poll_responses` pages, and reads `get_availability` for the caller's participant if present. The page publishes the refresh after all reads validate. Each response traversal retains the completeness rules above; the reads do not constitute a database snapshot.
+
+The next refresh starts 30 seconds after the previous one completes. Hidden/offline pages suspend scheduled work; focus, online and visible transitions request a refresh after 250 ms. Bursts share one scheduled request, and events during a read request one follow-up. Only one refresh traversal runs at a time per detail owner. Disposal, account change and explicit reload stop the old schedule and abort its reads; generation checks also discard late replies when a transport ignores cancellation.
+
+For a member whose responses fit one page, a refresh makes three RPC calls; creators without a participant make two. More responses require one call per additional 1,000 rows, bounded by `readAllPages`' 100-page ceiling. Maximum supported options/participants remain those above. This bounds request frequency and traversal size; representative hosted latency/payload measurements remain outstanding. Closure and final-time changes appear on the next successful refresh, so this is delayed synchronization rather than push delivery.
+
+The existing availability editor accepts a refreshed snapshot only when clean. A dirty draft keeps its content and original expected version, so a concurrent remote save must still go through the explicit conflict/reload flow. Refresh failures keep the last complete state and show an out-of-date notice with a retry action. Manual retries use the same coalesced refresh path; another failure keeps the notice, data and reconnect recovery. Response controls remain disabled until a successful read. A `42501` access denial clears visible detail and stops the schedule. Local save, status and finalization mutations invalidate older background reads so they cannot replace the command result. Background reads publish time options only when their JSON contents change, avoiding repeated calendar checks for unchanged options.
+
+Guests retain load/after-save refreshes. Their unpaged detail RPC is not put on a timer. Retiring guest nested responses and measuring their replacement remain F19 follow-ups.
+
 ## Verification
 
 - `npm run test:reads:db` (also part of `npm run test:database`): migration replay with a legacy null `created_at`, grants, full traversal at several page sizes up to 100, including polls that share a microsecond timestamp, role filters, a poll created mid-traversal, 1,200 responses across pages of 400 and 500, cross-poll exclusion, invalid cursors and sizes, unrelated and missing callers, and the oversized-detail failure.
-- `npm run test:web:reads`: the bundled web store and list screen against a mocked transport. It checks request counts, load-more and its fencing across account changes, error display, 1,200-row response traversal, and rejection of mismatched totals or counts.
+- `npm run test:web:reads`: the bundled web store, list screen and refresh scheduler against a mocked transport and deterministic clock. F20 adds cadence, visibility/offline, focus/reconnect coalescing, full response traversal, dirty/clean editors, conflict versions, failures/recovery, local mutation races, access loss, and route/account/disposal cases. It checks request counts, load-more and its fencing across account changes, error display, 1,200-row response traversal, and rejection of mismatched totals or counts.
 
 Query plans and payload sizes have not been measured against representative hosted data. Do that before setting operating limits tighter or looser than the ones above.
 
@@ -117,4 +129,4 @@ Apply the migration with the other ordered migrations. `ALTER COLUMN created_at 
 ## Remaining work
 
 - Guest detail still returns all of a poll's responses in one value. A guest response-page variant would need its own capability check.
-- F20 realtime: the web participant reload still reads the table directly. That read is bounded by capacity, well under the row cap.
+- Hosted multi-client validation of the F20 cadence, reconnect and draft-conflict behavior remains a release check. Member background refreshes use the F19 RPCs; no participant table reload remains.
