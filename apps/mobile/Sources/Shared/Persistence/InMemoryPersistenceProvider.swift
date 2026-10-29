@@ -30,6 +30,11 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
         try saveListedPolls(polls)
     }
 
+    public func replaceListedPollsPage(_ polls: [Poll]) throws {
+        listedPollIds = []
+        try saveListedPolls(polls)
+    }
+
     public func saveListedPolls(_ polls: [Poll]) throws {
         try savePolls(polls)
         listedPollIds.formUnion(polls.map(\.id))

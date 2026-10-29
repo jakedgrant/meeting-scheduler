@@ -94,10 +94,14 @@ Clients must therefore:
 | Client | Status |
 | --- | --- |
 | Web | Adopted. The list asks for the first page of each section (two requests regardless of history size) and appends pages with **Load more**; it no longer makes two table requests per poll. Detail uses `get_poll_detail` plus full response traversal, and the realtime response reload uses the same traversal. A failed or incomplete read shows an error with a retry button, not an empty history. See `apps/web/src/lib/paged-read.ts` and `tests/web-paged-reads.test.mjs`. |
-| iOS | Not yet. It still calls `get_user_participated_polls` and batches count queries that can hit the row cap. |
-| Android | Not yet. It still calls `get_user_participated_polls` and enriches each poll separately. |
+| iOS | Adopted in the native continuation. The list reads one combined summary page (50 polls), exposes the current total and **Load more**, and uses summary counts/ranges directly. Filters apply to loaded polls. Both detail and response screens consume validated `get_poll_detail` metadata and traverse response pages before caching or displaying them. |
+| Android | Adopted in the native continuation. One combined summary page populates both list sections, with the total and **Load more**. No per-poll enrichment runs. Detail and response screens use `get_poll_detail` and validated response traversal. |
 
-`get_user_participated_polls` and `get_poll_with_summary` stay, with their F02 authorization, until the native readers move. Retire them in a later migration once no shipped client calls them.
+`get_user_participated_polls` and `get_poll_with_summary` stay, with their F02 authorization, for compatibility with older builds. Current web/iOS/Android list and detail screens no longer call them. Retire them in a later migration once no shipped client calls them.
+
+The native adapters reject mismatched metadata counts, duplicate response IDs/pairs, foreign participant/option references, missing first-page response totals, inconsistent continuation flags, and repeated cursors. They check the final response count against the first total. A failed traversal does not publish its partial rows. Account/request generations prevent late reads from replacing another account or a newer refresh. Transport tests cover these boundaries with intercepted SDK requests; hosted execution remains a separate check.
+
+On iOS a partial list replaces only cached list membership. It does not delete unloaded details. Only an authoritative, complete first page reconciles deletion across the cache. A full traversal is not a database snapshot, so reaching the last page does not authorize deleting details for polls absent from that traversal. Transport failures retain the prior complete detail fallback; an invalid or incomplete payload shows a retry error instead. Cursors and totals are not persisted: reopening offline shows cached polls with a load error and retry, rather than claiming the history is complete.
 
 ## Verification
 
@@ -108,10 +112,9 @@ Query plans and payload sizes have not been measured against representative host
 
 ## Rollout
 
-Apply the migration with the other ordered migrations. `ALTER COLUMN created_at SET NOT NULL` scans `polls` under a brief exclusive lock, and the new index build blocks writes to `polls` while it runs. Both are short for an unreleased app. Ship the web client with or after the migration, because it calls the new RPCs directly.
+Apply the migration with the other ordered migrations. `ALTER COLUMN created_at SET NOT NULL` scans `polls` under a brief exclusive lock, and the new index build blocks writes to `polls` while it runs. Both are short for an unreleased app. Ship web and native clients with or after the migration, because it calls the new RPCs directly.
 
 ## Remaining work
 
-- iOS and Android list/detail readers (F19 step 3), then F18's native list adapters, which can use the summary rows directly.
 - Guest detail still returns all of a poll's responses in one value. A guest response-page variant would need its own capability check.
 - F20 realtime: the web participant reload still reads the table directly. That read is bounded by capacity, well under the row cap.

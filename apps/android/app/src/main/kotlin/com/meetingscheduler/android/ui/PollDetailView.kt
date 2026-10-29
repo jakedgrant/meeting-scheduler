@@ -61,18 +61,20 @@ fun PollDetailView(
     onNavigateBack: () -> Unit
 ) {
     val accountKey = pollService.creationAccountKey
+    var detailError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
+    var loadRevision by remember(pollId, accountKey) { mutableStateOf(0) }
     var joinError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
     var isJoining by remember(pollId, accountKey) { mutableStateOf(false) }
     val userId = authService.currentUser?.id
-    var poll by remember(pollId, userId) { mutableStateOf<Poll?>(null) }
-    var timeOptions by remember(pollId, userId) { mutableStateOf<List<PollTimeOption>>(emptyList()) }
-    var participants by remember(pollId, userId) { mutableStateOf<List<PollParticipant>>(emptyList()) }
-    var responses by remember(pollId, userId) { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
-    var myParticipant by remember(pollId, userId) { mutableStateOf<PollParticipant?>(null) }
-    var localResponses by remember(pollId, userId) { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
-    var localComment by remember(pollId, userId) { mutableStateOf("") }
-    var commentError by remember(pollId, userId) { mutableStateOf("") }
-    var calendarConflicts by remember(pollId, userId) { mutableStateOf<Set<String>>(emptySet()) }
+    var poll by remember(pollId, accountKey) { mutableStateOf<Poll?>(null) }
+    var timeOptions by remember(pollId, accountKey) { mutableStateOf<List<PollTimeOption>>(emptyList()) }
+    var participants by remember(pollId, accountKey) { mutableStateOf<List<PollParticipant>>(emptyList()) }
+    var responses by remember(pollId, accountKey) { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
+    var myParticipant by remember(pollId, accountKey) { mutableStateOf<PollParticipant?>(null) }
+    var localResponses by remember(pollId, accountKey) { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
+    var localComment by remember(pollId, accountKey) { mutableStateOf("") }
+    var commentError by remember(pollId, accountKey) { mutableStateOf("") }
+    var calendarConflicts by remember(pollId, accountKey) { mutableStateOf<Set<String>>(emptySet()) }
 
     val recovery = remember(pollId, accountKey) { runCatching { pollService.availabilitySession(pollId) } }
     if (recovery.isFailure) {
@@ -88,12 +90,12 @@ fun PollDetailView(
     var hasVersionConflict by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
     var conflictSnapshot by remember(pollId, authService.currentUser?.id) { mutableStateOf<AvailabilitySnapshot?>(null) }
     val MAX_COMMENT_LENGTH = 500
-    var isLoading by remember(pollId, userId) { mutableStateOf(true) }
-    var isSaving by remember(pollId, userId) { mutableStateOf(false) }
-    var showClosePollDialog by remember(pollId, userId) { mutableStateOf(false) }
-    var showSelectFinalDateDialog by remember(pollId, userId) { mutableStateOf(false) }
-    var finalTimeOption by remember(pollId, userId) { mutableStateOf<PollTimeOption?>(null) }
-    var isSelectingFinalDate by remember(pollId, userId) { mutableStateOf(false) }
+    var isLoading by remember(pollId, accountKey) { mutableStateOf(true) }
+    var isSaving by remember(pollId, accountKey) { mutableStateOf(false) }
+    var showClosePollDialog by remember(pollId, accountKey) { mutableStateOf(false) }
+    var showSelectFinalDateDialog by remember(pollId, accountKey) { mutableStateOf(false) }
+    var finalTimeOption by remember(pollId, accountKey) { mutableStateOf<PollTimeOption?>(null) }
+    var isSelectingFinalDate by remember(pollId, accountKey) { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -146,24 +148,29 @@ fun PollDetailView(
         }
     }
 
-    LaunchedEffect(pollId, authService.currentUser?.id) {
+    LaunchedEffect(pollId, accountKey, loadRevision) {
         isLoading = true
         availabilityLoaded = false
         localResponses = emptyMap()
         localComment = ""
         myParticipant = null
-        poll = pollService.loadPoll(pollId)
+        poll = null; timeOptions = emptyList(); participants = emptyList(); responses = emptyList()
+        detailError = null
+        val detail = try {
+            pollService.loadPollDetail(pollId)
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            detailError = "This poll could not be loaded completely. Please retry."
+            isLoading = false
+            return@LaunchedEffect
+        }
+        poll = detail.poll
+        timeOptions = detail.timeOptions
+        participants = detail.participants
+        responses = detail.responses
+        myParticipant = participants.firstOrNull { it.userId == userId }
 
         if (poll != null) {
-            timeOptions = pollService.loadTimeOptions(pollId)
-            participants = pollService.loadParticipants(pollId)
-
-            authService.currentUser?.id?.let { userId ->
-                myParticipant = participants.firstOrNull { it.userId == userId }
-            }
-
-            responses = pollService.loadResponses(timeOptions.map { it.id })
-
             myParticipant?.let { participant ->
                 loadSavedAvailability()
             }
@@ -245,7 +252,10 @@ fun PollDetailView(
                     .padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Poll not found")
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(detailError ?: "Poll not found")
+                    TextButton(onClick = { loadRevision += 1 }) { Text("Retry") }
+                }
             }
         } else {
             LazyColumn(

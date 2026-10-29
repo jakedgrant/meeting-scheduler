@@ -116,7 +116,7 @@ class PollCreationSessionTest {
     @Test fun accountBCreateCannotRetainAccountAsLoadedLists() = runBlocking<Unit> {
         val identity = Identity()
         val service = PollService(identity, createTransport = { result.copy(poll = result.poll.copy(creatorId = identity.pollUserId!!)) },
-            listTransport = { listOf(result.poll) to listOf(result.poll.copy(id = "joined-A")) })
+            listTransport = { listOf(result.poll) to listOf(result.poll.copy(id = "joined-A", creatorId = "other-owner")) })
         service.loadMyPolls()
         assertEquals(2, service.myPolls.size)
         identity.pollUserId = "B"; identity.identityGeneration++

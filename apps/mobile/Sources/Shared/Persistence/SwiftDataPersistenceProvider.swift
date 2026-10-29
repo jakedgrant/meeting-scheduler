@@ -75,6 +75,16 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         }
     }
 
+    public func replaceListedPollsPage(_ polls: [Poll]) throws {
+        try modelContext.transaction {
+            reconcilingSnapshot = true
+            defer { reconcilingSnapshot = false }
+            for record in try modelContext.fetch(FetchDescriptor<PersistedPoll>()) { record.isListed = false }
+            try saveListedPolls(polls)
+            try modelContext.save()
+        }
+    }
+
     public func saveListedPolls(_ polls: [Poll]) throws {
         try savePolls(polls)
         for poll in polls {
