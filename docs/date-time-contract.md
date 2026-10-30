@@ -40,4 +40,4 @@ The fixtures cover Chicago spring-forward and fall-back weeks, year and leap-day
 
 ## Out of scope
 
-F16 owns calendar coverage: whether busy all-day events, secondary calendars and provider uncertainty count as conflicts. It should consume these all-day bounds. The polls list date range (F18) still shows start instants in the viewer's zone. Changing the creation zone is not offered in the UI; a poll uses the creating device's zone.
+[Calendar coverage](calendar-coverage.md) (F16) decides whether busy all-day events, secondary calendars and provider uncertainty count as conflicts, and matches device all-day events against these all-day bounds. The polls list date range (F18) still shows start instants in the viewer's zone. Changing the creation zone is not offered in the UI; a poll uses the creating device's zone.

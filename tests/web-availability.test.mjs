@@ -79,7 +79,7 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
         const contents = {
           'supabase': `export const supabase=${reference}.supabase;`,
           'stores/auth': `${prefix} export const user=writable(null);`,
-          'stores/calendar': `${prefix} export const calendarEnabled=writable(false),calendarConflicts=writable(new Set()),calendarStatusError=writable(null); export async function checkCalendarConflicts(){}`,
+          'stores/calendar': `${prefix} export const calendarEnabled=writable(false),calendarConflicts=writable(new Set()),calendarUnchecked=writable(new Set()),calendarCoverage=writable(null),calendarLoading=writable(false),calendarStatusError=writable(null); ${reference}.calendar={calendarEnabled,calendarConflicts,calendarUnchecked,calendarCoverage,calendarStatusError}; export async function checkCalendarConflicts(){}`,
           'availability-editor': `import {createAvailabilityEditor as real} from '${lib}/availability-editor.ts'; export const createAvailabilityEditor=commands=>${reference}.editor ?? real(commands);`,
           '$app/stores': `${prefix} export const page=writable({params:{id:'${pollId}'}});`,
           '$app/navigation': 'export function goto(){}'
@@ -299,6 +299,30 @@ test('account transition discards an in-flight save result and its editor state'
   assert.equal(actual.get(editor).comment, '');
 });
 
+
+test('calendar badges distinguish busy from unchecked options and name what was checked (F16)', async t => {
+  const { actual, state, primePage } = await fixture(t, { member: true });
+  const editor = actual.createAvailabilityEditor({ save: actual.saveAvailability, load: actual.loadAvailability });
+  editor.initialize(snapshot());
+  primePage(editor);
+  const calendar = state.calendar;
+  calendar.calendarEnabled.set(true);
+  calendar.calendarCoverage.set('primary calendar');
+  let html = actual.render(actual.Page).body;
+  assert.match(html, /Checked Google Calendar \(primary calendar\)\./);
+  assert.doesNotMatch(html, /Busy|Couldn't check|Retry calendar check/);
+  calendar.calendarCoverage.set(null);
+  calendar.calendarUnchecked.set(new Set([optionId]));
+  calendar.calendarStatusError.set('Google Calendar couldn\'t be checked.');
+  html = actual.render(actual.Page).body;
+  assert.match(html, /Couldn't check/);
+  assert.match(html, /Retry calendar check/);
+  assert.doesNotMatch(html, /Checked Google Calendar/);
+  calendar.calendarConflicts.set(new Set([optionId]));
+  html = actual.render(actual.Page).body;
+  assert.match(html, /Busy/);
+  assert.doesNotMatch(html, /class="calendar-badge unchecked"/);
+});
 
 test('closed/expired poll hides response controls and load failure offers a retry', async t => {
   const { actual, primePage } = await fixture(t, { member: true });

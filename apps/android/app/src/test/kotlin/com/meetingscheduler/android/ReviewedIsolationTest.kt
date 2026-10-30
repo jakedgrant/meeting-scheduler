@@ -308,7 +308,7 @@ class ReviewedIsolationTest {
                 calls++; assertEquals(listOf("Bearer ${jwt("A", "original")}"), request.headers.getAll(HttpHeaders.Authorization))
                 started.complete(Unit); reply.await()
                 if (fails) respond("{\"message\":\"old conflict failure\"}", HttpStatusCode.InternalServerError, headersOf(HttpHeaders.ContentType, "application/json"))
-                else respond("{\"success\":true,\"conflictingIds\":[\"option-A\"]}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                else respond("{\"success\":true,\"coverage\":\"primary\",\"conflictingIds\":[\"option-A\"]}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
             })
             shared.auth.setSessionStatus(SessionStatus.NotAuthenticated()); shared.auth.importSession(session("B", "SDK-B"), autoRefresh = false)
             val events = MutableSharedFlow<SessionStatus>(); val gateway = SupabaseAuthGateway(shared, Dispatchers.Unconfined)
@@ -317,12 +317,49 @@ class ReviewedIsolationTest {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
             })
-            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared, readDeviceConflicts = { emptySet() })
+            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared, readDeviceConflicts = { _, _ -> emptySet() })
             auth.onBoundary { calendar.resetSession() }; events.emit(SessionStatus.Authenticated(session("A", "original")))
-            val old = async { calendar.checkPollConflicts(listOf(PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp))) }
+            val old = async { calendar.checkPollConflicts(listOf(PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)), "UTC") }
             started.await(); events.emit(SessionStatus.Authenticated(session(replacement, "replacement"))); reply.complete(Unit)
-            assertTrue(old.await().isEmpty()); assertEquals(1, calls); assertNull(calendar.calendarError)
+            assertEquals(CalendarCheck.NONE, old.await()); assertEquals(1, calls); assertNull(calendar.calendarError)
             assertEquals("current@example.test", calendar.googleCalendarAccountEmail)
+            auth.dispose(); scope.cancel(); shared.close()
+        }
+    }
+
+    @Test(timeout = 15000) fun conflictCheckReportsFailedSourcesAsUncheckedInsteadOfConflictFree() = runBlocking {
+        val hour = kotlin.time.Duration.parse("1h")
+        val options = listOf(
+            PollTimeOption("device-busy", "poll-A", stamp, stamp + hour, createdAt = stamp),
+            PollTimeOption("google-busy", "poll-A", stamp + hour * 2, stamp + hour * 3, createdAt = stamp),
+            PollTimeOption("free", "poll-A", stamp + hour * 4, stamp + hour * 5, createdAt = stamp),
+        )
+        for (deviceFails in listOf(false, true)) for (google in listOf("primary", "error", "unrecognized-coverage")) {
+            val shared = client(MockEngine {
+                when (google) {
+                    "error" -> respond("{\"message\":\"provider unavailable\"}", HttpStatusCode.ServiceUnavailable, headersOf(HttpHeaders.ContentType, "application/json"))
+                    "unrecognized-coverage" -> respond("{\"success\":true,\"coverage\":\"all\",\"conflictingIds\":[]}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                    else -> respond("{\"success\":true,\"coverage\":\"primary\",\"conflictingIds\":[\"google-busy\",\"unknown-id\"]}", headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                }
+            })
+            shared.auth.setSessionStatus(SessionStatus.NotAuthenticated()); shared.auth.importSession(session("A", "original"), autoRefresh = false)
+            val events = MutableSharedFlow<SessionStatus>(); val gateway = SupabaseAuthGateway(shared, Dispatchers.Unconfined)
+            val scope = createApplicationScope(Dispatchers.Unconfined)
+            val auth = AuthService(scope, null, object : AuthGateway by gateway {
+                override val status = events
+                override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
+            })
+            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared,
+                readDeviceConflicts = { _, zone -> assertEquals("Pacific/Auckland", zone); if (deviceFails) error("permission revoked"); setOf("device-busy") })
+            auth.onBoundary { calendar.resetSession() }; events.emit(SessionStatus.Authenticated(session("A", "original")))
+            val check = calendar.checkPollConflicts(options, "Pacific/Auckland")
+            val googleChecked = google == "primary"
+            val busy = (if (deviceFails) emptySet() else setOf("device-busy")) + (if (googleChecked) setOf("google-busy") else emptySet())
+            assertEquals(busy, check.busy)
+            assertEquals(if (deviceFails || !googleChecked) setOf("device-busy", "google-busy", "free") - busy else emptySet(), check.unchecked)
+            assertEquals(listOfNotNull(CalendarSource.APPLE_CALENDAR.takeIf { !deviceFails }, CalendarSource.GOOGLE_CALENDAR.takeIf { googleChecked }), check.checkedSources)
+            assertEquals(listOfNotNull(CalendarSource.APPLE_CALENDAR.takeIf { deviceFails }, CalendarSource.GOOGLE_CALENDAR.takeIf { !googleChecked }), check.failedSources)
+            assertNull(calendar.calendarError)
             auth.dispose(); scope.cancel(); shared.close()
         }
     }
@@ -349,12 +386,12 @@ class ReviewedIsolationTest {
             })
             val gate = CompletableDeferred<Unit>(); val started = CompletableDeferred<Unit>()
             val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared,
-                readDeviceConflicts = { started.complete(Unit); gate.await(); if (fails) error("old device failure"); setOf("old-conflict") })
+                readDeviceConflicts = { _, _ -> started.complete(Unit); gate.await(); if (fails) error("old device failure"); setOf("old-conflict") })
             auth.onBoundary { calendar.resetSession() }
             events.emit(SessionStatus.Authenticated(session("A", "old-session")))
-            val pending = async { calendar.checkPollConflicts(listOf(PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp))) }
+            val pending = async { calendar.checkPollConflicts(listOf(PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)), "UTC") }
             started.await(); events.emit(SessionStatus.Authenticated(session(newAccount, "new-session")))
-            gate.complete(Unit); assertTrue(pending.await().isEmpty())
+            gate.complete(Unit); assertEquals(CalendarCheck.NONE, pending.await())
             assertEquals(0, backendCalls); assertNull(calendar.calendarError)
             assertTrue(calendar.appleCalendarEnabled); assertTrue(calendar.googleCalendarEnabled)
             auth.dispose(); scope.cancel(); shared.close()

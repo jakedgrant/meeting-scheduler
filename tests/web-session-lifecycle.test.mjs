@@ -715,9 +715,37 @@ for (const outcome of ['success', 'failure']) test(`old calendar disconnect ${ou
   await rejected;
   assert.equal(actual.get(actual.calendar.calendarLoading), true);
   assert.equal(actual.get(actual.calendar.calendarAccountEmail), accountB);
-  current.resolve({ data: { success: true, conflictingIds: ['B-option'] }, error: null });
+  current.resolve({ data: { success: true, coverage: 'primary', conflictingIds: ['B-option'] }, error: null });
   await conflicts;
   assert.deepEqual([...actual.get(actual.calendar.calendarConflicts)], ['B-option']);
+});
+
+test('a failed or unrecognized calendar check marks options unchecked until a retry succeeds (F16)', async t => {
+  const { actual, state, mount } = await fixture(t);
+  mount(); state.emit('SIGNED_IN', sessionFor(accountA)); await flush();
+  const options = [{ id: 'busy', start_time: '2026-11-01T12:00:00Z', end_time: '2026-11-01T13:00:00Z' }, { id: 'free', start_time: '2026-11-02T12:00:00Z', end_time: '2026-11-02T13:00:00Z' }];
+  const replies = [
+    { data: { success: true, coverage: 'primary', conflictingIds: ['busy'] }, error: null },
+    { data: null, error: Error('provider unavailable') },
+    { data: { success: true, coverage: 'all', conflictingIds: [] }, error: null },
+    { data: { success: true, conflictingIds: [] }, error: null },
+    { data: { success: true, coverage: 'primary', conflictingIds: [] }, error: null }
+  ];
+  state.invoke = name => name === 'check-calendar-conflicts' ? Promise.resolve(replies.shift()) : Promise.resolve({ data: status(state.account), error: null });
+  const read = () => ({ busy: [...actual.get(actual.calendar.calendarConflicts)], unchecked: [...actual.get(actual.calendar.calendarUnchecked)].sort(), coverage: actual.get(actual.calendar.calendarCoverage), error: actual.get(actual.calendar.calendarStatusError) });
+  await actual.calendar.checkCalendarConflicts(options);
+  assert.deepEqual(read(), { busy: ['busy'], unchecked: [], coverage: 'primary calendar', error: null });
+  for (let failure = 0; failure < 3; failure++) {
+    await actual.calendar.checkCalendarConflicts(options);
+    const after = read();
+    // The last known busy option stays; nothing is reported as conflict-free.
+    assert.deepEqual({ ...after, error: typeof after.error }, { busy: ['busy'], unchecked: ['busy', 'free'], coverage: null, error: 'string' });
+    assert.match(after.error, /Google Calendar couldn't be checked/);
+  }
+  await actual.calendar.checkCalendarConflicts(options);
+  assert.deepEqual(read(), { busy: [], unchecked: [], coverage: 'primary calendar', error: null });
+  await actual.calendar.checkCalendarConflicts([]);
+  assert.deepEqual(read(), { busy: [], unchecked: [], coverage: null, error: null });
 });
 
 for (const path of ['A-B', 'A-logout-A', 'A-B-A']) for (const outcome of ['success', 'failure']) test(`cancelled list/detail ${outcome} is fenced across ${path}`, async t => {

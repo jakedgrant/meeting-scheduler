@@ -22,7 +22,7 @@
 		saveAvailability,
 		loadAvailability
 	} from '$lib/stores/polls';
-	import { calendarEnabled, calendarConflicts, calendarStatusError, checkCalendarConflicts } from '$lib/stores/calendar';
+	import { calendarEnabled, calendarConflicts, calendarUnchecked, calendarCoverage, calendarLoading, calendarStatusError, checkCalendarConflicts } from '$lib/stores/calendar';
 	import type { AvailabilityStatus } from '$lib/supabase';
 	import { createAvailabilityEditor } from '$lib/availability-editor';
 	import { createPollPageSession } from '$lib/poll-page-session';
@@ -333,6 +333,11 @@
 <div class="poll-detail">
 	{#if $calendarStatusError}
 		<p role="status">{$calendarStatusError}</p>
+		{#if $calendarUnchecked.size > 0}
+			<button class="btn secondary" disabled={$calendarLoading} onclick={() => checkCalendarConflicts($currentPollTimeOptions)}>Retry calendar check</button>
+		{/if}
+	{:else if $calendarEnabled && $calendarCoverage}
+		<p class="calendar-coverage">Checked Google Calendar ({$calendarCoverage}).</p>
 	{/if}
 	{#if $guestNotice}
 		<p class="guest-notice" role="status">{$guestNotice}</p>
@@ -511,6 +516,7 @@
 						{@const stats = getResponsesForTimeOption(option.id)}
 						{@const myResponse = localResponses[option.id]?.status}
 						{@const hasCalendarConflict = $calendarConflicts.has(option.id)}
+						{@const calendarUncertain = !hasCalendarConflict && $calendarUnchecked.has(option.id)}
 
 						<div class="time-option-card">
 							<button
@@ -523,6 +529,8 @@
 									  <div class="date">{formatted.date}</div>
                     {#if hasCalendarConflict}
 										<span class="calendar-badge">📅 Busy</span>
+									  {:else if calendarUncertain}
+										<span class="calendar-badge unchecked">Couldn't check</span>
 									  {/if}
                   </div>
 									<div class="time">
@@ -930,6 +938,16 @@
 		padding: 0.25rem 0.5rem;
 		border-radius: 4px;
 		white-space: nowrap;
+	}
+
+	.calendar-badge.unchecked {
+		background: #e9ecef;
+		color: #495057;
+	}
+
+	.calendar-coverage {
+		color: #6c757d;
+		font-size: 0.875rem;
 	}
 
 	.time-info .time {

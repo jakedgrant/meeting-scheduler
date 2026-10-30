@@ -1,6 +1,14 @@
 # Architecture remediation progress
 
-Updated October 29, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+Updated October 30, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+
+## F16 calendar coverage, October 30
+
+Started from fetched main `7056f86`, which contains merged #73 (F21) and #76 (F20). Branch `claude/f16-calendar-coverage` takes the F16 step that was queued behind F21's all-day bounds. One agent did the work directly, with no subagents.
+
+The owner chose three policies before implementation: Google checks stay on the primary calendar and every client says so; an all-day event counts as busy unless it is marked free, with iOS also skipping birthday and subscribed calendars; and a source that can't be checked marks options "Couldn't check", with a banner naming the source and a retry. The [calendar coverage contract](calendar-coverage.md) records the rules. Web, iOS and Android now return busy and unchecked options per source instead of a single conflict set. iOS counts busy all-day events and skips cancelled and declined ones. Both native clients match device all-day events by date against the poll's all-day options. Android replaces its per-option queries with one padded `Instances` query. The backend is unchanged; its test now asserts the `coverage` field the clients require.
+
+Local results: **169 web tests**, web check (0 errors, 5 existing warnings) and production build; **147 iOS package tests** (6 new) on fresh iPhone 17 Pro / iOS 27.0 simulator `E17D0F9E-FEAE-414C-BC81-4B1532D1FA10`, which was deleted after the run, plus the tracked wrapper build; **23 calendar Edge tests**. The Android Gradle build and JVM tests did not run locally: no JDK 21 is installed and downloading one was not permitted. The new pure Android coverage tests (5) compiled and passed with the cached Kotlin 2.2.20 compiler against kotlinx-datetime 0.7.1 instead of the app's 0.5.0. Android CI (`android.yml`) must still confirm the service, screen and `ReviewedIsolationTest` changes. Real device calendars and live Google accounts were not exercised. No merge, deployment or hosted change is included.
 
 ## F20 scoped poll updates, October 29
 
