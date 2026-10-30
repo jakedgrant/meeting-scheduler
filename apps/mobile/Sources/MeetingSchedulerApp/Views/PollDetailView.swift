@@ -22,7 +22,8 @@ struct PollDetailView: View {
     @State private var displayedAccountId: UUID?
     @State private var displayedPollId: UUID?
     @State var commentError: String = ""
-    @State var calendarConflicts: Set<UUID> = []
+    @State var calendarCheck = CalendarCheckResult.none
+    @State private var isCheckingCalendar = false
 
     private let MAX_COMMENT_LENGTH = 500
     @State var isLoading = true
@@ -145,6 +146,7 @@ struct PollDetailView: View {
             if let error = calendarService.googleCalendarError {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
+            calendarCoverageSection
             responseFeedbackSection
             pollInfoSection(poll)
             shareCodeSection(poll)
@@ -297,6 +299,35 @@ struct PollDetailView: View {
         }
     }
 
+    /// Names failed sources with a retry, otherwise what the last check read (F16).
+    @ViewBuilder
+    private var calendarCoverageSection: some View {
+        if !calendarCheck.failedSources.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(sourceNames(calendarCheck.failedSources)) couldn't be checked. Options marked \"Couldn't check\" may still conflict.")
+                    .font(.caption)
+                Button("Retry calendar check") {
+                    Task { await checkCalendar(generation: viewGeneration, account: authService.currentUserId) }
+                }
+                .font(.caption)
+                .disabled(isCheckingCalendar)
+            }
+        } else if !calendarCheck.checkedSources.isEmpty {
+            Text("Checked \(sourceNames(calendarCheck.checkedSources)).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func sourceNames(_ sources: [CalendarSource]) -> String {
+        sources.map { source in
+            switch source {
+            case .appleCalendar: String(localized: "Apple Calendar")
+            case .googleCalendar: String(localized: "Google Calendar (primary calendar)")
+            }
+        }.formatted(.list(type: .and))
+    }
+
     private func timeOptionsSection(_ poll: Poll) -> some View {
         Section("Time Options") {
             ForEach(timeOptions) { option in
@@ -308,7 +339,8 @@ struct PollDetailView: View {
                         pollTimeZone: poll.timezone,
                         responses: responsesForOption(option.id),
                         myResponse: editor.responses[option.id],
-                        hasCalendarConflict: calendarConflicts.contains(option.id),
+                        hasCalendarConflict: calendarCheck.busyIds.contains(option.id),
+                        calendarUnchecked: calendarCheck.uncheckedIds.contains(option.id),
                         canRespond: myParticipant != nil && editor.saved != nil && canRespond && !editor.isSaving && !editor.isLoading,
                         onResponseChange: { status in
                             editor.responses[option.id] = status
@@ -480,7 +512,7 @@ struct PollDetailView: View {
         displayedPollId = pollId
         editor.selectAccount(account, pollId: pollId)
         poll = nil; timeOptions = []; participants = []; responses = []; myParticipant = nil
-        calendarConflicts = []; actionError = nil; commentError = ""
+        calendarCheck = .none; isCheckingCalendar = false; actionError = nil; commentError = ""
         isSelectingFinalDate = false; finalTimeOption = nil; selectedTimeOption = nil
         showClosePollAlert = false; showSelectFinalDateAlert = false
         isLoading = true
@@ -499,13 +531,20 @@ struct PollDetailView: View {
         }
         await calendarService.refreshGoogleCalendarConnection()
         guard generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
-        if calendarService.isEnabled && !timeOptions.isEmpty {
-            let conflicts = await calendarService.checkConflicts(for: timeOptions)
-            guard generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
-            calendarConflicts = conflicts
-            for conflictId in conflicts where editor.saved != nil && editor.responses[conflictId] == nil {
-                editor.responses[conflictId] = .unavailable
-            }
+        await checkCalendar(generation: generation, account: account)
+    }
+
+    /// Only busy options become unavailable suggestions; unchecked options are left alone.
+    private func checkCalendar(generation: UInt64, account: UUID?) async {
+        // The service returns an empty result when no source is enabled, which clears a stale banner on retry.
+        guard let poll, !timeOptions.isEmpty, !isCheckingCalendar else { return }
+        isCheckingCalendar = true
+        defer { if generation == viewGeneration { isCheckingCalendar = false } }
+        let result = await calendarService.checkConflicts(for: timeOptions, pollTimeZone: poll.timezone)
+        guard generation == viewGeneration, account == authService.currentUserId, !Task.isCancelled else { return }
+        calendarCheck = result
+        for conflictId in result.busyIds where editor.saved != nil && editor.responses[conflictId] == nil {
+            editor.responses[conflictId] = .unavailable
         }
     }
 
@@ -854,6 +893,7 @@ struct TimeOptionRow: View {
     let responses: ResponseSummary
     let myResponse: AvailabilityStatus?
     let hasCalendarConflict: Bool
+    let calendarUnchecked: Bool
     let canRespond: Bool
     let onResponseChange: (AvailabilityStatus) -> Void
 
@@ -881,6 +921,14 @@ struct TimeOptionRow: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.orange.opacity(0.15))
+                            .clipShape(Capsule())
+                    } else if calendarUnchecked {
+                        Label("Couldn't check", systemImage: "questionmark.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.15))
                             .clipShape(Capsule())
                     }
                 }

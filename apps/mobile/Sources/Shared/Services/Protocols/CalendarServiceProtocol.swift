@@ -20,7 +20,7 @@ public protocol CalendarServiceProtocol: AnyObject, Observable, Sendable {
 
     // MARK: - Conflict Checking
 
-    func checkConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID>
+    func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult
 
     // MARK: - Add to Calendar
 

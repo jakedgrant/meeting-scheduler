@@ -7,6 +7,10 @@ import { captureSession, sessionIdentity } from '$lib/session-scope'
 export const calendarEnabled = writable(false)
 export const calendarLoading = writable(false)
 export const calendarConflicts = writable<Set<string>>(new Set())
+/** Options the last check could not cover; see docs/calendar-coverage.md (F16). */
+export const calendarUnchecked = writable<Set<string>>(new Set())
+/** What the last successful check read, for example "primary calendar". */
+export const calendarCoverage = writable<string | null>(null)
 export const calendarStatusError = writable<string | null>(null)
 export const calendarAccountEmail = writable<string | null>(null)
 export const calendarRequiresReconnect = writable(false)
@@ -17,6 +21,7 @@ let conflictRequest = 0
 let conflictOptions = ''
 let connectionMutation = false
 let statusRequest = 0
+const CHECK_FAILED = 'Google Calendar couldn\'t be checked. Options marked "Couldn\'t check" may still conflict.'
 
 interface ConnectionStatus {
   connected: boolean
@@ -34,11 +39,17 @@ function reset(account: string | null) {
   connectionMutation = false
   calendarEnabled.set(false)
   calendarLoading.set(false)
-  calendarConflicts.set(new Set())
+  clearConflictResults()
   calendarStatusError.set(null)
   calendarAccountEmail.set(null)
   calendarRequiresReconnect.set(false)
   calendarRevocationPending.set(false)
+}
+
+function clearConflictResults() {
+  calendarConflicts.set(new Set())
+  calendarUnchecked.set(new Set())
+  calendarCoverage.set(null)
 }
 
 // State clears synchronously on every auth boundary, even with no mounted watcher.
@@ -132,21 +143,21 @@ export async function disableCalendarIntegration() {
   statusRequest++
   connectionMutation = true
   conflictRequest++
-  calendarConflicts.set(new Set())
+  clearConflictResults()
   calendarLoading.set(true)
   calendarStatusError.set(null)
   try {
     const result = await connection<ConnectionStatus>({ action: 'disconnect' })
     if (generation !== current) return
     applyStatus(result)
-    calendarConflicts.set(new Set())
+    clearConflictResults()
   } finally {
     if (generation === current) { calendarLoading.set(false); connectionMutation = false }
   }
 }
 
 export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
-  if (!timeOptions.length) { conflictRequest++; conflictOptions = ''; calendarConflicts.set(new Set()); return }
+  if (!timeOptions.length) { conflictRequest++; conflictOptions = ''; clearConflictResults(); return }
   if (connectionMutation) return
   if (!get(session)?.user) return
   const current = generation
@@ -156,7 +167,7 @@ export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
     ({ id, start_time, end_time })).sort((a, b) => a.id.localeCompare(b.id)))
   if (conflictOptions !== optionsKey) {
     conflictOptions = optionsKey
-    calendarConflicts.set(new Set())
+    clearConflictResults()
   }
   calendarLoading.set(true)
   calendarStatusError.set(null)
@@ -165,15 +176,22 @@ export async function checkCalendarConflicts(timeOptions: PollTimeOption[]) {
       timeOptions: timeOptions.map(({ id, start_time, end_time }) => ({ id, start_time, end_time }))
     } })
     if (generation !== current || request !== conflictRequest) return
-    if (error || data?.success !== true || !Array.isArray(data.conflictingIds) ||
+    // An unrecognized coverage cannot be labelled honestly, so it counts as unchecked.
+    if (error || data?.success !== true || data.coverage !== 'primary' || !Array.isArray(data.conflictingIds) ||
         !data.conflictingIds.every((id: unknown) => typeof id === 'string')) {
       throw new Error('Calendar conflicts could not be checked.')
     }
     calendarConflicts.set(new Set(data.conflictingIds))
+    calendarUnchecked.set(new Set())
+    calendarCoverage.set('primary calendar')
   } catch {
-    // Preserve the last known results and expose uncertainty instead of reporting
-    // an empty, apparently successful conflict check.
-    if (generation === current && request === conflictRequest) calendarStatusError.set('Google Calendar could not be checked. Review your availability before saving.')
+    // Keep the last known busy options and mark every option unchecked instead of
+    // reporting an empty, apparently successful check.
+    if (generation === current && request === conflictRequest) {
+      calendarUnchecked.set(new Set(timeOptions.map(option => option.id)))
+      calendarCoverage.set(null)
+      calendarStatusError.set(CHECK_FAILED)
+    }
   } finally {
     if (generation === current && request === conflictRequest) calendarLoading.set(false)
   }

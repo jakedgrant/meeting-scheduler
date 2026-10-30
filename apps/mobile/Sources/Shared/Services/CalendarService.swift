@@ -3,7 +3,7 @@ import Foundation
 import Supabase
 
 /// Calendar source options
-public enum CalendarSource: String, Codable {
+public enum CalendarSource: String, Codable, Sendable {
     case appleCalendar = "apple"
     case googleCalendar = "google"
 }
@@ -238,96 +238,77 @@ public final class CalendarService: CalendarServiceProtocol {
 
     // MARK: - Conflict Checking
 
-    /// Check all time options for calendar conflicts from enabled sources
-    /// - Parameter timeOptions: Array of poll time options to check
-    /// - Returns: Set of option IDs that have calendar conflicts
-    public func checkConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
+    /// Check all time options against the enabled sources (F16; see docs/calendar-coverage.md).
+    /// - Parameters:
+    ///   - timeOptions: The poll's time options.
+    ///   - pollTimeZone: The poll's IANA zone, which gives all-day options their dates.
+    /// - Returns: Busy options, plus the options a failed source could not cover.
+    public func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
             let account = accountId
             let generation = connectionGeneration
-            guard account != nil, isEnabled else { return Set() }
-            guard !timeOptions.isEmpty else { return Set() }
+            guard account != nil, isEnabled, !timeOptions.isEmpty else { return .none }
 
-            var allConflictingIds = Set<UUID>()
-
-            // Check Apple Calendar if enabled
+            var sources: [(CalendarSource, Set<UUID>?)] = []
             if appleCalendarEnabled {
-                let appleConflicts = await checkAppleCalendarConflicts(for: timeOptions)
-                guard account == accountId, generation == connectionGeneration, !Task.isCancelled else { return [] }
-                allConflictingIds.formUnion(appleConflicts)
+                let busy = await checkAppleCalendarConflicts(for: timeOptions, pollTimeZone: pollTimeZone)
+                guard account == accountId, generation == connectionGeneration, !Task.isCancelled else { return .none }
+                sources.append((.appleCalendar, busy))
             }
-
-            // Check Google Calendar if enabled
             if googleCalendarEnabled {
-                let googleConflicts = await checkGoogleCalendarConflicts(for: timeOptions)
-                guard account == accountId, generation == connectionGeneration, !Task.isCancelled else { return [] }
-                allConflictingIds.formUnion(googleConflicts)
+                let busy = await checkGoogleCalendarConflicts(for: timeOptions)
+                guard account == accountId, generation == connectionGeneration, !Task.isCancelled else { return .none }
+                sources.append((.googleCalendar, busy))
             }
-
-            return allConflictingIds
+            return CalendarCheckResult(optionIds: Set(timeOptions.map(\.id)), sources: sources)
         }
     }
 
-    /// Check Apple Calendar for conflicts
-    private func checkAppleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
+    /// Busy options from every device calendar, or nil when calendar access is missing.
+    private func checkAppleCalendarConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> Set<UUID>? {
         updateAuthorizationStatus()
-
-        // Check if we have permission
         guard authorizationStatus == .fullAccess else {
-            // Permission was revoked
             await setAppleCalendarEnabled(false)
-            return Set()
+            return nil
         }
-
-        // Find the overall date range to query
         let allDates = timeOptions.flatMap { [$0.startTime, $0.endTime] }
-        guard let minDate = allDates.min(), let maxDate = allDates.max() else {
-            return Set()
-        }
+        guard let minDate = allDates.min(), let maxDate = allDates.max() else { return [] }
 
-        // Single EventKit query for entire date range (batched for performance)
+        // All-day events match by date, so pad the instant window by the widest zone difference.
+        let padding: TimeInterval = 2 * 86_400
         let predicate = eventStore.predicateForEvents(
-            withStart: minDate,
-            end: maxDate,
-            calendars: nil  // Check all calendars
+            withStart: minDate.addingTimeInterval(-padding),
+            end: maxDate.addingTimeInterval(padding),
+            calendars: nil
         )
-
-        let events = eventStore.events(matching: predicate)
-
-        // Filter out events that don't count as busy:
-        // - All-day events
-        // - Transparent events (don't block time)
-        let busyEvents = events.filter { event in
-            !event.isAllDay && event.availability != .free
-        }
-
-        // Check each time option for conflicts
-        var conflictingIds = Set<UUID>()
-
-        for option in timeOptions {
-            let hasConflict = busyEvents.contains { event in
-                overlaps(event: event, start: option.startTime, end: option.endTime)
-            }
-
-            if hasConflict {
-                conflictingIds.insert(option.id)
-            }
-        }
-
-        return conflictingIds
+        let deviceZone = TimeZone.current
+        let periods = eventStore.events(matching: predicate).compactMap { busyPeriod(of: $0, in: deviceZone) }
+        return DeviceBusyPeriod.busyOptionIds(timeOptions, pollTimeZone: pollTimeZone, periods: periods, deviceZone: deviceZone)
     }
 
-    /// Check Google Calendar for conflicts via Edge Function
-    private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
+    private func busyPeriod(of event: EKEvent, in deviceZone: TimeZone) -> DeviceBusyPeriod? {
+        DeviceBusyPeriod.of(
+            isAllDay: event.isAllDay,
+            start: event.startDate,
+            end: event.endDate,
+            availability: event.availability,
+            status: event.status,
+            declined: event.attendees?.contains { $0.isCurrentUser && $0.participantStatus == .declined } ?? false,
+            calendarType: event.calendar.type,
+            in: deviceZone
+        )
+    }
+
+    /// Busy options from the Google primary calendar, or nil when it could not be checked.
+    private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID>? {
         let client = clientFactory()
-        guard let userId = accountId else { return Set() }
+        guard let userId = accountId else { return nil }
         let generation = connectionGeneration
         do {
             googleCalendarLoading = true
             defer { if generation == connectionGeneration { googleCalendarLoading = false } }
 
-            // Build the request payload
             let timeOptionsArray = timeOptions.map { option in
                 [
                     "id": option.id.uuidString,
@@ -335,28 +316,21 @@ public final class CalendarService: CalendarServiceProtocol {
                     "end_time": ISO8601DateFormatter().string(from: option.endTime),
                 ]
             }
-
-            let requestBody = ["timeOptions": timeOptionsArray]
-
-            // Invoke the Edge Function
             let response: GoogleCalendarConflictResponse =
                 try await client
                 .functions
                 .invoke(
                     "check-calendar-conflicts",
-                    options: FunctionInvokeOptions(body: requestBody)
+                    options: FunctionInvokeOptions(body: ["timeOptions": timeOptionsArray])
                 )
 
-            guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return Set() }
-            guard response.success else { throw CalendarConnectionError.unavailable }
+            guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return nil }
+            // An unrecognized coverage cannot be labelled honestly, so it counts as unchecked.
+            guard response.success, response.coverage == "primary" else { throw CalendarConnectionError.unavailable }
             googleCalendarError = nil
-            let conflictIds = Set(response.conflictingIds.compactMap { UUID(uuidString: $0) })
-            return conflictIds
+            return Set(response.conflictingIds.compactMap { UUID(uuidString: $0) })
         } catch {
-            if accountId == userId, generation == connectionGeneration {
-                googleCalendarError = "Google Calendar could not be checked. Review your availability before saving."
-            }
-            return Set()
+            return nil
         }
     }
 
@@ -385,7 +359,8 @@ public final class CalendarService: CalendarServiceProtocol {
 
             let events = eventStore.events(matching: predicate)
 
-            return events.filter { !$0.isAllDay && $0.availability != .free }
+            let deviceZone = TimeZone.current
+            return events.filter { busyPeriod(of: $0, in: deviceZone) != nil }
         }
     }
 
@@ -466,9 +441,6 @@ public final class CalendarService: CalendarServiceProtocol {
     // MARK: - Helper Methods
 
     /// Check if an event overlaps with a time range
-    private func overlaps(event: EKEvent, start: Date, end: Date) -> Bool {
-        event.startDate < end && event.endDate > start
-    }
 }
 
 // MARK: - Helper Types
@@ -486,5 +458,6 @@ private struct CalendarAuthorizationStart: Decodable {
 
 private struct GoogleCalendarConflictResponse: Decodable {
     let success: Bool
+    let coverage: String
     let conflictingIds: [String]
 }

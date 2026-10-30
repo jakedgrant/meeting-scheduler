@@ -50,8 +50,8 @@ public final class MockCalendarService: CalendarServiceProtocol {
 
     public func refreshGoogleCalendarConnection() async {}
 
-    public func checkConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID> {
-        Set()
+    public func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult {
+        .none
     }
 
     public func addEventToCalendar(

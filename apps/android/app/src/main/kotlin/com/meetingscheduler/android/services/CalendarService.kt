@@ -18,6 +18,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.meetingscheduler.android.models.CalendarCheck
+import com.meetingscheduler.android.models.DeviceBusyPeriod
 import com.meetingscheduler.android.models.PollTimeOption
 import io.github.jan.supabase.functions.functions
 import io.ktor.client.statement.bodyAsText
@@ -57,7 +59,7 @@ class CalendarService(
     private val writeDevicePreference: (suspend (String, Boolean) -> Unit)? = null,
     private val readPermission: (() -> Boolean)? = null,
     private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
-    private val readDeviceConflicts: (suspend (List<PollTimeOption>) -> Set<String>)? = null,
+    private val readDeviceConflicts: (suspend (List<PollTimeOption>, String) -> Set<String>)? = null,
 ) {
     private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val json = Json { ignoreUnknownKeys = true }
@@ -240,36 +242,28 @@ class CalendarService(
         }
     }
 
-    /** One bounded backend call for all options; no provider tokens reach Android. */
-    suspend fun checkPollConflicts(options: List<PollTimeOption>): Set<String> {
-        if (options.isEmpty()) return emptySet()
-        val owner = captureOwner() ?: return emptySet()
-        val userId = owner.id
-        val session = owner.session
-        val generation = owner.generation
-        val deviceEnabled = appleCalendarEnabled
-        val googleEnabled = googleCalendarEnabled
-        calendarError = null
-        val conflicts = mutableSetOf<String>()
-        if (deviceEnabled) {
-            try {
-                val device = readDeviceConflicts?.invoke(options) ?: withContext(Dispatchers.IO) {
-                    options.filter { checkAppleCalendarConflicts(it.startTime, it.endTime).isNotEmpty() }.map { it.id }.toSet()
-                }
-                if (!isCurrent(owner)) return emptySet()
-                conflicts.addAll(device)
+    /**
+     * Checks every option against the enabled sources (F16; see docs/calendar-coverage.md).
+     * Google uses one bounded backend call; no provider tokens reach Android. A source that
+     * cannot be checked leaves its options unchecked rather than conflict-free.
+     */
+    suspend fun checkPollConflicts(options: List<PollTimeOption>, pollTimeZone: String): CalendarCheck {
+        if (options.isEmpty()) return CalendarCheck.NONE
+        val owner = captureOwner() ?: return CalendarCheck.NONE
+        val sources = mutableListOf<Pair<CalendarSource, Set<String>?>>()
+        if (appleCalendarEnabled) {
+            val busy = try {
+                readDeviceConflicts?.invoke(options, pollTimeZone) ?: withContext(Dispatchers.IO) { readDeviceBusy(options, pollTimeZone) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (authService.isCurrent(userId, session) && generation == connectionGeneration) {
-                    calendarError = "Device calendar conflicts could not be checked."
-                }
+                null
             }
+            if (!isCurrent(owner)) return CalendarCheck.NONE
+            sources += CalendarSource.APPLE_CALENDAR to busy
         }
-        if (!isCurrent(owner)) return emptySet()
-        if (googleEnabled) {
-            try {
-                val credential = owner.credential
+        if (googleCalendarEnabled) {
+            val busy = try {
                 val response = invokeOwned("check-calendar-conflicts", buildJsonObject {
                     put("timeOptions", kotlinx.serialization.json.buildJsonArray {
                         options.forEach { option ->
@@ -280,35 +274,32 @@ class CalendarService(
                             })
                         }
                     })
-                }, credential)
+                }, owner.credential)
                 if (!response.status.isSuccess()) throw IllegalStateException("Calendar coverage unknown")
                 val result = json.decodeFromString<ConflictResponse>(response.bodyAsText())
-                if (!result.success) throw IllegalStateException("Calendar coverage unknown")
-                if (!authService.isCurrent(userId, session) || generation != connectionGeneration) return emptySet()
-                conflicts.addAll(result.conflictingIds)
+                // An unrecognized coverage cannot be labelled honestly, so it counts as unchecked.
+                if (!result.success || result.coverage != "primary") throw IllegalStateException("Calendar coverage unknown")
+                result.conflictingIds.toSet()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (authService.isCurrent(userId, session) && generation == connectionGeneration) {
-                    calendarError = "Google Calendar could not be checked. Review your availability before saving."
-                }
+                null
             }
+            if (!isCurrent(owner)) return CalendarCheck.NONE
+            sources += CalendarSource.GOOGLE_CALENDAR to busy
         }
-        return if (authService.isCurrent(userId, session) && generation == connectionGeneration) conflicts else emptySet()
+        return CalendarCheck.combine(options.map { it.id }.toSet(), sources)
     }
 
-    private fun checkAppleCalendarConflicts(
-        startTime: Instant,
-        endTime: Instant
-    ): List<CalendarEvent> {
-        if (!hasCalendarPermission) return emptyList()
-
-        val events = mutableListOf<CalendarEvent>()
-        val contentResolver: ContentResolver = context?.contentResolver ?: return emptyList()
-
+    /** One Instances query (recurrences expanded) across every device calendar. */
+    private fun readDeviceBusy(options: List<PollTimeOption>, pollTimeZone: String): Set<String> {
+        if (!hasCalendarPermission) throw IllegalStateException("Calendar permission missing")
+        val contentResolver: ContentResolver = context?.contentResolver ?: throw IllegalStateException("No calendar provider")
+        // All-day instances are stored at UTC midnights and match by date, so pad the window.
+        val padding = 2 * 86_400_000L
+        val begin = options.minOf { it.startTime }.toEpochMilliseconds() - padding
+        val end = options.maxOf { it.endTime }.toEpochMilliseconds() + padding
         val projection = arrayOf(
-            CalendarContract.Instances.EVENT_ID,
-            CalendarContract.Events.TITLE,
             CalendarContract.Instances.BEGIN,
             CalendarContract.Instances.END,
             CalendarContract.Events.ALL_DAY,
@@ -316,53 +307,23 @@ class CalendarService(
             CalendarContract.Events.STATUS,
             CalendarContract.Events.SELF_ATTENDEE_STATUS
         )
-
-        val cursor: Cursor? = CalendarContract.Instances.query(
-            contentResolver, projection, startTime.toEpochMilliseconds(), endTime.toEpochMilliseconds()
-        )
-
-        cursor?.use {
-            val idIndex = it.getColumnIndex(CalendarContract.Instances.EVENT_ID)
-            val titleIndex = it.getColumnIndex(CalendarContract.Events.TITLE)
-            val startIndex = it.getColumnIndex(CalendarContract.Instances.BEGIN)
-            val endIndex = it.getColumnIndex(CalendarContract.Instances.END)
-            val availabilityIndex = it.getColumnIndex(CalendarContract.Events.AVAILABILITY)
-            val statusIndex = it.getColumnIndex(CalendarContract.Events.STATUS)
-            val attendeeIndex = it.getColumnIndex(CalendarContract.Events.SELF_ATTENDEE_STATUS)
-
+        val cursor: Cursor = CalendarContract.Instances.query(contentResolver, projection, begin, end)
+            ?: throw IllegalStateException("Calendar query failed")
+        val periods = mutableListOf<DeviceBusyPeriod>()
+        cursor.use {
             while (it.moveToNext()) {
-                val id = it.getString(idIndex)
-                val title = it.getString(titleIndex) ?: "Busy"
-                val start = Instant.fromEpochMilliseconds(it.getLong(startIndex))
-                val end = Instant.fromEpochMilliseconds(it.getLong(endIndex))
-                val availability = it.getInt(availabilityIndex)
-
-                if (availability != CalendarContract.Events.AVAILABILITY_FREE &&
-                    it.getInt(statusIndex) != CalendarContract.Events.STATUS_CANCELED &&
-                    it.getInt(attendeeIndex) != CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED) {
-                    events.add(
-                        CalendarEvent(
-                            id = id,
-                            title = title,
-                            startTime = start,
-                            endTime = end,
-                            source = CalendarSource.APPLE_CALENDAR
-                        )
-                    )
-                }
+                DeviceBusyPeriod.of(
+                    allDay = it.getInt(2) == 1,
+                    begin = Instant.fromEpochMilliseconds(it.getLong(0)),
+                    end = Instant.fromEpochMilliseconds(it.getLong(1)),
+                    free = it.getInt(3) == CalendarContract.Events.AVAILABILITY_FREE,
+                    cancelled = it.getInt(4) == CalendarContract.Events.STATUS_CANCELED,
+                    declined = it.getInt(5) == CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED,
+                )?.let(periods::add)
             }
         }
-
-        return events
+        return DeviceBusyPeriod.busyOptionIds(options, pollTimeZone, periods, kotlinx.datetime.TimeZone.currentSystemDefault())
     }
-
-    data class CalendarEvent(
-        val id: String,
-        val title: String,
-        val startTime: Instant,
-        val endTime: Instant,
-        val source: CalendarSource
-    )
 }
 
 @Serializable
@@ -371,4 +332,4 @@ private data class ConnectionStatus(val connected: Boolean, val accountEmail: St
 @Serializable
 private data class AuthorizationStart(val authorizationURL: String)
 @Serializable
-private data class ConflictResponse(val success: Boolean, val conflictingIds: List<String>)
+private data class ConflictResponse(val success: Boolean, val coverage: String, val conflictingIds: List<String>)

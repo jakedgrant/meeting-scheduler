@@ -635,6 +635,8 @@ Deno.test("refresh uses actual expiry and preserves an existing refresh token wh
     Promise.resolve({ accessToken: "new-google-access", expiresIn: 1200 });
   const response = await f.service.conflicts(identity, [slot]);
   equal(response.conflictingIds, ["slot"]);
+  // Clients label this coverage and treat any other value as unchecked (F16).
+  equal(response.coverage, "primary");
   equal(f.provider.refreshes, [tokens.refreshToken]);
   const row = f.repository.rows.get(userId)!;
   equal(

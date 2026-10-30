@@ -74,7 +74,8 @@ fun PollDetailView(
     var localResponses by remember(pollId, accountKey) { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
     var localComment by remember(pollId, accountKey) { mutableStateOf("") }
     var commentError by remember(pollId, accountKey) { mutableStateOf("") }
-    var calendarConflicts by remember(pollId, accountKey) { mutableStateOf<Set<String>>(emptySet()) }
+    var calendarCheck by remember(pollId, accountKey) { mutableStateOf(CalendarCheck.NONE) }
+    var isCheckingCalendar by remember(pollId, accountKey) { mutableStateOf(false) }
 
     val recovery = remember(pollId, accountKey) { runCatching { pollService.availabilitySession(pollId) } }
     if (recovery.isFailure) {
@@ -129,6 +130,25 @@ fun PollDetailView(
         localComment = saveSession.pendingDraft?.comment ?: saved.comment.orEmpty()
     }
 
+    // Only busy options become unavailable suggestions; unchecked options are left alone (F16).
+    suspend fun checkCalendar() {
+        val currentPoll = poll ?: return
+        // The service returns an empty result when no source is enabled, which clears a stale banner on retry.
+        if (timeOptions.isEmpty() || isCheckingCalendar) return
+        isCheckingCalendar = true
+        try {
+            val check = calendarService.checkPollConflicts(timeOptions, currentPoll.timezone)
+            calendarCheck = check
+            check.busy.forEach { conflictId ->
+                if (saveSession.pendingDraft == null && !localResponses.containsKey(conflictId)) {
+                    localResponses = localResponses + (conflictId to AvailabilityStatus.UNAVAILABLE)
+                }
+            }
+        } finally {
+            isCheckingCalendar = false
+        }
+    }
+
     suspend fun loadSavedAvailability() {
         val loadingUserId = authService.currentUser?.id
         try {
@@ -177,17 +197,7 @@ fun PollDetailView(
 
             // Refresh safe connection metadata, then check all slots in one call.
             calendarService.refreshGoogleCalendarConnection()
-            if (calendarService.isEnabled && timeOptions.isNotEmpty()) {
-                val conflicts = calendarService.checkPollConflicts(timeOptions)
-                calendarConflicts = conflicts
-
-                // Auto-mark conflicts as unavailable
-                conflicts.forEach { conflictId ->
-                    if (saveSession.pendingDraft == null && !localResponses.containsKey(conflictId)) {
-                        localResponses = localResponses + (conflictId to AvailabilityStatus.UNAVAILABLE)
-                    }
-                }
-            }
+            checkCalendar()
         }
 
         isLoading = false
@@ -265,6 +275,22 @@ fun PollDetailView(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                if (calendarCheck.failedSources.isNotEmpty()) {
+                    item {
+                        Column {
+                            Text("${calendarSourceNames(calendarCheck.failedSources)} couldn't be checked. Options marked \"Couldn't check\" may still conflict.",
+                                style = MaterialTheme.typography.bodySmall)
+                            TextButton(enabled = !isCheckingCalendar, onClick = { scope.launch { checkCalendar() } }) {
+                                Text("Retry calendar check")
+                            }
+                        }
+                    }
+                } else if (calendarCheck.checkedSources.isNotEmpty()) {
+                    item {
+                        Text("Checked ${calendarSourceNames(calendarCheck.checkedSources)}.", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
                 calendarService.calendarError?.let { message ->
                     item {
                         Text(message, style = MaterialTheme.typography.bodySmall,
@@ -524,7 +550,8 @@ fun PollDetailView(
                         option = option,
                         responses = responsesForOption(option.id),
                         myResponse = localResponses[option.id],
-                        hasCalendarConflict = calendarConflicts.contains(option.id),
+                        hasCalendarConflict = option.id in calendarCheck.busy,
+                        calendarUnchecked = option.id in calendarCheck.unchecked,
                         canRespond = myParticipant != null && poll?.status == PollStatus.ACTIVE && availabilityLoaded && !isSaving,
                         onResponseChange = { status ->
                             if (!isSaving && availabilityLoaded) {
@@ -819,6 +846,7 @@ fun TimeOptionRow(
     responses: ResponseSummary,
     myResponse: AvailabilityStatus?,
     hasCalendarConflict: Boolean,
+    calendarUnchecked: Boolean,
     canRespond: Boolean,
     onResponseChange: (AvailabilityStatus) -> Unit,
     onClick: () -> Unit
@@ -868,6 +896,19 @@ fun TimeOptionRow(
                                         color = MaterialTheme.colorScheme.onErrorContainer
                                     )
                                 }
+                            }
+                        } else if (calendarUnchecked) {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    "Couldn't check",
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
@@ -1216,3 +1257,11 @@ fun StatusBadge(status: PollStatus) {
         )
     }
 }
+
+private fun calendarSourceNames(sources: List<CalendarSource>): String =
+    sources.joinToString(" and ") { source ->
+        when (source) {
+            CalendarSource.APPLE_CALENDAR -> "Android Calendar"
+            CalendarSource.GOOGLE_CALENDAR -> "Google Calendar (primary calendar)"
+        }
+    }
