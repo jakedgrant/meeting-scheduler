@@ -317,6 +317,13 @@ test('closed/expired poll hides response controls and load failure offers a retr
   const html = actual.render(actual.Page).body;
   assert.match(html, /Retry loading responses/);
   assert.doesNotMatch(html, /class="response-btn available/);
+  actual.availabilityLoadError.set(null);
+  actual.pollRefreshError.set('Displayed results may be out of date.');
+  const stale = actual.render(actual.Page).body;
+  assert.match(stale, /Displayed results may be out of date/);
+  assert.match(stale, /Retry refreshing poll/);
+  assert.doesNotMatch(stale, /class="response-btn available/);
+  assert.doesNotMatch(stale, /Save Responses/);
 });
 
 test('failed conflict reload keeps the conflict and cannot send an unsafe retry', async t => {

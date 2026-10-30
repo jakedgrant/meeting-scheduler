@@ -17,8 +17,11 @@ const entitlement = (name = 'pro_access', extra = {}) => ({ resource_id: `subscr
   purchased_at: date(-3600000), expires_at: date(3600000), valid_until: date(600000), ...extra });
 const pass = (extra = {}) => ({ purchase_id: 'purch_test', product_id: 'prod_pass', store: 'APP_STORE',
   transaction_id: 'store-receipt', purchased_at: date(-3600000), quantity: 1, ...extra });
-const snapshot = (entitlements = [entitlement()], passes = []) => ({ environment: 'production', fetched_at: date(0),
-  valid_until: date(900000), entitlements, passes });
+const snapshot = (entitlements = [entitlement()], passes = []) => {
+  const fetchedAt = Date.now();
+  return { environment: 'production', fetched_at: new Date(fetchedAt).toISOString(),
+    valid_until: new Date(fetchedAt + 900000).toISOString(), entitlements, passes };
+};
 
 test('billing migration, privileges, transactional recovery and fencing on Postgres', async t => {
   const db = new PGlite();
@@ -157,6 +160,24 @@ test('billing migration, privileges, transactional recovery and fencing on Postg
       assert.equal((await one('SELECT public.has_active_subscription() AS active')).active, true);
       assert.equal((await one('SELECT public.get_user_entitlement() AS tier')).tier, 'team_access');
     } finally { await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false)"); }
+  });
+  await reset();
+
+  await t.test('snapshot fixture respects the fifteen-minute horizon when the clock advances', async t => {
+    const instant = Date.now();
+    let tick = 0;
+    const clock = t.mock.method(Date, 'now', () => instant + tick++);
+    let value;
+    try { value = snapshot([]); }
+    finally { clock.mock.restore(); }
+
+    await accept(event('snapshot-horizon'));
+    const job = await claim();
+    const fetchedAt = Date.parse(value.fetched_at);
+    await assert.rejects(complete(job, { ...value, valid_until: new Date(fetchedAt + 900001).toISOString() }), /invalid_snapshot/);
+    assert.equal((await one("SELECT status FROM private.billing_inbox WHERE event_id='snapshot-horizon'")).status, 'pending');
+    assert.equal(await complete(job, value), 'applied');
+    assert.equal((await one("SELECT status FROM private.billing_inbox WHERE event_id='snapshot-horizon'")).status, 'processed');
   });
   await reset();
 
