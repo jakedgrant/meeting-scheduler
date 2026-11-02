@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-public protocol PersistenceProviderProtocol: Sendable {
+protocol PersistenceProviderProtocol: Sendable {
     /// Changes the cache namespace. Identity transitions discard the previous namespace.
     func selectAccount(_ accountId: UUID?) throws
 

@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
+final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     private var listedPollIds: Set<UUID> = []
     private var polls: [UUID: Poll] = [:]
     private var timeOptions: [UUID: [PollTimeOption]] = [:]
@@ -16,7 +16,7 @@ public final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
     private var detailTimestamps: [UUID: Date] = [:]
 
     private let now: @MainActor () -> Date
-    public init(now: @escaping @MainActor () -> Date = { Date() }) { self.now = now }
+    init(now: @escaping @MainActor () -> Date = { Date() }) { self.now = now }
 
     public func selectAccount(_ accountId: UUID?) throws {
         guard self.accountId != accountId else { return }

@@ -11,22 +11,11 @@ import Shared
 
 @main
 struct MeetingSchedulerAppMain: App {
-
-    init() {
-        // Initialize services on app launch
-        // PurchaseService initializes automatically when shared is accessed
-        _ = PurchaseService.shared
-    }
+    private let services = AppServices.live()
 
     var body: some Scene {
         WindowGroup {
-            MeetingSchedulerApp.ContentView()
-                .onOpenURL { url in
-                    // Handle OAuth callback deep links
-                    Task {
-                        await AuthService.shared.handleDeepLink(url: url)
-                    }
-                }
+            MeetingSchedulerApp.AppRootView(services: services)
         }
     }
 }

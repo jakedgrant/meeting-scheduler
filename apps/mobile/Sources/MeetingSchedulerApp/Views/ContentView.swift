@@ -1,12 +1,10 @@
 import SwiftUI
 import Shared
 
-public struct ContentView: View {
+struct ContentView: View {
     @Environment(\.authService) var authService
 
-    public init() {}
-
-    public var body: some View {
+    var body: some View {
         Group {
             if authService.isLoading {
                 loadingView

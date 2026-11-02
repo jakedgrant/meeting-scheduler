@@ -6,7 +6,6 @@ extension PollService {
     {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return try await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             var params: [String: AnyJSON] = [
                 "poll_uuid": .string(pollId.uuidString), "participant_uuid": .string(participantId.uuidString),
@@ -29,7 +28,6 @@ extension PollService {
     public func saveAvailability(_ request: SaveAvailabilityRequest) async throws -> AvailabilitySnapshot {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return try await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             invalidateDetail(request.pollId)
             do {
@@ -51,7 +49,6 @@ extension PollService {
     public func finalizePoll(pollId: UUID, timeOptionId: UUID) async throws -> Poll {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return try await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             invalidateDetail(pollId)
             do {

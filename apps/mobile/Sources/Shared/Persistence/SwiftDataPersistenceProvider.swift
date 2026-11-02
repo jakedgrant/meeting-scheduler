@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @MainActor
-public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
+final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
     private var modelContainer: ModelContainer
     private var modelContext: ModelContext
     private let now: @MainActor () -> Date
@@ -14,7 +14,7 @@ public final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
     private var participantCounts: [UUID: Int] = [:]
     private var timeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
-    public init(inMemory: Bool = false, now: @escaping @MainActor () -> Date = { Date() }) {
+    init(inMemory: Bool = false, now: @escaping @MainActor () -> Date = { Date() }) {
         self.now = now
         self.inMemory = inMemory
         do {
