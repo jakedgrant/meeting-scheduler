@@ -163,7 +163,7 @@ public final class PurchaseService: PurchaseServiceProtocol {
             else { return }
             customerInfo = info
         } catch {
-            print("Failed to get customer info: \(error)")
+            FailureLog.purchases.record("Failed to get customer info", error: error)
         }
     }
 
@@ -184,7 +184,7 @@ public final class PurchaseService: PurchaseServiceProtocol {
             guard generation == accountGeneration, !Task.isCancelled else { return }
             offerings = result
         } catch {
-            print("Failed to load offerings: \(error)")
+            FailureLog.purchases.record("Failed to load offerings", error: error)
         }
     }
 

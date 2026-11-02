@@ -1,3 +1,4 @@
+import { logEvent } from "../diagnostics.ts";
 import { CalendarError, type Identity } from "./types.ts";
 import { CalendarService, parseOptions } from "./service.ts";
 
@@ -96,75 +97,97 @@ export function calendarHandler(
   kind: "connection" | "conflicts" | "callback" | "maintenance",
   deps: HandlerDependencies,
 ) {
+  const route = async (
+    request: Request,
+    responseHeaders: Headers,
+    requestId: string,
+  ): Promise<Response> => {
+    if (kind !== "callback" && request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: responseHeaders });
+    }
+    if (request.method !== (kind === "callback" ? "GET" : "POST")) {
+      throw new CalendarError(
+        "method_not_allowed",
+        405,
+        "Unsupported request method.",
+      );
+    }
+    const origin = request.headers.get("Origin");
+    if (kind !== "callback" && origin && !deps.webOrigins.includes(origin)) {
+      throw new CalendarError(
+        "origin_not_allowed",
+        403,
+        "Unsupported request origin.",
+      );
+    }
+    if (kind === "callback") {
+      const location = await deps.service.callback(
+        new URL(request.url).searchParams,
+        requestId,
+      );
+      responseHeaders.set("Location", location);
+      return new Response(null, { status: 303, headers: responseHeaders });
+    }
+    if (kind === "maintenance") {
+      await deps.authorizeMaintenance(request);
+      return Response.json({
+        revoked: await deps.service.revokePending(),
+        rotated: await deps.service.rotateKeys(),
+      }, { headers: responseHeaders });
+    }
+    const identity = await deps.authenticate(request);
+    const input = await body(request);
+    let result;
+    if (kind === "conflicts") {
+      onlyKeys(input, ["timeOptions"]);
+      result = await deps.service.conflicts(
+        identity,
+        parseOptions(input.timeOptions),
+      );
+    } else {
+      if (input.action === "status") {
+        onlyKeys(input, ["action"]);
+        result = await deps.service.status(identity);
+      } else if (input.action === "disconnect") {
+        onlyKeys(input, ["action"]);
+        result = await deps.service.disconnect(identity);
+      } else if (input.action === "start") {
+        onlyKeys(input, ["action", "target", "origin"]);
+        result = await deps.service.start(
+          identity,
+          input.target,
+          input.origin,
+        );
+      } else {
+        throw new CalendarError(
+          "invalid_action",
+          400,
+          "Unsupported calendar action.",
+        );
+      }
+    }
+    return Response.json(result, { headers: responseHeaders });
+  };
+
   return async (request: Request): Promise<Response> => {
+    const startedAt = performance.now();
     const responseHeaders = headers(request, deps.webOrigins);
     const requestId = crypto.randomUUID();
     responseHeaders.set("X-Request-Id", requestId);
+    const fields = () => ({
+      kind,
+      requestId,
+      durationMs: Math.round(performance.now() - startedAt),
+    });
     try {
-      if (kind !== "callback" && request.method === "OPTIONS") {
-        return new Response(null, { status: 204, headers: responseHeaders });
+      const response = await route(request, responseHeaders, requestId);
+      if (request.method !== "OPTIONS") {
+        logEvent("info", "calendar_request", "ok", {
+          ...fields(),
+          status: response.status,
+        });
       }
-      if (request.method !== (kind === "callback" ? "GET" : "POST")) {
-        throw new CalendarError(
-          "method_not_allowed",
-          405,
-          "Unsupported request method.",
-        );
-      }
-      const origin = request.headers.get("Origin");
-      if (kind !== "callback" && origin && !deps.webOrigins.includes(origin)) {
-        throw new CalendarError(
-          "origin_not_allowed",
-          403,
-          "Unsupported request origin.",
-        );
-      }
-      if (kind === "callback") {
-        const location = await deps.service.callback(
-          new URL(request.url).searchParams,
-        );
-        responseHeaders.set("Location", location);
-        return new Response(null, { status: 303, headers: responseHeaders });
-      }
-      if (kind === "maintenance") {
-        await deps.authorizeMaintenance(request);
-        return Response.json({
-          revoked: await deps.service.revokePending(),
-          rotated: await deps.service.rotateKeys(),
-        }, { headers: responseHeaders });
-      }
-      const identity = await deps.authenticate(request);
-      const input = await body(request);
-      let result;
-      if (kind === "conflicts") {
-        onlyKeys(input, ["timeOptions"]);
-        result = await deps.service.conflicts(
-          identity,
-          parseOptions(input.timeOptions),
-        );
-      } else {
-        if (input.action === "status") {
-          onlyKeys(input, ["action"]);
-          result = await deps.service.status(identity);
-        } else if (input.action === "disconnect") {
-          onlyKeys(input, ["action"]);
-          result = await deps.service.disconnect(identity);
-        } else if (input.action === "start") {
-          onlyKeys(input, ["action", "target", "origin"]);
-          result = await deps.service.start(
-            identity,
-            input.target,
-            input.origin,
-          );
-        } else {
-          throw new CalendarError(
-            "invalid_action",
-            400,
-            "Unsupported calendar action.",
-          );
-        }
-      }
-      return Response.json(result, { headers: responseHeaders });
+      return response;
     } catch (error) {
       const failure = error instanceof CalendarError
         ? error
@@ -173,15 +196,23 @@ export function calendarHandler(
           503,
           "Calendar service is temporarily unavailable.",
         );
-      console.warn("calendar_request_failed", {
-        requestId,
-        code: failure.code,
-      });
+      logEvent(
+        failure.status >= 500 ? "error" : "warn",
+        "calendar_request",
+        failure.code,
+        { ...fields(), status: failure.status },
+      );
+      if (failure.retryAfter !== undefined) {
+        responseHeaders.set("Retry-After", String(failure.retryAfter));
+      }
       return Response.json({
         success: false,
         error: failure.code,
         message: failure.message,
         requestId,
+        ...(failure.retryAfter === undefined
+          ? {}
+          : { retryAfter: failure.retryAfter }),
       }, { status: failure.status, headers: responseHeaders });
     }
   };

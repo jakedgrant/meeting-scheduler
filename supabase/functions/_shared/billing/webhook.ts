@@ -1,3 +1,4 @@
+import { logEvent } from "../diagnostics.ts";
 import {
   AcceptedEvent,
   BillingConfig,
@@ -180,8 +181,12 @@ export function parseEvent(
   };
 }
 
-export function response(status: number, code: string): Response {
-  return Response.json({ code }, {
+export function response(
+  status: number,
+  code: string,
+  requestId?: string,
+): Response {
+  return Response.json({ code, ...(requestId ? { requestId } : {}) }, {
     status,
     headers: { "Cache-Control": "no-store" },
   });
@@ -194,7 +199,10 @@ export function webhookHandler(
 ) {
   return async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return response(405, "method_not_allowed");
-    if (!config.webhookAuth) return response(503, "configuration_unavailable");
+    if (!config.webhookAuth) {
+      logEvent("error", "billing_webhook", "configuration_unavailable");
+      return response(503, "configuration_unavailable");
+    }
     if (
       !await constantTimeEqual(
         req.headers.get("authorization") ?? "",
@@ -231,10 +239,9 @@ export function webhookHandler(
         return response(409, "event_conflict");
       }
       // No payload, user identifiers, raw database/provider errors, or secrets.
-      console.error(
-        JSON.stringify({ component: "billing_webhook", code: "accept_failed" }),
-      );
-      return response(503, "accept_failed");
+      const requestId = crypto.randomUUID();
+      logEvent("error", "billing_webhook", "accept_failed", { requestId });
+      return response(503, "accept_failed", requestId);
     }
   };
 }

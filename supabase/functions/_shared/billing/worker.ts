@@ -1,3 +1,4 @@
+import { logEvent } from "../diagnostics.ts";
 import {
   BillingConfig,
   BillingError,
@@ -26,6 +27,7 @@ export async function processOne(
       canonicalUserId,
       signal,
     ),
+  requestId?: string,
 ): Promise<"idle" | "applied" | "stale" | "retry"> {
   const claim = await repo.call<Claim | null>("claim", {
     project_id: config.projectId,
@@ -114,7 +116,7 @@ export async function processOne(
         "legacy_pass_unmapped",
       ].includes(code),
     });
-    console.error(JSON.stringify({ component: "billing_worker", code }));
+    logEvent("error", "billing_worker", code, { requestId });
     return "retry";
   }
 }
@@ -122,26 +124,27 @@ export async function processOne(
 export function workerHandler(config: BillingConfig, repo: BillingRepository) {
   return async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return response(405, "method_not_allowed");
-    if (!config.workerSecret) return response(503, "configuration_unavailable");
+    if (!config.workerSecret) {
+      logEvent("error", "billing_worker", "configuration_unavailable");
+      return response(503, "configuration_unavailable");
+    }
     if (
       !await constantTimeEqual(
         req.headers.get("authorization") ?? "",
         config.workerSecret,
       )
     ) return response(401, "unauthorized");
+    const requestId = crypto.randomUUID();
     try {
       // One bounded reconciliation per invocation. Concurrent calls lease
       // different customers; expired leases cannot overwrite newer work.
-      const outcome = await processOne(repo, config);
-      return response(outcome === "retry" ? 503 : 200, outcome);
+      const outcome = await processOne(repo, config, undefined, requestId);
+      return outcome === "retry"
+        ? response(503, outcome, requestId)
+        : response(200, outcome);
     } catch {
-      console.error(
-        JSON.stringify({
-          component: "billing_worker",
-          code: "worker_unavailable",
-        }),
-      );
-      return response(503, "worker_unavailable");
+      logEvent("error", "billing_worker", "worker_unavailable", { requestId });
+      return response(503, "worker_unavailable", requestId);
     }
   };
 }

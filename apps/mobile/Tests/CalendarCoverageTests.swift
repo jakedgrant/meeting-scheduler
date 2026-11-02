@@ -148,6 +148,7 @@ final class CalendarCoverageTests: XCTestCase {
         let cases: [(name: String, status: Int, body: String, checked: Bool)] = [
             ("primary", 200, #"{"success":true,"coverage":"primary","conflictingIds":["\#(busy.id.uuidString)"]}"#, true),
             ("provider error", 503, #"{"error":"provider_unavailable"}"#, false),
+            ("rate limited", 429, #"{"success":false,"error":"rate_limited","retryAfter":17}"#, false),
             ("unrecognized coverage", 200, #"{"success":true,"coverage":"all","conflictingIds":[]}"#, false),
             ("missing coverage", 200, #"{"success":true,"conflictingIds":[]}"#, false),
         ]

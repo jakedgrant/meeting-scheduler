@@ -3,6 +3,7 @@ package com.meetingscheduler.android.services
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.meetingscheduler.android.FailureLog
 import com.meetingscheduler.android.models.*
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
@@ -17,6 +18,8 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import java.text.SimpleDateFormat
 import java.util.*
+
+private const val TAG = "PollService"
 
 @Serializable
 private data class JoinPollResult(val participant: PollParticipant, val created: Boolean)
@@ -230,7 +233,7 @@ class PollService(
                 }
                 .decodeSingle<Poll>()
         } catch (e: Exception) {
-            println("Failed to load poll: ${e.message}")
+            FailureLog.record(TAG, "Failed to load poll", e)
             null
         }
     }
@@ -245,7 +248,7 @@ class PollService(
 
             response.firstOrNull()
         } catch (e: Exception) {
-            println("Failed to load poll by code: ${e.message}")
+            FailureLog.record(TAG, "Failed to load poll by code", e)
             null
         }
     }
@@ -302,7 +305,7 @@ class PollService(
                 }
                 .decodeList<PollTimeOption>()
         } catch (e: Exception) {
-            println("Failed to load time options: ${e.message}")
+            FailureLog.record(TAG, "Failed to load time options", e)
             emptyList()
         }
     }
@@ -357,7 +360,7 @@ class PollService(
                 }
                 .decodeList<PollParticipant>()
         } catch (e: Exception) {
-            println("Failed to load participants: ${e.message}")
+            FailureLog.record(TAG, "Failed to load participants", e)
             emptyList()
         }
     }
@@ -396,7 +399,7 @@ class PollService(
                 }
                 .decodeList<AvailabilityResponse>()
         } catch (e: Exception) {
-            println("Failed to load responses: ${e.message}")
+            FailureLog.record(TAG, "Failed to load responses", e)
             emptyList()
         }
     }

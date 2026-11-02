@@ -154,7 +154,7 @@ struct SettingsView: View {
         isSigningOut = true
         authService.performSessionTask(
             operation: { _ in try await authService.signOut() },
-            onFailure: { print("Sign out failed: \($0)") },
+            onFailure: { FailureLog.auth.record("Sign out failed", error: $0) },
             onCompletion: { isSigningOut = false }
         )
     }
@@ -162,7 +162,7 @@ struct SettingsView: View {
     private func restorePurchases() {
         authService.performSessionTask(
             operation: { _ in _ = try await purchaseService.restorePurchases() },
-            onFailure: { print("Restore failed: \($0)") }
+            onFailure: { FailureLog.purchases.record("Restore failed", error: $0) }
         )
     }
 

@@ -1,6 +1,7 @@
 package com.meetingscheduler.android.ui
 
 import android.util.Log
+import com.meetingscheduler.android.FailureLog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -71,11 +72,11 @@ fun AuthView(authService: AuthService) {
                         authService.signInWithGoogle(idToken, rawNonce, attempt)
                         Log.d(TAG, "Supabase sign-in completed successfully")
                     } catch (e: GoogleIdTokenParsingException) {
-                        Log.e(TAG, "Received an invalid Google ID token response", e)
+                        FailureLog.record(TAG, "Received an invalid Google ID token response", e)
                         if (authService.isCurrent(attempt)) errorMessage = "Failed to parse Google credentials"
                     } catch (e: kotlinx.coroutines.CancellationException) { throw e
                     } catch (e: Exception) {
-                        Log.e(TAG, "Supabase sign-in failed: ${e.message}", e)
+                        FailureLog.record(TAG, "Supabase sign-in failed", e)
                         if (authService.isCurrent(attempt)) errorMessage = e.message ?: "Sign-in failed"
                     }
                 } else {
@@ -120,9 +121,9 @@ fun AuthView(authService: AuthService) {
                     Log.d(TAG, "No returning user, using Sign In With Google button flow")
                 } catch (e: GetCredentialCancellationException) {
                     // User cancelled One Tap or it failed after account selection, fall through to SIWG
-                    Log.d(TAG, "One Tap cancelled or failed, falling back to Sign In With Google: ${e.message}")
+                    Log.d(TAG, "One Tap cancelled or failed, falling back to Sign In With Google")
                 } catch (e: GetCredentialException) {
-                    Log.d(TAG, "One Tap failed, falling back to Sign In With Google: ${e.type} - ${e.message}")
+                    Log.d(TAG, "One Tap failed, falling back to Sign In With Google: ${e.type}")
                 }
 
                 if (!authService.isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
@@ -140,14 +141,14 @@ fun AuthView(authService: AuthService) {
                 handleSignIn(result, rawNonce, attempt)
 
             } catch (e: GetCredentialCancellationException) {
-                Log.d(TAG, "User cancelled Google sign-in: ${e.message}")
+                Log.d(TAG, "User cancelled Google sign-in")
                 // User cancelled, no error message needed
             } catch (e: GetCredentialException) {
-                Log.e(TAG, "Google sign-in failed: ${e.type} - ${e.message}", e)
+                FailureLog.record(TAG, "Google sign-in failed: ${e.type}", e)
                 if (authService.isCurrent(attempt)) errorMessage = "Google sign-in failed. Please ensure you have a Google account on this device."
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: Exception) {
-                Log.e(TAG, "Unexpected error during Google sign-in: ${e.javaClass.simpleName}", e)
+                FailureLog.record(TAG, "Unexpected error during Google sign-in", e)
                 if (authService.isCurrent(attempt)) errorMessage = e.message ?: "Sign-in failed"
             } finally {
                 if (uiRequest == request) isLoading = false

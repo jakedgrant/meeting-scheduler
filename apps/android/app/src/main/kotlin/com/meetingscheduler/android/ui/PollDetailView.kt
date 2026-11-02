@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.meetingscheduler.android.FailureLog
 import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
@@ -748,7 +749,7 @@ fun PollDetailView(
                             pollService.updatePollStatus(pollId, PollStatus.CLOSED)
                             poll = poll?.copy(status = PollStatus.CLOSED)
                         } catch (e: Exception) {
-                            println("Failed to update status: ${e.message}")
+                            FailureLog.record("PollDetailView", "Failed to update status", e)
                         }
                     }
                     showClosePollDialog = false

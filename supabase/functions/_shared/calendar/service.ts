@@ -1,8 +1,10 @@
+import { logEvent } from "../diagnostics.ts";
 import { pkceChallenge, randomSecret, sha256, TokenCipher } from "./crypto.ts";
 import { CALENDAR_SCOPE } from "./google.ts";
 import {
   type CalendarConfig,
   CalendarError,
+  type CheckAdmission,
   connected,
   type Connection,
   type Identity,
@@ -103,7 +105,10 @@ export class CalendarService {
     };
   }
 
-  async callback(parameters: URLSearchParams): Promise<string> {
+  async callback(
+    parameters: URLSearchParams,
+    requestId?: string,
+  ): Promise<string> {
     const state = parameters.get("state");
     if (
       !state || !/^[A-Za-z0-9_-]{43}$/.test(state) ||
@@ -203,9 +208,11 @@ export class CalendarService {
       }
     } catch (error) {
       // Error codes only: provider responses and database errors can contain secrets.
-      console.warn(
-        "calendar_oauth_failed",
+      logEvent(
+        "warn",
+        "calendar_oauth",
         error instanceof CalendarError ? error.code : "internal_error",
+        { requestId },
       );
     }
     if (result !== "connected") {
@@ -223,17 +230,27 @@ export class CalendarService {
         });
         if (cleanupToken) await this.revokePending(attempt.user_id);
       } catch {
+        logEvent("error", "calendar_oauth", "finish_failed", { requestId });
         // If durable storage is down, also try to revoke the newly issued token.
         // This does not turn a failed authorization into a successful connection.
         if (cleanupToken) {
           try {
             await this.provider.revoke(cleanupToken);
           } catch {
-            console.error("calendar_oauth_cleanup_required");
+            logEvent("error", "calendar_oauth", "cleanup_required", {
+              requestId,
+            });
           }
         }
       }
     }
+    // The redirect itself succeeds either way, so this line records the real outcome.
+    logEvent(
+      result === "failed" ? "warn" : "info",
+      "calendar_oauth",
+      result,
+      { requestId },
+    );
     returnURL.searchParams.set("calendar", result);
     return returnURL.toString();
   }
@@ -260,7 +277,9 @@ export class CalendarService {
         );
         success = true;
       } catch {
-        console.warn("calendar_revocation_retry");
+        logEvent("warn", "calendar_revocation", "retry_scheduled", {
+          jobId: job.id,
+        });
       }
       await this.repository.call("finish_revocation", undefined, {
         id: job.id,
@@ -398,6 +417,33 @@ export class CalendarService {
   }
 
   async conflicts(identity: Identity, options: TimeOption[]) {
+    const admission = await this.repository.call<CheckAdmission>(
+      "admit_check",
+      identity.userId,
+    );
+    if (!admission.admitted) {
+      throw new CalendarError(
+        "rate_limited",
+        429,
+        "Too many calendar checks. Try again shortly.",
+        admission.retry_after,
+      );
+    }
+    try {
+      return await this.checkConflicts(identity, options);
+    } finally {
+      // The lease expires by itself, so this must not replace the check's result.
+      await this.repository.call("finish_check", identity.userId, {
+        id: admission.id,
+      }).catch(() =>
+        logEvent("warn", "calendar_check", "release_failed", {
+          jobId: admission.id,
+        })
+      );
+    }
+  }
+
+  private async checkConflicts(identity: Identity, options: TimeOption[]) {
     const start = new Date(
       Math.min(...options.map((option) => Date.parse(option.start_time))),
     ).toISOString();

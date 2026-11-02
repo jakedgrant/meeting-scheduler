@@ -59,6 +59,10 @@ test('calendar migration and backend-only repository contract on real Postgres',
     assert.equal(await call('connect', alice, credentials(attempt.generation, attempt.hash)), true);
   };
 
+  const resetAdmissions = () => db.exec('DELETE FROM private.calendar_check_admissions');
+  const admissions = async userId => (await db.query(
+    'SELECT count(*)::int AS n FROM private.calendar_check_admissions WHERE user_id=$1', [userId])).rows[0].n;
+
   await t.test('public profile payloads no longer contain token or calendar columns', async () => {
     const columns = await db.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='profiles'");
     assert.equal(columns.rows.some(row => /google_calendar|calendar_integration/.test(row.column_name)), false);
@@ -76,7 +80,7 @@ test('calendar migration and backend-only repository contract on real Postgres',
       await db.exec(`SET ROLE ${role}`);
       try {
         await assert.rejects(db.query('SELECT public.calendar_admin($1,$2)', ['read', bob]), /permission denied/);
-        for (const table of ['calendar_connections', 'calendar_oauth_attempts', 'calendar_revocations']) {
+        for (const table of ['calendar_connections', 'calendar_oauth_attempts', 'calendar_revocations', 'calendar_check_admissions']) {
           await assert.rejects(db.query(`SELECT * FROM private.${table}`), /permission denied/);
         }
       } finally { await db.exec('RESET ROLE'); }
@@ -85,7 +89,7 @@ test('calendar migration and backend-only repository contract on real Postgres',
 
   await t.test('new objects enable RLS, pin elevated search paths and keep the exposed RPC as invoker', async () => {
     const tables = await db.query("SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='private' AND c.relkind='r' AND c.relname LIKE 'calendar_%'");
-    assert.equal(tables.rows.length, 3);
+    assert.equal(tables.rows.length, 4);
     assert.equal(tables.rows.every(row => row.relrowsecurity), true);
     const functions = await db.query(`SELECT n.nspname,p.proname,p.prosecdef,p.proconfig FROM pg_proc p
       JOIN pg_namespace n ON n.oid=p.pronamespace
@@ -198,9 +202,61 @@ test('calendar migration and backend-only repository contract on real Postgres',
     await call('finish_callback', alice, { state_hash: next.hash });
   });
 
+  await t.test('conflict checks admit two at once and free the slot on finish or lease expiry', async () => {
+    await resetAdmissions();
+    const first = await call('admit_check', alice);
+    const second = await call('admit_check', alice);
+    assert.equal(first.admitted, true);
+    assert.equal(second.admitted, true);
+    const blocked = await call('admit_check', alice);
+    assert.equal(blocked.admitted, false);
+    assert.ok(blocked.retry_after >= 1 && blocked.retry_after <= 5, `retry_after ${blocked.retry_after}`);
+    assert.equal(await admissions(alice), 2, 'a rejected attempt records nothing');
+    assert.equal((await call('admit_check', bob)).admitted, true, 'budgets are per user');
+
+    await call('finish_check', bob, { id: first.id });
+    assert.equal((await call('admit_check', alice)).admitted, false, 'another user cannot free the slot');
+    await call('finish_check', alice, { id: first.id });
+    assert.equal((await call('admit_check', alice)).admitted, true);
+    await db.exec(`UPDATE private.calendar_check_admissions SET lease_expires_at=now()-interval '1 second' WHERE user_id='${alice}'`);
+    assert.equal((await call('admit_check', alice)).admitted, true, 'a crashed worker frees its slot');
+  });
+
+  await t.test('conflict checks are limited to 20 a minute and 200 an hour', async () => {
+    await resetAdmissions();
+    const seed = (count, age) => db.exec(`INSERT INTO private.calendar_check_admissions(user_id,admitted_at,lease_expires_at)
+      SELECT '${alice}', now()-interval '${age}', now()-interval '${age}' FROM generate_series(1,${count})`);
+    await seed(20, '30 seconds');
+    const perMinute = await call('admit_check', alice);
+    assert.equal(perMinute.admitted, false);
+    assert.ok(perMinute.retry_after > 5 && perMinute.retry_after <= 31, `retry_after ${perMinute.retry_after}`);
+    await db.exec(`UPDATE private.calendar_check_admissions SET admitted_at=now()-interval '61 seconds', lease_expires_at=now()-interval '1 second'`);
+    assert.equal((await call('admit_check', alice)).admitted, true, 'the minute window slides');
+
+    await resetAdmissions();
+    await seed(200, '30 minutes');
+    const perHour = await call('admit_check', alice);
+    assert.equal(perHour.admitted, false);
+    assert.ok(perHour.retry_after > 1700 && perHour.retry_after <= 1801, `retry_after ${perHour.retry_after}`);
+    await db.exec(`UPDATE private.calendar_check_admissions SET admitted_at=now()-interval '61 minutes'`);
+    assert.equal((await call('admit_check', alice)).admitted, true, 'expired admissions leave the hour window');
+    assert.equal(await admissions(alice), 1, 'admitting prunes that user\'s expired rows');
+  });
+
+  await t.test('maintenance prunes expired admissions and leaves live ones', async () => {
+    await resetAdmissions();
+    await db.exec(`INSERT INTO private.calendar_check_admissions(user_id,admitted_at,lease_expires_at) VALUES
+      ('${bob}',now()-interval '2 hours',now()-interval '2 hours'),('${bob}',now()-interval '10 minutes',now()-interval '10 minutes')`);
+    await call('rotation_candidates', null, { key_id: 'test' });
+    assert.equal(await admissions(bob), 1);
+  });
+
   await t.test('deleting an account queues revocation instead of orphaning its Google grant', async () => {
     await connect(await begin());
+    await resetAdmissions();
+    assert.equal((await call('admit_check', alice)).admitted, true);
     await db.exec(`DELETE FROM auth.users WHERE id='${alice}'`);
+    assert.equal(await admissions(alice), 0);
     assert.equal(await call('read', alice), null);
     assert.equal(await call('pending_revocation', alice), true);
     assert.equal((await db.query('SELECT count(*)::int AS n FROM private.calendar_oauth_attempts')).rows[0].n, 0);

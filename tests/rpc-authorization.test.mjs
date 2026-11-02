@@ -48,6 +48,7 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
   `);
 
   let calendarBefore;
+  let calendarAfterF02;
   let defaultsBefore;
   const calendarContract = async () => (await db.query(`
     SELECT n.nspname, p.proname, pg_get_functiondef(p.oid) AS definition, p.proacl::text AS acl
@@ -66,6 +67,7 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
       assert.equal(legacy.allowed, true, 'test fixture must exercise legacy PUBLIC and direct grants');
     }
     await db.exec(await readFile(new URL(name, directory), 'utf8'));
+    if (name.endsWith('_privileged_rpc_authorization.sql')) calendarAfterF02 = await calendarContract();
   }
   assert.ok(calendarBefore, 'F02 migration must be replayed');
 
@@ -467,7 +469,10 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
   });
 
   await t.test('calendar service-role definitions/grants and global default privileges remain unchanged', async () => {
-    assert.deepEqual(await calendarContract(), calendarBefore);
+    // F02 leaves the definitions alone; later calendar migrations may extend them but not their grants.
+    assert.deepEqual(calendarAfterF02, calendarBefore);
+    const grants = rows => rows.map(({ proname, acl }) => ({ proname, acl }));
+    assert.deepEqual(grants(await calendarContract()), grants(calendarBefore));
     assert.deepEqual((await db.query('SELECT * FROM pg_default_acl')).rows, defaultsBefore);
     await asRole('service_role', null, async () => {
       assert.equal(await scalar("SELECT public.calendar_admin('session',$1,$2::jsonb) AS result",
