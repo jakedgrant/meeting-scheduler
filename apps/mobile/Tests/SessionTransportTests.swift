@@ -4,11 +4,18 @@ import XCTest
 
 @testable import Shared
 
-private final class LifecycleURLProtocol: URLProtocol, @unchecked Sendable {
-    static let waiting = Mutex<[LifecycleURLProtocol]>([])
+private final class LifecycleURLProtocol: URLProtocol {
+    /// `URLProtocol` marks `Sendable` unavailable, so a subclass can't conform itself.
+    /// Storing `self` in the `Mutex` directly compiled in some Xcode 26.6 builds and not others.
+    struct Waiter: @unchecked Sendable {
+        let item: LifecycleURLProtocol
+        var request: URLRequest { item.request }
+    }
+
+    static let waiting = Mutex<[Waiter]>([])
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() { Self.waiting.withLock { $0.append(self) } }
+    override func startLoading() { Self.waiting.withLock { $0.append(Waiter(item: self)) } }
     override func stopLoading() {}
     static func requestURLs() -> [URL] { waiting.withLock { $0.map { $0.request.url! } } }
     static func count(path: String, method: String? = nil) -> Int {
@@ -17,10 +24,10 @@ private final class LifecycleURLProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     static func reply(path: String, method: String? = nil, status: Int = 200, data: Data) {
-        let item = waiting.withLock { items -> LifecycleURLProtocol in
+        let item = waiting.withLock { items -> Waiter in
             items.remove(
                 at: items.firstIndex { $0.request.url?.path == path && (method == nil || $0.request.httpMethod == method) }!)
-        }
+        }.item
         let response = HTTPURLResponse(
             url: item.request.url!, statusCode: status, httpVersion: nil,
             headerFields: ["Content-Type": "application/json"])!
