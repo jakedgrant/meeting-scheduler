@@ -302,7 +302,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                 try? persistence.saveProfile(response)
                 profile = response
             } catch {
-                print("Failed to load profile: \(error)")
+                FailureLog.auth.record("Failed to load profile", error: error)
             }
         }
     }

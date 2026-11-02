@@ -20,6 +20,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.meetingscheduler.android.FailureLog
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.PurchaseService
@@ -196,7 +197,7 @@ fun SettingsView(
                                     try {
                                         purchaseService?.restorePurchases()
                                     } catch (e: Exception) {
-                                        println("Restore failed: ${e.message}")
+                                        FailureLog.record("SettingsView", "Restore failed", e)
                                     }
                                 }
                             },
@@ -380,7 +381,7 @@ fun SettingsView(
                                     authService.signOut()
                                 } catch (e: kotlinx.coroutines.CancellationException) { throw e
                                 } catch (e: Exception) {
-                                    if (authService.isCurrent(owner, generation)) println("Sign out failed: ${e.message}")
+                                    if (authService.isCurrent(owner, generation)) FailureLog.record("SettingsView", "Sign out failed", e)
                                 } finally {
                                     if (authService.isCurrent(owner, generation)) isSigningOut = false
                                 }

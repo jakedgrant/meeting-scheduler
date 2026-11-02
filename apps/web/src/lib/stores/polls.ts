@@ -210,7 +210,7 @@ export async function loadPollByCode(code: string): Promise<Poll | null> {
 
     return data[0] as Poll
   } catch (err) {
-    console.error('Failed to load poll by code:', err)
+    console.error('Failed to load poll by code')
     return null
   }
 }
@@ -434,7 +434,7 @@ export async function updatePollStatus(pollId: string, status: Poll['status']) {
 
   if (identity !== identityGeneration || generation !== loadGeneration || get(currentPoll)?.id !== pollId) return
   if (error) {
-    console.error('Failed to update poll status:', error)
+    console.error('Failed to update poll status')
     throw error
   }
 

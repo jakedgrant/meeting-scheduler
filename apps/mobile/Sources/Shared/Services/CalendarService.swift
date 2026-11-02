@@ -105,7 +105,7 @@ public final class CalendarService: CalendarServiceProtocol {
                     return granted
                 #endif
             } catch {
-                print("Calendar access request failed: \(error)")
+                FailureLog.calendar.record("Calendar access request failed", error: error)
                 return false
             }
         }
@@ -421,7 +421,7 @@ public final class CalendarService: CalendarServiceProtocol {
                 try eventStore.save(event, span: .thisEvent)
                 return true
             } catch {
-                print("Failed to save event to calendar: \(error)")
+                FailureLog.calendar.record("Failed to save event to calendar", error: error)
                 return false
             }
         }

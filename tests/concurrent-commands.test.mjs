@@ -158,6 +158,15 @@ test('real PostgreSQL command ordering with independent sessions', { timeout: 90
         [guest ? f.guest.participant.id : f.participant]))[0].n, 0);
     });
   }
+  await t.test('a calendar check waits for a concurrent admission and cannot exceed the in-flight limit', async () => {
+    const admit = client => query(client, 'SELECT public.calendar_admin($1,$2) AS result', ['admit_check', owner]);
+    await role(first, 'service_role'); await role(second, 'service_role');
+    assert.equal((await admit(first))[0].result.admitted, true);
+    const { won, outcome } = await race(() => admit(first), () => admit(second));
+    assert.equal(won[0].result.admitted, true);
+    assert.equal(outcome.result[0].result.admitted, false);
+    assert.equal((await query(admin, 'SELECT count(*)::int AS n FROM private.calendar_check_admissions WHERE user_id=$1', [owner]))[0].n, 2);
+  });
   for (const action of ['edit', 'delete']) {
     await t.test(`finalization commits before waiting option ${action}: mutation rejected`, async () => {
       const f = await fixture();

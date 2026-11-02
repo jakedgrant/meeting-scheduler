@@ -251,7 +251,7 @@ public final class PollService: PollServiceProtocol {
                 return response
             } catch {
                 guard isCurrent(generation) else { return nil }
-                print("Failed to load poll: \(error)")
+                FailureLog.polls.record("Failed to load poll", error: error)
                 return try? persistence.fetchPoll(id: id)
             }
         }
@@ -273,7 +273,7 @@ public final class PollService: PollServiceProtocol {
                 return response.first
             } catch {
                 guard isCurrent(generation) else { return nil }
-                print("Failed to load poll by code: \(error)")
+                FailureLog.polls.record("Failed to load poll by code", error: error)
                 return nil
             }
         }
@@ -429,7 +429,7 @@ public final class PollService: PollServiceProtocol {
                 return response
             } catch {
                 guard isCurrent(generation) else { return [] }
-                print("Failed to load time options: \(error)")
+                FailureLog.polls.record("Failed to load time options", error: error)
                 return (try? persistence.fetchTimeOptions(for: pollId)) ?? []
             }
         }
@@ -487,7 +487,7 @@ public final class PollService: PollServiceProtocol {
                 return response
             } catch {
                 guard isCurrent(generation) else { return [] }
-                print("Failed to load participants: \(error)")
+                FailureLog.polls.record("Failed to load participants", error: error)
                 return (try? persistence.fetchParticipants(for: pollId)) ?? []
             }
         }
@@ -542,7 +542,7 @@ public final class PollService: PollServiceProtocol {
                 return response
             } catch {
                 guard isCurrent(generation) else { return [] }
-                print("Failed to load responses: \(error)")
+                FailureLog.polls.record("Failed to load responses", error: error)
                 return (try? persistence.fetchResponses(for: participantIds)) ?? []
             }
         }

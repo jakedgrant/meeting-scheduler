@@ -9,6 +9,15 @@ export const CALENDAR_SCOPE =
   "https://www.googleapis.com/auth/calendar.events.freebusy";
 const TIMEOUT_MS = 10000;
 
+// Google reports exhausted quota as 429, or as 403 with one of these reasons.
+async function rateLimited(response: Response): Promise<boolean> {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  const body = await response.json().catch(() => null);
+  return ["rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"]
+    .includes(body?.error?.errors?.[0]?.reason);
+}
+
 export class GoogleCalendarProvider implements Provider {
   constructor(
     private clientId: string,
@@ -176,7 +185,9 @@ export class GoogleCalendarProvider implements Provider {
     }
     if (!response.ok) {
       throw new CalendarError(
-        "provider_unavailable",
+        await rateLimited(response)
+          ? "provider_rate_limited"
+          : "provider_unavailable",
         503,
         "Calendar conflicts could not be checked.",
       );

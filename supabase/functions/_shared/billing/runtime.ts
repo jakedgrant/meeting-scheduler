@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.89.0";
+import { logEvent } from "../diagnostics.ts";
 import { BillingConfig, BillingError, BillingRepository } from "./types.ts";
 import { response, webhookHandler } from "./webhook.ts";
 import { workerHandler } from "./worker.ts";
@@ -76,12 +77,7 @@ export function billingRuntime(mode: "webhook" | "worker") {
         ? webhookHandler(settings, repository())
         : workerHandler(settings, repository()))(req);
     } catch {
-      console.error(
-        JSON.stringify({
-          component: "billing_runtime",
-          code: "configuration_unavailable",
-        }),
-      );
+      logEvent("error", "billing_runtime", "configuration_unavailable");
       return response(503, "configuration_unavailable");
     }
   };

@@ -1,3 +1,4 @@
+import { logEvent } from "../diagnostics.ts";
 import { base64url, pkceChallenge, sha256, TokenCipher } from "./crypto.ts";
 import { CALENDAR_SCOPE, GoogleCalendarProvider } from "./google.ts";
 import { calendarHandler } from "./http.ts";
@@ -66,6 +67,8 @@ class MemoryRepository implements Repository {
   attempts = new Map<string, OAuthAttempt & { consumed?: boolean }>();
   jobs: Revocation[] = [];
   activeSession = true;
+  admission: { admitted: boolean; retry_after?: number } = { admitted: true };
+  finishFails = false;
   calls: {
     action: Operation;
     userId?: string;
@@ -220,6 +223,16 @@ class MemoryRepository implements Repository {
           JSON.parse(record.refresh_token_ciphertext).key_id !== data.key_id
         ).map((record) => ({ ...record }));
         break;
+      case "admit_check":
+        result = this.admission.admitted
+          ? { admitted: true, id: crypto.randomUUID() }
+          : this.admission;
+        break;
+      case "finish_check":
+        if (this.finishFails) {
+          return Promise.reject(new Error("storage down"));
+        }
+        break;
     }
     return Promise.resolve(result as T);
   }
@@ -238,6 +251,7 @@ class TestProvider implements Provider {
   refreshHook?: () => Promise<TokenSet>;
   busyHook?: () => Promise<{ start: string; end: string }[]>;
   revokeFails = false;
+  busyCalls = 0;
   exchanges: { code: string; verifier: string }[] = [];
   refreshes: string[] = [];
   revoked: string[] = [];
@@ -259,6 +273,7 @@ class TestProvider implements Provider {
     return this.refreshHook ? await this.refreshHook() : { ...tokens };
   }
   async freeBusy() {
+    this.busyCalls++;
     return this.busyHook
       ? await this.busyHook()
       : [{ start: slot.start_time, end: slot.end_time }];
@@ -325,6 +340,23 @@ async function fixture(cipher?: TokenCipher) {
     assert(result.includes("calendar=connected"));
   };
   return { repository, provider, service, cipher, handlers, connect };
+}
+
+async function captureLogs(action: () => Promise<unknown>) {
+  const originals = {
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+  };
+  const lines: string[] = [];
+  const record = (...values: unknown[]) => lines.push(values.join(" "));
+  Object.assign(console, { info: record, warn: record, error: record });
+  try {
+    await action();
+  } finally {
+    Object.assign(console, originals);
+  }
+  return lines;
 }
 
 function request(
@@ -784,6 +816,284 @@ Deno.test("FreeBusy per-calendar errors and malformed coverage are failures, eve
       "provider_response_invalid",
     );
   }
+});
+
+Deno.test("over budget checks return 429 with Retry-After and do no provider work", async () => {
+  const f = await fixture();
+  await f.connect();
+  f.repository.admission = { admitted: false, retry_after: 17 };
+  f.repository.calls = [];
+  const response = await f.handlers("conflicts")(
+    request({ timeOptions: [slot] }),
+  );
+  equal(response.status, 429);
+  equal(response.headers.get("Retry-After"), "17");
+  const body = await response.json();
+  equal(body.error, "rate_limited");
+  equal(body.retryAfter, 17);
+  assert(!("conflictingIds" in body));
+  equal(f.provider.busyCalls, 0);
+  equal(f.provider.refreshes, []);
+  assert(!f.repository.calls.some((call) => call.action === "read"));
+  assert(!f.repository.calls.some((call) => call.action === "finish_check"));
+});
+
+Deno.test("invalid requests spend no budget and do no provider work", async () => {
+  const f = await fixture();
+  await f.connect();
+  f.repository.calls = [];
+  const response = await f.handlers("conflicts")(
+    request({ timeOptions: [] }),
+  );
+  equal(response.status, 400);
+  equal(f.provider.busyCalls, 0);
+  assert(!f.repository.calls.some((call) => call.action === "admit_check"));
+});
+
+Deno.test("a finished check releases its slot on success and failure, without changing the result", async () => {
+  const f = await fixture();
+  await f.connect();
+  const released = () =>
+    f.repository.calls.filter((call) => call.action === "finish_check");
+  equal(
+    (await f.handlers("conflicts")(request({ timeOptions: [slot] }))).status,
+    200,
+  );
+  equal(released().length, 1);
+  f.provider.busyHook = () =>
+    Promise.reject(
+      new CalendarError("provider_unavailable", 503, "Could not check."),
+    );
+  equal(
+    (await f.handlers("conflicts")(request({ timeOptions: [slot] }))).status,
+    503,
+  );
+  equal(released().length, 2);
+
+  f.provider.busyHook = undefined;
+  f.repository.finishFails = true;
+  let response!: Response;
+  const logs = await captureLogs(async () => {
+    response = await f.handlers("conflicts")(request({ timeOptions: [slot] }));
+  });
+  equal(response.status, 200);
+  assert(logs.some((line) => line.includes("release_failed")));
+});
+
+Deno.test("storage failure while admitting a check fails closed", async () => {
+  const f = await fixture();
+  await f.connect();
+  const call = f.repository.call.bind(f.repository);
+  f.repository.call = <T>(
+    action: Operation,
+    id?: string,
+    data?: Record<string, unknown>,
+  ) =>
+    action === "admit_check"
+      ? Promise.reject(
+        new CalendarError("calendar_storage_unavailable", 503, "Unavailable."),
+      )
+      : call<T>(action, id, data);
+  equal(
+    (await f.handlers("conflicts")(request({ timeOptions: [slot] }))).status,
+    503,
+  );
+  equal(f.provider.busyCalls, 0);
+});
+
+Deno.test("Google quota responses are distinguished from other provider failures", async () => {
+  const cases: [number, unknown, string][] = [
+    [429, {}, "provider_rate_limited"],
+    [403, {
+      error: { errors: [{ reason: "userRateLimitExceeded" }] },
+    }, "provider_rate_limited"],
+    [
+      403,
+      { error: { errors: [{ reason: "forbidden" }] } },
+      "provider_unavailable",
+    ],
+    [403, null, "provider_unavailable"],
+    [500, {}, "provider_unavailable"],
+  ];
+  for (const [status, payload, code] of cases) {
+    const provider = new GoogleCalendarProvider(
+      "client",
+      "secret",
+      "https://project.example.test/callback",
+      () => Promise.resolve(Response.json(payload, { status })),
+    );
+    await rejects(
+      () => provider.freeBusy("access", slot.start_time, slot.end_time),
+      code,
+    );
+  }
+});
+
+Deno.test("logs carry allowlisted fields, trace to the response, and contain no secrets", async () => {
+  const secrets = [
+    "verified-test-token",
+    "cookie-secret",
+    "api-key-secret",
+    tokens.accessToken,
+    tokens.refreshToken!,
+    "provider-error-secret",
+    "calendar@example.test",
+    "server-only-code",
+    userId,
+    sessionId,
+  ];
+  const f = await fixture();
+  const headers = { Cookie: "session=cookie-secret", apikey: "api-key-secret" };
+  let succeeded!: Response, failed!: Response;
+  const logs = await captureLogs(async () => {
+    await f.connect();
+    succeeded = await f.handlers("conflicts")(
+      request({ timeOptions: [slot] }, "verified-test-token", headers),
+    );
+    f.provider.busyHook = () =>
+      Promise.reject(new Error("provider-error-secret " + tokens.accessToken));
+    failed = await f.handlers("conflicts")(
+      request({ timeOptions: [slot] }, "verified-test-token", headers),
+    );
+    // A callback failing on an unexpected provider error, then a retried revocation.
+    const start = await f.service.start(
+      identity,
+      "web",
+      "https://web.example.test",
+    );
+    f.provider.exchangeHook = () =>
+      Promise.reject(new Error("provider-error-secret"));
+    await f.handlers("callback")(
+      new Request(
+        "https://project.example.test/function?code=server-only-code&state=" +
+          new URL(start.authorizationURL).searchParams.get("state"),
+      ),
+    );
+    f.repository.jobs = [{
+      id: crypto.randomUUID(),
+      user_id: userId,
+      token_ciphertext: await f.cipher.encrypt(
+        tokens.refreshToken!,
+        tokenPurpose(userId, "refresh"),
+      ),
+      lease_id: "",
+    }];
+    f.provider.revokeFails = true;
+    await f.service.revokePending();
+  });
+
+  const allowed = new Set([
+    "component",
+    "code",
+    "requestId",
+    "jobId",
+    "kind",
+    "status",
+    "durationMs",
+  ]);
+  const entries = logs.map((line) => JSON.parse(line));
+  for (const entry of entries) {
+    assert(Object.keys(entry).every((field) => allowed.has(field)));
+  }
+  for (const secret of secrets) {
+    assert(!logs.join("\n").includes(secret), `Logged ${secret}`);
+  }
+  const traced = (response: Response) =>
+    entries.find((entry) =>
+      entry.requestId === response.headers.get("X-Request-Id")
+    );
+  const ok = traced(succeeded);
+  equal([ok.code, ok.kind, ok.status], ["ok", "conflicts", 200]);
+  assert(typeof ok.durationMs === "number");
+  const failure = traced(failed);
+  equal([failure.code, failure.status], ["calendar_unavailable", 503]);
+  assert(
+    entries.some((entry) =>
+      entry.component === "calendar_oauth" && entry.requestId
+    ),
+    "Callback failure carries the request ID",
+  );
+  assert(
+    entries.some((entry) =>
+      entry.component === "calendar_revocation" && entry.jobId
+    ),
+    "Revocation retry carries the job ID",
+  );
+});
+
+Deno.test("the log helper drops fields outside its allowlist, whatever object it receives", async () => {
+  const fields = { requestId: "trace", userId, authorization: "Bearer secret" };
+  const [line] = await captureLogs(() =>
+    Promise.resolve(logEvent("warn", "component", "code", fields))
+  );
+  equal(JSON.parse(line), {
+    component: "component",
+    code: "code",
+    requestId: "trace",
+  });
+});
+
+Deno.test("every OAuth callback outcome logs under its request ID, including failures that throw nothing", async () => {
+  const outcomes = async (
+    arrange: (
+      f: Awaited<ReturnType<typeof fixture>>,
+    ) => void,
+    extra: Record<string, string>,
+  ) => {
+    const f = await fixture();
+    const start = await f.service.start(
+      identity,
+      "web",
+      "https://web.example.test",
+    );
+    arrange(f);
+    const url = new URL("https://project.example.test/function");
+    url.searchParams.set(
+      "state",
+      new URL(start.authorizationURL).searchParams.get("state")!,
+    );
+    for (const [name, value] of Object.entries(extra)) {
+      url.searchParams.set(name, value);
+    }
+    let response!: Response;
+    const logs = await captureLogs(async () => {
+      response = await f.handlers("callback")(new Request(url));
+    });
+    const requestId = response.headers.get("X-Request-Id");
+    return logs.map((line) => JSON.parse(line))
+      .filter((entry) =>
+        entry.component === "calendar_oauth" && entry.requestId === requestId
+      )
+      .map((entry) => entry.code);
+  };
+  equal(await outcomes(() => {}, { code: "server-only-code" }), ["connected"]);
+  equal(await outcomes(() => {}, { error: "access_denied" }), ["cancelled"]);
+  equal(await outcomes(() => {}, { error: "server_error" }), ["failed"]);
+  // A disconnect during the exchange fences the save: connect returns false without throwing.
+  equal(
+    await outcomes((f) => {
+      f.provider.exchangeHook = () => {
+        f.repository.rows.get(userId)!.generation = crypto.randomUUID();
+        return Promise.resolve({ ...tokens });
+      };
+    }, { code: "server-only-code" }),
+    ["failed"],
+  );
+  const call = (f: Awaited<ReturnType<typeof fixture>>) => {
+    const original = f.repository.call.bind(f.repository);
+    f.repository.call = <T>(
+      action: Operation,
+      id?: string,
+      data?: Record<string, unknown>,
+    ) =>
+      action === "finish_callback"
+        ? Promise.reject(new Error("storage down"))
+        : original<T>(action, id, data);
+  };
+  equal(await outcomes(call, { error: "server_error" }), [
+    "finish_failed",
+    "failed",
+  ]);
 });
 
 Deno.test("option validation bounds workload and rejects duplicate IDs, naive timestamps and invalid ranges", async () => {

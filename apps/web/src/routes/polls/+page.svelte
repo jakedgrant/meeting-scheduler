@@ -78,7 +78,7 @@
 			// Navigate to the poll
 			goto(`/polls/${poll.id}`);
 		} catch (err) {
-			console.error('Failed to join poll:', err);
+			console.error('Failed to join poll');
 			if (isCurrent()) joinError = 'Failed to join poll. Please try again.';
 		} finally {
 			if (isCurrent()) joinLoading = false;

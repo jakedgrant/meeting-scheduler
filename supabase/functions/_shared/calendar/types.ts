@@ -1,5 +1,10 @@
 export class CalendarError extends Error {
-  constructor(readonly code: string, readonly status: number, message: string) {
+  constructor(
+    readonly code: string,
+    readonly status: number,
+    message: string,
+    readonly retryAfter?: number,
+  ) {
     super(message);
   }
 }
@@ -48,6 +53,9 @@ export interface BusyInterval {
   start: string;
   end: string;
 }
+export type CheckAdmission =
+  | { admitted: true; id: string }
+  | { admitted: false; retry_after: number };
 export interface Provider {
   authorizationURL(state: string, challenge: string): string;
   exchange(code: string, verifier: string): Promise<TokenSet>;
@@ -76,7 +84,9 @@ export type Operation =
   | "finish_callback"
   | "claim_revocations"
   | "finish_revocation"
-  | "rotation_candidates";
+  | "rotation_candidates"
+  | "admit_check"
+  | "finish_check";
 export interface Repository {
   call<T>(
     action: Operation,

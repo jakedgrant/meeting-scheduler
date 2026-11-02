@@ -2,6 +2,7 @@ import {
   createClient,
   type SupabaseClient,
 } from "npm:@supabase/supabase-js@2.89.0";
+import { logEvent } from "../diagnostics.ts";
 import { TokenCipher } from "./crypto.ts";
 import { GoogleCalendarProvider } from "./google.ts";
 import { CalendarService } from "./service.ts";
@@ -192,7 +193,7 @@ export function serveCalendar(
       });
       return await calendarHandler(kind, await dependencies)(request);
     } catch {
-      console.error("calendar_configuration_unavailable");
+      logEvent("error", "calendar_runtime", "configuration_unavailable");
       return Response.json({
         success: false,
         error: "calendar_unavailable",

@@ -22,7 +22,7 @@ class AppContainer(
     val purchaseService: PurchaseService? = try {
         PurchaseService(application, applicationScope)
     } catch (e: Exception) {
-        println("Failed to initialize PurchaseService: ${e.message}")
+        FailureLog.record("AppContainer", "Failed to initialize PurchaseService", e)
         null
     }
 

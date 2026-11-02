@@ -641,6 +641,57 @@ Deno.test("unknown identities and missing profiles fail durably before provider 
   }
 });
 
+Deno.test("missing webhook or worker auth logs the failure it returns", async () => {
+  const logged: string[] = [];
+  const original = console.error;
+  console.error = (line: string) => logged.push(line);
+  try {
+    const post = () =>
+      new Request("https://project.example.test/billing", { method: "POST" });
+    const repo = new Repository();
+    const webhook = webhookHandler(
+      { ...config, webhookAuth: undefined },
+      repo,
+    );
+    const worker = workerHandler({ ...config, workerSecret: undefined }, repo);
+    assert.equal((await webhook(post())).status, 503);
+    assert.equal((await worker(post())).status, 503);
+    assert.deepEqual(logged.map((line) => JSON.parse(line)), [
+      { component: "billing_webhook", code: "configuration_unavailable" },
+      { component: "billing_worker", code: "configuration_unavailable" },
+    ]);
+    assert.equal(repo.calls.length, 0);
+  } finally {
+    console.error = original;
+  }
+});
+
+Deno.test("a worker failure returns a request ID that matches its log line", async () => {
+  const repo = new Repository();
+  repo.nextClaim = claim({ customer_id: "$RCAnonymousID:test" });
+  const logged: string[] = [];
+  const original = console.error;
+  console.error = (line: string) => logged.push(line);
+  try {
+    const result = await workerHandler(config, repo)(
+      new Request("https://project.example.test/worker", {
+        method: "POST",
+        headers: { authorization: config.workerSecret! },
+      }),
+    );
+    assert.equal(result.status, 503);
+    const body = await result.json();
+    assert.equal(body.code, "retry");
+    assert.deepEqual(JSON.parse(logged[0]), {
+      component: "billing_worker",
+      code: "unknown_identity",
+      requestId: body.requestId,
+    });
+  } finally {
+    console.error = original;
+  }
+});
+
 Deno.test("processing/provider errors retain work; stale completion and worker-secret checks are explicit", async () => {
   const repo = new Repository();
   repo.error = "database_unavailable";

@@ -143,4 +143,4 @@ The `Android` workflow above runs steps 1–4 on GitHub's runners. Its first run
 - Android `PurchaseService`: `Purchases.logLevel` is `DEBUG` only when `BuildConfig.DEBUG`, and `WARN` otherwise. `buildFeatures.buildConfig = true` was enabled so that `BuildConfig` is generated.
 - iOS `PurchaseService` (in the `apps/mobile` package): `#if DEBUG` selects `.debug`, otherwise `.warn`.
 
-Still open under F27: both services print the RevenueCat `originalAppUserId` on login, and raw error messages on failure, through `println`/`print` in every build type.
+F27 replaced the remaining raw error logging on both clients. See [integration diagnostics](integration-diagnostics.md#client-logs).

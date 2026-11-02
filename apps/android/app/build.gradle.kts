@@ -123,6 +123,11 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        // FailureLog and Kermit both reach android.util.Log from JVM tests, where the stub would throw.
+        unitTests.isReturnDefaultValues = true
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
