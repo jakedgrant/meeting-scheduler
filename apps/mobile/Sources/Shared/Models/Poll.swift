@@ -74,7 +74,7 @@ public struct Poll: Codable, Identifiable, Sendable {
         status: PollStatus = .draft,
         timezone: String = "UTC",
         isPremium: Bool = false,
-        maxParticipants: Int = 10,
+        maxParticipants: Int = PollCreationEntitlement.free.participantLimit,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         closesAt: Date? = nil,

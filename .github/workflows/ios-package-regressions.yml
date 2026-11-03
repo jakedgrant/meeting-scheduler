@@ -5,6 +5,7 @@ on:
     paths:
       - 'apps/mobile/**'
       - 'packages/shared-config/date-time-fixtures.json'
+      - 'packages/shared-config/entitlements.json'
       - '.github/workflows/ios-package-regressions.yml'
       - 'scripts/ci/ios-package-regressions.sh'
       - 'scripts/ci/check-ios-environment-keys.sh'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'apps/mobile/**'
       - 'packages/shared-config/date-time-fixtures.json'
+      - 'packages/shared-config/entitlements.json'
       - '.github/workflows/ios-package-regressions.yml'
       - 'scripts/ci/ios-package-regressions.sh'
       - 'scripts/ci/check-ios-environment-keys.sh'

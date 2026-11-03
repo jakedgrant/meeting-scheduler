@@ -1,6 +1,20 @@
 # Architecture remediation progress
 
-Updated November 2, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+Updated November 3, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+
+## F23 entitlement limits and iOS calendar write, November 3
+
+Branch `claude/next-remedy-tranche` started from fetched main `a5f1035`, which contains merged #80. It takes the two iOS items the section below left open.
+
+`packages/shared-config/entitlements.json` is now checked on both sides. A new subtest in `tests/creation-commands.test.mjs` reads the file and creates polls on each tier: free gets the file's capacity and is refused past its active-poll count, Pro and Team get their capacity with no poll count, and an event pass gets its capacity. On iOS, `PollCreationEntitlement` now carries `participantLimit` and `allowsUnlimitedActivePolls`, and the new `EntitlementContractTests` compares them, the tier names and the `Poll` default capacity with the file. The paywall's participant line, `Poll`'s default capacity and the Pro/Team identifiers in `PurchaseService` and `Subscription` read from that enum instead of repeating the numbers and strings. The server still sets each poll's capacity; the client copy only describes plans. The file's `features` lists aren't enforced anywhere and aren't checked. The iOS workflow now also runs when the file changes.
+
+Adding the final time to the device calendar moved from `FinalDateDisplay` to `PollDetailModel`. The model builds a `DeviceCalendarEvent` from the finalized poll, including the all-day date in the poll's zone, and `addFinalTimeToCalendar()` reports `added`, `accessDenied` or `failed` through `calendarAdd` until the screen acknowledges it. `CalendarServiceProtocol.addEventToCalendar` now takes that event and returns the outcome rather than a `Bool`. Three behaviors changed. The first tap on a device that hadn't been asked for calendar access used to show the prompt and then do nothing; it now saves the event once access is granted. A denied or failed save used to show nothing; it now shows an alert. The success alert used to ignore its dismissal; it now clears. The button is disabled while an add runs, and a result that arrives after the screen leaves is dropped.
+
+Local results on Xcode 27.1 with pinned dependencies and a fresh iPhone 17 Pro / iOS 27.0 simulator, deleted afterwards: **179 iOS package tests** (9 new), 10 repeats of `PollDetailModelTests`, the package in Debug and Release, and `scripts/ci/check-ios-environment-keys.sh`. The tracked app wrapper wasn't built locally. **168 database tests** pass with `npm run test:database`. In a scratch edit, changing Team's capacity in the fixture to 90 made the database subtest fail with `100 !== 90`. The `CalendarService` path that asks for access and then saves isn't covered by a test, because its result depends on the simulator's calendar permission; the model tests use the mock. Previews weren't opened, the app wasn't launched, and Xcode 26.6 wasn't run locally, so this branch's CI is the first 26.6 run.
+
+Still open in F23: web type generation, the web and Android paywall copies of the limits, Android's global `SupabaseService` object and its screen orchestration.
+
+Not changed here: the app's `Info.plist` has only `NSCalendarsUsageDescription`. Since iOS 17, `requestFullAccessToEvents()` reads `NSCalendarsFullAccessUsageDescription`, so the access prompt that both the conflict check and the new save-after-grant path rely on may not appear. Check this on a device before relying on either path.
 
 ## F23 iOS clock and screen workflows, November 2
 

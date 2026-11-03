@@ -24,12 +24,5 @@ public protocol CalendarServiceProtocol: AnyObject, Observable, Sendable {
 
     // MARK: - Add to Calendar
 
-    func addEventToCalendar(
-        title: String,
-        startDate: Date,
-        endDate: Date,
-        isAllDay: Bool,
-        notes: String?,
-        location: String?
-    ) async -> Bool
+    func addEventToCalendar(_ event: DeviceCalendarEvent) async -> DeviceCalendarAddResult
 }

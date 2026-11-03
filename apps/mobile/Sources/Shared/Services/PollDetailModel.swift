@@ -14,9 +14,17 @@ public enum ResponseDeadlineStatus: Equatable, Sendable {
     case pastDue
 }
 
+/// Progress of adding a finalized poll's meeting to the device calendar.
+public enum CalendarAddState: Equatable, Sendable {
+    case idle
+    case adding
+    /// Stays until the screen acknowledges it with `acknowledgeCalendarAdd()`.
+    case finished(DeviceCalendarAddResult)
+}
+
 /// One visit to a poll's detail screen: it loads the poll for the signed-in account, edits that
-/// account's availability, checks the device and Google calendars, and runs the join, save,
-/// close and finalize commands.
+/// account's availability, checks the device and Google calendars, runs the join, save, close
+/// and finalize commands, and adds the final time to the device calendar.
 ///
 /// Each `load()` starts a new visit and `suspend()` ends one. A result applies only while the
 /// visit and account that started it are still current, so a reply that arrives after the
@@ -34,6 +42,7 @@ public final class PollDetailModel {
     public private(set) var responses: [AvailabilityResponse] = []
     public private(set) var actionError: String?
     public private(set) var commentError: String?
+    public private(set) var calendarAdd = CalendarAddState.idle
     public private(set) var calendarCheck = CalendarCheckResult.none
     public private(set) var isCheckingCalendar = false
     public private(set) var isLoading = true
@@ -83,6 +92,11 @@ public final class PollDetailModel {
     /// The signed-in account's entry in `participants`, once it has joined.
     public var myParticipant: PollParticipant? {
         myParticipantId.flatMap { id in participants.first { $0.id == id } }
+    }
+
+    /// The meeting to add to the device calendar, once the poll has a final time.
+    public var finalEvent: DeviceCalendarEvent? {
+        poll.flatMap { DeviceCalendarEvent(finalTimeOf: $0, options: timeOptions) }
     }
 
     public var isCreator: Bool {
@@ -151,6 +165,7 @@ public final class PollDetailModel {
         editor.selectAccount(account, pollId: pollId)
         poll = nil; timeOptions = []; participants = []; responses = []; myParticipantId = nil
         calendarCheck = .none; isCheckingCalendar = false; actionError = nil; commentError = nil
+        calendarAdd = .idle
         isSelectingFinalDate = false
         isLoading = true
         defer { if generation == self.generation { isLoading = false } }
@@ -279,6 +294,26 @@ public final class PollDetailModel {
             onCompletion: { self.isSelectingFinalDate = false },
             isCurrent: { generation == self.generation }
         )
+    }
+
+    /// Adds `finalEvent` to the device calendar. Does nothing before the poll has a final time
+    /// or while an earlier add is still running.
+    @discardableResult
+    public func addFinalTimeToCalendar() -> Task<Void, Never>? {
+        guard let event = finalEvent, calendarAdd != .adding else { return nil }
+        let generation = generation
+        calendarAdd = .adding
+        return auth.performSessionTask(
+            operation: { _ in await self.calendar.addEventToCalendar(event) },
+            onSuccess: { result in self.calendarAdd = .finished(result) },
+            onCompletion: { if self.calendarAdd == .adding { self.calendarAdd = .idle } },
+            isCurrent: { generation == self.generation }
+        )
+    }
+
+    /// Clears a finished add once the screen has shown its result.
+    public func acknowledgeCalendarAdd() {
+        if case .finished = calendarAdd { calendarAdd = .idle }
     }
 
     // MARK: - Private

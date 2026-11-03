@@ -16,14 +16,21 @@ final class PollDetailModelTests: XCTestCase {
         let participant: PollParticipant
     }
 
-    private func fixture(closesAt: Date? = nil, status: PollStatus = .active, creatorId: UUID? = nil) -> Fixture {
-        let poll = Poll(
-            creatorId: creatorId ?? UUID(), title: "Planning", status: status, timezone: "America/Chicago",
-            closesAt: closesAt, shareCode: "ABC123")
+    private func fixture(
+        closesAt: Date? = nil, status: PollStatus = .active, creatorId: UUID? = nil, allDay: Bool = false,
+        finalized: Bool = false
+    ) -> Fixture {
+        var poll = Poll(
+            creatorId: creatorId ?? UUID(), title: "Planning", description: "Agenda", location: "Room 4",
+            status: status, timezone: "America/Chicago", closesAt: closesAt, shareCode: "ABC123")
         let options = (0..<3).map { index in
             PollTimeOption(
                 pollId: poll.id, startTime: now.addingTimeInterval(Double(index + 1) * 86_400),
-                endTime: now.addingTimeInterval(Double(index + 1) * 86_400 + 3_600))
+                endTime: now.addingTimeInterval(Double(index + 1) * 86_400 + 3_600), isAllDay: allDay)
+        }
+        if finalized {
+            poll.selectedStartTime = options[0].startTime
+            poll.selectedEndTime = options[0].endTime
         }
         let participant = PollParticipant(pollId: poll.id, userId: account)
         let other = PollParticipant(pollId: poll.id, anonymousName: "Guest")
@@ -199,5 +206,82 @@ final class PollDetailModelTests: XCTestCase {
         await fixture.model.close()?.value
         XCTAssertEqual(fixture.model.poll?.status, .closed)
         XCTAssertFalse(fixture.model.acceptsResponses)
+    }
+
+    // MARK: - Device calendar
+
+    /// A loaded fixture poll that was finalized on the first option, which starts at
+    /// 2027-01-16T08:00:00Z: 02:00 on January 16 in Chicago. The poll is stored finalized so a
+    /// later `load()` keeps its final time.
+    private func finalizedFixture(allDay: Bool = false) async -> Fixture {
+        let fixture = fixture(status: .closed, creatorId: account, allDay: allDay, finalized: true)
+        await fixture.model.load()
+        return fixture
+    }
+
+    func testFinalEventIsTheFinalizedTimeWithThePollsDetails() async {
+        let fixture = fixture(status: .closed, creatorId: account)
+        await fixture.model.load()
+        XCTAssertNil(fixture.model.finalEvent)
+        XCTAssertNil(fixture.model.addFinalTimeToCalendar())
+
+        await fixture.model.finalize(with: fixture.options[0])?.value
+        XCTAssertEqual(
+            fixture.model.finalEvent,
+            DeviceCalendarEvent(
+                title: "Planning", start: fixture.options[0].startTime, end: fixture.options[0].endTime,
+                allDayDate: nil, notes: "Agenda", location: "Room 4"))
+    }
+
+    func testAllDayFinalEventUsesTheDateInThePollsZone() async {
+        let fixture = await finalizedFixture(allDay: true)
+        XCTAssertEqual(fixture.model.finalEvent?.allDayDate, CalendarDay("2027-01-16"))
+    }
+
+    func testAddingToTheCalendarReportsEachOutcomeUntilAcknowledged() async throws {
+        let fixture = await finalizedFixture()
+        await fixture.model.addFinalTimeToCalendar()?.value
+        XCTAssertEqual(fixture.model.calendarAdd, .finished(.added))
+        XCTAssertEqual(fixture.calendar.addedEvents, [try XCTUnwrap(fixture.model.finalEvent)])
+
+        fixture.model.acknowledgeCalendarAdd()
+        XCTAssertEqual(fixture.model.calendarAdd, .idle)
+
+        for result in [DeviceCalendarAddResult.accessDenied, .failed] {
+            fixture.calendar.eventAdder = { _ in result }
+            await fixture.model.addFinalTimeToCalendar()?.value
+            XCTAssertEqual(fixture.model.calendarAdd, .finished(result))
+            fixture.model.acknowledgeCalendarAdd()
+        }
+    }
+
+    func testAddRunsOnceAtATimeAndItsResultIsDroppedAfterTheScreenLeaves() async {
+        let fixture = await finalizedFixture()
+        var release: CheckedContinuation<Void, Never>?
+        let started = expectation(description: "add started")
+        fixture.calendar.eventAdder = { _ in
+            await withCheckedContinuation {
+                release = $0
+                started.fulfill()
+            }
+            return .added
+        }
+        guard let task = fixture.model.addFinalTimeToCalendar() else { return XCTFail("Add did not start") }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertEqual(fixture.model.calendarAdd, .adding)
+        XCTAssertNil(fixture.model.addFinalTimeToCalendar())
+
+        fixture.model.suspend()
+        XCTAssertNotNil(release)
+        release?.resume()
+        await task.value
+
+        // The stale task neither reports its result nor clears the state; the next visit does.
+        XCTAssertEqual(fixture.model.calendarAdd, .adding)
+        fixture.calendar.eventAdder = nil
+        await fixture.model.load()
+        XCTAssertEqual(fixture.model.calendarAdd, .idle)
+        await fixture.model.addFinalTimeToCalendar()?.value
+        XCTAssertEqual(fixture.model.calendarAdd, .finished(.added))
     }
 }

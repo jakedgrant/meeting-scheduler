@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import {bootstrapCreationDatabase,creationPayload} from './helpers/creation-database.mjs';
 const code = value => error => error.code===value;
@@ -117,6 +118,24 @@ test('F05/F09 atomic creation, retry identity and server limits', async t => {
     await db.exec('DROP TRIGGER fail_creation_option ON public.poll_time_options;DROP FUNCTION public.fail_creation_option()');
     await create(id,creationPayload({use_event_pass:true}),op);
     assert.deepEqual(await counts(id),{polls:1,options:2,spent:1,requests:1});
+  });
+  await t.test('creation applies the limits in packages/shared-config/entitlements.json',async()=>{
+    // Clients describe plans from this file, so the command must match it tier by tier.
+    const fixture=JSON.parse(await readFile(new URL('../packages/shared-config/entitlements.json',import.meta.url),'utf8'));
+    const free=await user();
+    assert.equal((await create(free)).poll.max_participants,fixture.free_tier.limits.max_participants_per_poll);
+    for(let made=1;made<fixture.free_tier.limits.max_active_polls;made++)await create(free);
+    await assert.rejects(create(free),code('P0001'));
+    assert.deepEqual(Object.keys(fixture.entitlements).sort(),['pro_access','team_access']);
+    for(const[tier,{limits}]of Object.entries(fixture.entitlements)){
+      assert.equal(limits.max_active_polls,-1,`${tier} is unlimited`);
+      const id=await user();await grant(id,tier);const r=await create(id);await create(id);
+      assert.equal(r.entitlement,tier);assert.equal(r.poll.max_participants,limits.max_participants_per_poll);
+    }
+    const holder=await user();await addPass(holder);
+    const funded=await create(holder,creationPayload({use_event_pass:true}));
+    assert.equal(funded.entitlement,'event_pass');
+    assert.equal(funded.poll.max_participants,fixture.event_pass.limits.max_participants_per_poll);
   });
   await t.test('active quota cannot be bypassed with another operation',async()=>{
     const id=await user();await create(id);await assert.rejects(create(id),code('P0001'));

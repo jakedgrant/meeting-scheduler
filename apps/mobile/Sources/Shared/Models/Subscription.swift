@@ -34,11 +34,11 @@ public struct Subscription: Codable, Identifiable, Sendable {
     }
 
     public var hasProAccess: Bool {
-        isActive && (entitlement == "pro_access" || entitlement == "team_access")
+        isActive && (entitlement == PollCreationEntitlement.pro.rawValue || hasTeamAccess)
     }
 
     public var hasTeamAccess: Bool {
-        isActive && entitlement == "team_access"
+        isActive && entitlement == PollCreationEntitlement.team.rawValue
     }
 
     public init(
