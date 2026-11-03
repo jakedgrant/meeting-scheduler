@@ -45,7 +45,7 @@ public final class PersistedPoll {
         selectedStartTime: Date?,
         selectedEndTime: Date?,
         shareCode: String,
-        lastSyncedAt: Date = Date()
+        lastSyncedAt: Date
     ) {
         self.id = id
         self.creatorId = creatorId
@@ -88,7 +88,7 @@ public final class PersistedPoll {
         )
     }
 
-    public func update(from poll: Poll) {
+    public func update(from poll: Poll, syncedAt: Date) {
         creatorId = poll.creatorId
         title = poll.title
         pollDescription = poll.description
@@ -103,10 +103,10 @@ public final class PersistedPoll {
         selectedStartTime = poll.selectedStartTime
         selectedEndTime = poll.selectedEndTime
         shareCode = poll.shareCode
-        lastSyncedAt = Date()
+        lastSyncedAt = syncedAt
     }
 
-    public static func from(_ poll: Poll) -> PersistedPoll {
+    public static func from(_ poll: Poll, syncedAt: Date) -> PersistedPoll {
         PersistedPoll(
             id: poll.id,
             creatorId: poll.creatorId,
@@ -122,7 +122,8 @@ public final class PersistedPoll {
             closesAt: poll.closesAt,
             selectedStartTime: poll.selectedStartTime,
             selectedEndTime: poll.selectedEndTime,
-            shareCode: poll.shareCode
+            shareCode: poll.shareCode,
+            lastSyncedAt: syncedAt
         )
     }
 }

@@ -249,6 +249,31 @@ final class PersistenceProviderTests: XCTestCase {
         }
     }
 
+    /// Sync stamps and the freshness cutoff both come from the injected clock, so the
+    /// wall clock can't make a just-saved poll stale or keep an old one fresh.
+    func testFreshnessReadsTheInjectedClock() throws {
+        var now = Date(timeIntervalSince1970: 1_000)
+        let providers: [any PersistenceProviderProtocol] = [
+            InMemoryPersistenceProvider(now: { now }),
+            SwiftDataPersistenceProvider(inMemory: true, now: { now }),
+        ]
+        for provider in providers {
+            now = Date(timeIntervalSince1970: 1_000)
+            let poll = makeSamplePoll(updatedAt: Date(timeIntervalSince1970: 0))
+            let profile = makeSampleProfile()
+            try provider.savePolls([poll])
+            try provider.saveProfile(profile)
+            XCTAssertTrue(provider.isFresh(poll.id, maxAge: 300))
+            XCTAssertTrue(provider.isFresh(profile.id, maxAge: 300))
+            now = now.addingTimeInterval(301)
+            XCTAssertFalse(provider.isFresh(poll.id, maxAge: 300))
+            XCTAssertFalse(provider.isFresh(profile.id, maxAge: 300))
+            // A newer copy renews the stamp at the injected time.
+            try provider.savePolls([makeSamplePoll(id: poll.id, updatedAt: Date(timeIntervalSince1970: 1))])
+            XCTAssertTrue(provider.isFresh(poll.id, maxAge: 300))
+        }
+    }
+
     func testClearAll() throws {
         for provider in makeProviders() {
             let poll = makeSamplePoll()

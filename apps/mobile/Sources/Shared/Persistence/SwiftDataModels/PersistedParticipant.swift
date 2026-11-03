@@ -31,7 +31,7 @@ public final class PersistedParticipant {
         createdAt: Date,
         updatedAt: Date,
         profileDisplayName: String?,
-        lastSyncedAt: Date = Date()
+        lastSyncedAt: Date
     ) {
         self.id = id
         self.pollId = pollId
@@ -65,7 +65,7 @@ public final class PersistedParticipant {
         )
     }
 
-    public func update(from participant: PollParticipant) {
+    public func update(from participant: PollParticipant, syncedAt: Date) {
         pollId = participant.pollId
         userId = participant.userId
         anonymousName = participant.anonymousName
@@ -75,10 +75,10 @@ public final class PersistedParticipant {
         createdAt = participant.createdAt
         updatedAt = participant.updatedAt
         profileDisplayName = participant.profiles?.displayName
-        lastSyncedAt = Date()
+        lastSyncedAt = syncedAt
     }
 
-    public static func from(_ participant: PollParticipant) -> PersistedParticipant {
+    public static func from(_ participant: PollParticipant, syncedAt: Date) -> PersistedParticipant {
         PersistedParticipant(
             id: participant.id,
             pollId: participant.pollId,
@@ -89,7 +89,8 @@ public final class PersistedParticipant {
             comment: participant.comment,
             createdAt: participant.createdAt,
             updatedAt: participant.updatedAt,
-            profileDisplayName: participant.profiles?.displayName
+            profileDisplayName: participant.profiles?.displayName,
+            lastSyncedAt: syncedAt
         )
     }
 }

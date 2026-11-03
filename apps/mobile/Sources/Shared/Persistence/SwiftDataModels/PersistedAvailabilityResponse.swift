@@ -22,7 +22,7 @@ public final class PersistedAvailabilityResponse {
         note: String?,
         createdAt: Date,
         updatedAt: Date,
-        lastSyncedAt: Date = Date()
+        lastSyncedAt: Date
     ) {
         self.id = id
         self.participantId = participantId
@@ -46,17 +46,17 @@ public final class PersistedAvailabilityResponse {
         )
     }
 
-    public func update(from response: AvailabilityResponse) {
+    public func update(from response: AvailabilityResponse, syncedAt: Date) {
         participantId = response.participantId
         timeOptionId = response.timeOptionId
         statusRawValue = response.status.rawValue
         note = response.note
         createdAt = response.createdAt
         updatedAt = response.updatedAt
-        lastSyncedAt = Date()
+        lastSyncedAt = syncedAt
     }
 
-    public static func from(_ response: AvailabilityResponse) -> PersistedAvailabilityResponse {
+    public static func from(_ response: AvailabilityResponse, syncedAt: Date) -> PersistedAvailabilityResponse {
         PersistedAvailabilityResponse(
             id: response.id,
             participantId: response.participantId,
@@ -64,7 +64,8 @@ public final class PersistedAvailabilityResponse {
             statusRawValue: response.status.rawValue,
             note: response.note,
             createdAt: response.createdAt,
-            updatedAt: response.updatedAt
+            updatedAt: response.updatedAt,
+            lastSyncedAt: syncedAt
         )
     }
 }

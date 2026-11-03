@@ -9,6 +9,7 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public var googleCalendarLoading: Bool
     public var googleCalendarError: String?
     public var googleCalendarAccountEmail: String?
+    public var conflictChecker: (@MainActor ([PollTimeOption], String?) async -> CalendarCheckResult)?
 
     public var isEnabled: Bool {
         appleCalendarEnabled || googleCalendarEnabled
@@ -51,7 +52,8 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public func refreshGoogleCalendarConnection() async {}
 
     public func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult {
-        .none
+        if let conflictChecker { return await conflictChecker(timeOptions, pollTimeZone) }
+        return .none
     }
 
     public func addEventToCalendar(

@@ -20,7 +20,7 @@ public final class PersistedTimeOption {
         endTime: Date,
         isAllDay: Bool,
         createdAt: Date,
-        lastSyncedAt: Date = Date()
+        lastSyncedAt: Date
     ) {
         self.id = id
         self.pollId = pollId
@@ -42,23 +42,24 @@ public final class PersistedTimeOption {
         )
     }
 
-    public func update(from option: PollTimeOption) {
+    public func update(from option: PollTimeOption, syncedAt: Date) {
         pollId = option.pollId
         startTime = option.startTime
         endTime = option.endTime
         isAllDay = option.isAllDay
         createdAt = option.createdAt
-        lastSyncedAt = Date()
+        lastSyncedAt = syncedAt
     }
 
-    public static func from(_ option: PollTimeOption) -> PersistedTimeOption {
+    public static func from(_ option: PollTimeOption, syncedAt: Date) -> PersistedTimeOption {
         PersistedTimeOption(
             id: option.id,
             pollId: option.pollId,
             startTime: option.startTime,
             endTime: option.endTime,
             isAllDay: option.isAllDay,
-            createdAt: option.createdAt
+            createdAt: option.createdAt,
+            lastSyncedAt: syncedAt
         )
     }
 }

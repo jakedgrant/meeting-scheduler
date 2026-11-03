@@ -24,6 +24,7 @@ struct PollListView: View {
     }
 
     @Environment(\.pollService) var pollService
+    @Environment(\.appClock) private var clock
     @State var selectedFilter: PollFilter = .active
     @State var showCreatePoll = false
     @State var showJoinByCode = false
@@ -111,7 +112,7 @@ struct PollListView: View {
     }
 
     private var filteredPolls: [Poll] {
-        let now = Date()
+        let now = clock.now
         let currentUserId = authService.currentUserId
         let allPolls = pollService.myPolls
 
