@@ -44,6 +44,7 @@ let package = Package(
         .testTarget(
             name: "MeetingSchedulerTests",
             dependencies: [
+                "MeetingSchedulerApp",
                 "Shared",
             ],
             path: "Tests"

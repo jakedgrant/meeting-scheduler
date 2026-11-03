@@ -233,14 +233,10 @@ struct ProfileRow: View {
 
 #Preview("Signed In") {
     SettingsView()
-        .environment(\.authService, MockAuthService.signedIn)
-        .environment(\.purchaseService, MockPurchaseService.free)
-        .environment(\.calendarService, MockCalendarService.disabled)
+        .previewServices(auth: MockAuthService.signedIn, calendar: MockCalendarService.disabled, purchases: MockPurchaseService.free)
 }
 
 #Preview("Pro User") {
     SettingsView()
-        .environment(\.authService, MockAuthService.signedIn)
-        .environment(\.purchaseService, MockPurchaseService.pro)
-        .environment(\.calendarService, MockCalendarService.allEnabled)
+        .previewServices(auth: MockAuthService.signedIn, calendar: MockCalendarService.allEnabled, purchases: MockPurchaseService.pro)
 }

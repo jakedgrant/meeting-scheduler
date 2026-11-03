@@ -1,3 +1,4 @@
+import MeetingSchedulerApp
 import Supabase
 import SwiftUI
 import Synchronization
@@ -123,26 +124,14 @@ final class AppServicesTests: XCTestCase {
         await settle { provider.logouts == 1 }
     }
 
-    func testEnvironmentDefaultsAreStableMocks() {
-        let environment = EnvironmentValues()
-        XCTAssertTrue(environment.authService is MockAuthService)
-        XCTAssertTrue(environment.pollService is MockPollService)
-        XCTAssertTrue(environment.calendarService is MockCalendarService)
-        XCTAssertTrue(environment.purchaseService is MockPurchaseService)
-        XCTAssertTrue(environment.authService === EnvironmentValues().authService)
-    }
-
-    func testAppServicesModifierBindsEveryServiceIntoTheEnvironment() throws {
-        let suite = "app-services-\(UUID())"
-        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { preferences.removePersistentDomain(forName: suite) }
+    private func offlineServices(preferences: UserDefaults) -> AppServices {
         let url = URL(string: "https://app-services.invalid")!
         let adapter = SessionAuthAdapter(
             url: url, key: "test-only", storage: LifecycleAuthStorage(),
             fetch: { request in
                 (Data(), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
             }, autoRefreshToken: false)
-        let services = AppServices(
+        return AppServices(
             supabase: SupabaseService(
                 client: SupabaseService.apiClient(url: url, key: "test-only"), sessionAdapter: adapter),
             persistence: InMemoryPersistenceProvider(), preferences: preferences,
@@ -150,6 +139,13 @@ final class AppServicesTests: XCTestCase {
                 dependencies: .init(
                     login: { _ in nil }, logout: {}, currentUserId: { "anonymous" }, customerInfo: { nil },
                     offerings: { nil })))
+    }
+
+    func testAppServicesModifierBindsEveryServiceIntoTheEnvironment() throws {
+        let suite = "app-services-\(UUID())"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let services = offlineServices(preferences: preferences)
 
         var rendered: EnvironmentProbe.Values?
         let renderer = ImageRenderer(content: EnvironmentProbe { rendered = $0 }.appServices(services))
@@ -160,6 +156,30 @@ final class AppServicesTests: XCTestCase {
         XCTAssertTrue(values.polls === services.polls)
         XCTAssertTrue(values.calendar === services.calendar)
         XCTAssertTrue(values.purchases === services.purchases)
+    }
+
+    func testPreviewServicesBindsTheOverrideAndMocksForTheRest() throws {
+        let auth = MockAuthService.signedIn
+
+        var rendered: EnvironmentProbe.Values?
+        let renderer = ImageRenderer(content: EnvironmentProbe { rendered = $0 }.previewServices(auth: auth))
+        _ = renderer.uiImage
+
+        let values = try XCTUnwrap(rendered)
+        XCTAssertTrue(values.auth === auth)
+        XCTAssertTrue(values.polls is MockPollService)
+        XCTAssertTrue(values.calendar is MockCalendarService)
+        XCTAssertTrue(values.purchases is MockPurchaseService)
+    }
+
+    /// Reading an unbound service traps, so this crashes the run if `AppRootView` stops binding.
+    func testAppRootBindsServicesForTheViewsBelowIt() throws {
+        let suite = "app-services-\(UUID())"
+        let preferences = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { preferences.removePersistentDomain(forName: suite) }
+
+        let renderer = ImageRenderer(content: AppRootView(services: offlineServices(preferences: preferences)))
+        _ = renderer.uiImage
     }
 }
 

@@ -411,5 +411,5 @@ struct TimeOptionView: View {
 
 #Preview {
     CreatePollView()
-        .environment(\.pollService, MockPollService.empty)
+        .previewServices(polls: MockPollService.empty)
 }

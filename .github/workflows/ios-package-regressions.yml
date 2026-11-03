@@ -7,6 +7,7 @@ on:
       - 'packages/shared-config/date-time-fixtures.json'
       - '.github/workflows/ios-package-regressions.yml'
       - 'scripts/ci/ios-package-regressions.sh'
+      - 'scripts/ci/check-ios-environment-keys.sh'
   push:
     branches: [main]
     paths:
@@ -14,6 +15,7 @@ on:
       - 'packages/shared-config/date-time-fixtures.json'
       - '.github/workflows/ios-package-regressions.yml'
       - 'scripts/ci/ios-package-regressions.sh'
+      - 'scripts/ci/check-ios-environment-keys.sh'
   workflow_dispatch:
 
 permissions:
@@ -33,6 +35,8 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Check that services stay in ServiceSet
+        run: bash scripts/ci/check-ios-environment-keys.sh
       - name: Build package and app wrapper; run provider, lifecycle and command regressions
         env:
           IOS_CI_OUTPUT: ${{ runner.temp }}/ios-package-regressions

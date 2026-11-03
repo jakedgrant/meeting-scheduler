@@ -172,5 +172,5 @@ struct ProfileEditView: View {
 
 #Preview {
     ProfileEditView()
-        .environment(\.authService, MockAuthService.signedIn)
+        .previewServices(auth: MockAuthService.signedIn)
 }

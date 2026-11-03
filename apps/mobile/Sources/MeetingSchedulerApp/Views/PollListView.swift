@@ -238,10 +238,10 @@ struct PollListView: View {
 
 #Preview("With Pollss") {
     PollListView()
-        .environment(\.pollService, MockPollService.withSamplePolls)
+        .previewServices(polls: MockPollService.withSamplePolls)
 }
 
 #Preview("Empty") {
     PollListView()
-        .environment(\.pollService, MockPollService.empty)
+        .previewServices(polls: MockPollService.empty)
 }

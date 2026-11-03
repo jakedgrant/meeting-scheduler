@@ -1055,9 +1055,7 @@ struct ResponseButton: View {
     NavigationStack {
         PollDetailView(pollId: UUID())
     }
-    .environment(\.authService, MockAuthService.signedIn)
-    .environment(\.pollService, MockPollService.empty)
-    .environment(\.calendarService, MockCalendarService.disabled)
+    .previewServices(auth: MockAuthService.signedIn, polls: MockPollService.empty, calendar: MockCalendarService.disabled)
 }
 
 #Preview("With Data") {
@@ -1065,9 +1063,7 @@ struct ResponseButton: View {
     return NavigationStack {
         PollDetailView(pollId: mock.myPolls.first?.id ?? UUID())
     }
-    .environment(\.authService, MockAuthService.signedIn)
-    .environment(\.pollService, mock)
-    .environment(\.calendarService, MockCalendarService.disabled)
+    .previewServices(auth: MockAuthService.signedIn, polls: mock, calendar: MockCalendarService.disabled)
 }
 
 private struct DetailIdentity: Hashable {

@@ -260,10 +260,10 @@ struct FeatureRow: View {
 
 #Preview("Free User") {
     PaywallView()
-        .environment(\.purchaseService, MockPurchaseService.free)
+        .previewServices(purchases: MockPurchaseService.free)
 }
 
 #Preview("Pro User") {
     PaywallView()
-        .environment(\.purchaseService, MockPurchaseService.pro)
+        .previewServices(purchases: MockPurchaseService.pro)
 }

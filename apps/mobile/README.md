@@ -4,9 +4,9 @@
 
 The app wrapper calls `AppServices.live()` once at launch, and `AppRootView(services:)` places the services in the SwiftUI environment through `appServices(_:)`. Views read them through `@Environment(\.authService)` and its siblings. There are no service singletons.
 
-A view without `appServices(_:)`, including a preview, gets a mock for any service it doesn't set, so reading the environment doesn't build production services. `AppServices.live()` is public for the wrapper; don't call it from previews or tests. Release builds include the mocks, so a production view hosted outside `AppRootView` silently gets the signed-out, empty mocks.
+A preview binds mocks with `previewServices()`, passing only the services it cares about. Those two modifiers are the only ways to bind services, and both bind all of them. The compiler can't check that a view has services bound, so reading one with none bound traps in every build configuration. `AppServices.live()` is public for the wrapper; don't call it from previews or tests.
 
-To add a service, add it to `AppServices`, add an environment key with a stored mock fallback in `ServiceEnvironment.swift`, and bind it in `appServices(_:)`. `AppServicesTests` checks each binding and default, so extend its environment tests too. If the service holds account state, also add it to the identity fan-out in `AppServices` and extend `testIdentityTransitionsReachEveryAccountScopedServiceAndTransport`.
+To add a service, add it to `AppServices` and add a field and a read-only accessor to `ServiceSet` in `ServiceEnvironment.swift`. `appServices(_:)` and `previewServices()` then won't compile until they supply it. `AppServicesTests` checks each binding, so extend its environment tests too. `scripts/ci/check-ios-environment-keys.sh` fails on an environment key outside `ServiceSet`. If the service holds account state, also add it to the identity fan-out in `AppServices` and extend `testIdentityTransitionsReachEveryAccountScopedServiceAndTransport`.
 
 ## Authentication redirects
 
