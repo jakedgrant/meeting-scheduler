@@ -9,11 +9,11 @@ public final class PurchaseService: PurchaseServiceProtocol {
     public private(set) var isLoading = false
 
     public var hasProAccess: Bool {
-        customerInfo?.entitlements["pro_access"]?.isActive == true || customerInfo?.entitlements["team_access"]?.isActive == true
+        isActive(.pro) || isActive(.team)
     }
 
     public var hasTeamAccess: Bool {
-        customerInfo?.entitlements["team_access"]?.isActive == true
+        isActive(.team)
     }
 
     public var currentOffering: Offering? {
@@ -75,6 +75,10 @@ public final class PurchaseService: PurchaseServiceProtocol {
     }
 
     init(dependencies: Dependencies) { self.dependencies = dependencies }
+
+    private func isActive(_ entitlement: PollCreationEntitlement) -> Bool {
+        customerInfo?.entitlements[entitlement.rawValue]?.isActive == true
+    }
 
     private func startReconciliation() {
         guard identityTask == nil else { return }

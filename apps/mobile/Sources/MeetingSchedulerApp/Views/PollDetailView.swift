@@ -250,18 +250,13 @@ private struct PollDetailScreen: View {
 
     @ViewBuilder
     private func finalDateSection(_ poll: Poll) -> some View {
-        if let selectedStart = poll.selectedStartTime,
-           let selectedEnd = poll.selectedEndTime {
+        if let event = model.finalEvent {
             Section {
                 FinalDateDisplay(
-                    selectedStart: selectedStart,
-                    selectedEnd: selectedEnd,
-                    // Finalization copies the chosen option's interval onto the poll.
-                    allDayDate: model.timeOptions.first(where: { $0.startTime == selectedStart && $0.endTime == selectedEnd && $0.isAllDay })
-                        .map { $0.allDayDate(pollTimeZone: poll.timezone) },
-                    pollTitle: poll.title,
-                    pollDescription: poll.description,
-                    pollLocation: poll.location
+                    event: event,
+                    addState: model.calendarAdd,
+                    onAdd: { model.addFinalTimeToCalendar() },
+                    onAcknowledgeAdd: model.acknowledgeCalendarAdd
                 )
             }
         } else if model.isCreator && poll.status == .closed {
@@ -525,19 +520,16 @@ struct ParticipantRow: View {
 // MARK: - FinalDateDisplay
 
 struct FinalDateDisplay: View {
-    @Environment(\.authService) private var authService
-    let selectedStart: Date
-    let selectedEnd: Date
-    /// Set when the final option is all-day: its calendar date in the poll's zone.
-    let allDayDate: CalendarDay?
-    private var isAllDay: Bool { allDayDate != nil }
-    let pollTitle: String
-    let pollDescription: String?
-    let pollLocation: String?
-    @Environment(\.calendarService) var calendarService
+    let event: DeviceCalendarEvent
+    let addState: CalendarAddState
+    let onAdd: () -> Void
+    let onAcknowledgeAdd: () -> Void
 
     @State private var showAddToCalendarAlert = false
-    @State private var addingToCalendar = false
+
+    private var addResult: DeviceCalendarAddResult? {
+        if case .finished(let result) = addState { result } else { nil }
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -560,23 +552,24 @@ struct FinalDateDisplay: View {
                     .foregroundColor(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
+                .disabled(addState == .adding)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Image(systemName: "calendar")
                         .foregroundStyle(.white)
-                    Text(allDayDate?.pickerDate() ?? selectedStart, style: .date)
+                    Text(event.allDayDate?.pickerDate() ?? event.start, style: .date)
                         .font(.title3)
                         .fontWeight(.semibold)
                         .foregroundStyle(.white)
                 }
 
-                if !isAllDay {
+                if event.allDayDate == nil {
                     HStack {
                         Image(systemName: "clock")
                             .foregroundStyle(.white)
-                        Text("\(selectedStart, style: .time) - \(selectedEnd, style: .time)")
+                        Text("\(event.start, style: .time) - \(event.end, style: .time)")
                             .font(.body)
                             .foregroundStyle(.white)
                     }
@@ -594,37 +587,28 @@ struct FinalDateDisplay: View {
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
         .alert("Add to Calendar", isPresented: $showAddToCalendarAlert) {
-            Button("Add Event", role: nil) {
-                addToCalendar()
-            }
+            Button("Add Event", role: nil, action: onAdd)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Add this meeting to your calendar?")
         }
-        .alert("Success", isPresented: .init(get: { addingToCalendar }, set: { _ in })) {
+        .alert(
+            addResultText.title,
+            isPresented: .init(get: { addResult != nil }, set: { if !$0 { onAcknowledgeAdd() } })
+        ) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Event added to your calendar successfully!")
+            Text(addResultText.message)
         }
     }
 
-    private func addToCalendar() {
-        authService.performSessionTask(
-            operation: { _ in
-                await calendarService.addEventToCalendar(
-                    title: pollTitle,
-                    // An all-day event is a floating date in the device calendar.
-                    startDate: allDayDate?.pickerDate() ?? selectedStart,
-                    endDate: allDayDate?.pickerDate() ?? selectedEnd,
-                    isAllDay: isAllDay,
-                    notes: pollDescription,
-                    location: pollLocation
-                )
-            },
-            onSuccess: { success in if success { addingToCalendar = true } }
-        )
+    private var addResultText: (title: LocalizedStringKey, message: LocalizedStringKey) {
+        switch addResult {
+        case .added, nil: ("Success", "Event added to your calendar successfully!")
+        case .accessDenied: ("Calendar Access Needed", "Allow calendar access for Meeting Scheduler in Settings, then try again.")
+        case .failed: ("Event Not Added", "The event couldn't be saved to your calendar. Try again.")
+        }
     }
-
 }
 
 // MARK: - FinalDateSelectionView

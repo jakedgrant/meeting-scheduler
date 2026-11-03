@@ -12,6 +12,10 @@ To add a service, add it to `AppServices` and add a field and a read-only access
 
 The poll detail and creation screens keep their orchestration in a `Shared` model that takes its services and clock in its initializer: `PollDetailModel` and `PollCreationModel`. The view builds the model from the environment and holds it in `@State`, and tests drive the model with the mocks. Follow the same shape when moving another screen's commands out of its view.
 
+## Plan limits
+
+The server sets each poll's capacity and active-poll quota when it creates the poll. The client keeps a copy of those limits only to describe plans, on `PollCreationEntitlement` (`participantLimit`, `allowsUnlimitedActivePolls`). Read limits and entitlement identifiers from there instead of writing the numbers or strings again. `EntitlementContractTests` checks the copy against `packages/shared-config/entitlements.json`, and the database suite checks that file against `create_poll`. To change a limit, change the migration, the file and the enum together.
+
 ## Authentication redirects
 
 Email links and browser Google sign-in use Supabase PKCE with a persisted, single-use attempt UUID. The emitted redirect is:

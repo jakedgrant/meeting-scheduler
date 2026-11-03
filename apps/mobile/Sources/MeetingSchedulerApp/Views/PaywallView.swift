@@ -88,7 +88,7 @@ struct PaywallView: View {
                 .font(.headline)
 
             FeatureRow(icon: "infinity", text: "Unlimited active polls")
-            FeatureRow(icon: "person.3.fill", text: "Up to 50 participants per poll")
+            FeatureRow(icon: "person.3.fill", text: "Up to \(PollCreationEntitlement.pro.participantLimit) participants per poll")
             FeatureRow(icon: "calendar", text: "Calendar integrations")
             FeatureRow(icon: "bell.fill", text: "Priority notifications")
         }
@@ -244,7 +244,7 @@ struct PackageCard: View {
 
 struct FeatureRow: View {
     let icon: String
-    let text: String
+    let text: LocalizedStringKey
 
     var body: some View {
         HStack(spacing: 12) {

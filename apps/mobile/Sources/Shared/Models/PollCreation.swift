@@ -82,8 +82,32 @@ public struct CreatePollRequest: Codable, Sendable {
     }
 }
 
-public enum PollCreationEntitlement: String, Codable, Sendable {
+/// What funded a poll's creation, with the limits the server applies to it.
+///
+/// The server sets each poll's capacity from these tiers; the client copies the limits only to
+/// describe plans and must apply the capacity the server returns. `EntitlementContractTests`
+/// checks the copies against `packages/shared-config/entitlements.json`, which the database
+/// tests check against the creation command.
+public enum PollCreationEntitlement: String, CaseIterable, Codable, Sendable {
     case free, pro = "pro_access", team = "team_access", eventPass = "event_pass"
+
+    /// The most participant rows a poll funded this way can hold.
+    public var participantLimit: Int {
+        switch self {
+        case .free: 10
+        case .pro, .eventPass: 50
+        case .team: 100
+        }
+    }
+
+    /// Whether the account can keep any number of draft or active polls. A free account has one
+    /// ordinary slot, and each event pass funds a single poll.
+    public var allowsUnlimitedActivePolls: Bool {
+        switch self {
+        case .pro, .team: true
+        case .free, .eventPass: false
+        }
+    }
 }
 
 public struct PollCreationResult: Codable, Sendable {

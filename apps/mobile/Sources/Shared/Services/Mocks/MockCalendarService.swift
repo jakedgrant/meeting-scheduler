@@ -10,6 +10,9 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public var googleCalendarError: String?
     public var googleCalendarAccountEmail: String?
     public var conflictChecker: (@MainActor ([PollTimeOption], String?) async -> CalendarCheckResult)?
+    /// Replaces the default add, which records the event in `addedEvents` and reports success.
+    public var eventAdder: (@MainActor (DeviceCalendarEvent) async -> DeviceCalendarAddResult)?
+    public private(set) var addedEvents: [DeviceCalendarEvent] = []
 
     public var isEnabled: Bool {
         appleCalendarEnabled || googleCalendarEnabled
@@ -56,14 +59,9 @@ public final class MockCalendarService: CalendarServiceProtocol {
         return .none
     }
 
-    public func addEventToCalendar(
-        title: String,
-        startDate: Date,
-        endDate: Date,
-        isAllDay: Bool,
-        notes: String?,
-        location: String?
-    ) async -> Bool {
-        true
+    public func addEventToCalendar(_ event: DeviceCalendarEvent) async -> DeviceCalendarAddResult {
+        if let eventAdder { return await eventAdder(event) }
+        addedEvents.append(event)
+        return .added
     }
 }

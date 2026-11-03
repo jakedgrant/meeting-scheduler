@@ -353,63 +353,45 @@ public final class CalendarService: CalendarServiceProtocol {
 
     // MARK: - Add to Calendar
 
-    /// Add an event to the user's calendar
-    /// - Parameters:
-    ///   - title: Event title
-    ///   - startDate: Event start date
-    ///   - endDate: Event end date
-    ///   - notes: Optional event notes/description
-    ///   - location: Optional event location
-    /// - Returns: true if event was successfully added
-    public func addEventToCalendar(
-        title: String,
-        startDate: Date,
-        endDate: Date,
-        isAllDay: Bool,
-        notes: String? = nil,
-        location: String? = nil
-    ) async -> Bool {
+    /// Adds `event` to the default calendar for new events, asking for calendar access first if
+    /// the person hasn't been asked yet.
+    public func addEventToCalendar(_ event: DeviceCalendarEvent) async -> DeviceCalendarAddResult {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-
             updateAuthorizationStatus()
-
-            // check permission
             switch authorizationStatus {
             case .notDetermined:
-
-                let _ = await requestAccess()
-                return false  //
-
+                guard await requestAccess() else { return .accessDenied }
+            case .fullAccess, .writeOnly, .authorized:
+                break
             case .restricted, .denied:
-                return false
-
-            case .fullAccess, .writeOnly:
-                break
-
-            case .authorized:  // (Deprecated) This application is authorized to access the service.
-                break
-
+                return .accessDenied
             @unknown default:
-                return false
+                return .accessDenied
             }
 
-            // Create the event
-            let event = EKEvent(eventStore: eventStore)
-            event.title = title
-            event.isAllDay = isAllDay
-            event.startDate = startDate
-            event.endDate = endDate
-            event.notes = notes
-            event.location = location
-            event.calendar = eventStore.defaultCalendarForNewEvents
+            let saved = EKEvent(eventStore: eventStore)
+            saved.title = event.title
+            if let day = event.allDayDate {
+                // An all-day event is a floating date in the device calendar.
+                saved.isAllDay = true
+                let date = day.pickerDate()
+                saved.startDate = date
+                saved.endDate = date
+            } else {
+                saved.startDate = event.start
+                saved.endDate = event.end
+            }
+            saved.notes = event.notes
+            saved.location = event.location
+            saved.calendar = eventStore.defaultCalendarForNewEvents
 
             do {
-                try eventStore.save(event, span: .thisEvent)
-                return true
+                try eventStore.save(saved, span: .thisEvent)
+                return .added
             } catch {
                 FailureLog.calendar.record("Failed to save event to calendar", error: error)
-                return false
+                return .failed
             }
         }
     }
