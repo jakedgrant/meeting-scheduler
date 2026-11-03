@@ -3,7 +3,7 @@ import Supabase
 
 /// Immutable credentials belong to the operation that captured them, including
 /// while the SDK suspends before applying its Authorization header.
-public struct AccountRequestCredentials: Sendable {
+struct AccountRequestCredentials: Sendable {
     let accountId: UUID?
     let generation: UInt64
     let accessToken: String?
@@ -13,10 +13,12 @@ enum AccountRequestContext {
     @TaskLocal static var credentials: AccountRequestCredentials?
 }
 
+/// The API transport and the identity accepted for it. `AuthService` updates `requestCredentials`
+/// through `acceptSession(_:)`, and poll and calendar services read it at request time instead of
+/// depending on `AuthService`. Account changes reach those services through the fan-out in `AppServices`.
 @MainActor
-public final class SupabaseService {
-    public static let shared = SupabaseService()
-    public let client: SupabaseClient
+final class SupabaseService {
+    let client: SupabaseClient
     let sessionAdapter: SessionAuthAdapter
     private(set) var requestCredentials = AccountRequestCredentials(accountId: nil, generation: 0, accessToken: nil)
 
@@ -42,9 +44,8 @@ public final class SupabaseService {
             accountId: session?.user.id, generation: generation, accessToken: session?.accessToken)
     }
 
-    private init() {
-        let url = URL(string: Config.supabaseURL)!
-        sessionAdapter = SessionAuthAdapter(url: url, key: Config.supabaseAnonKey)
-        client = Self.apiClient(url: url, key: Config.supabaseAnonKey)
+    init(client: SupabaseClient, sessionAdapter: SessionAuthAdapter) {
+        self.client = client
+        self.sessionAdapter = sessionAdapter
     }
 }

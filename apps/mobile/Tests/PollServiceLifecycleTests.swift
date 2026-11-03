@@ -1,6 +1,23 @@
 import XCTest
 @testable import Shared
 
+extension PollService {
+    /// For suites that inject loaders. The client can't resolve, so a missed loader
+    /// fails rather than reaching a real backend.
+    convenience init(
+        persistence: any PersistenceProviderProtocol,
+        currentUserId: @escaping @MainActor () -> UUID?,
+        listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))? = nil,
+        detailLoader: (@MainActor (UUID) async throws -> PollDetail)? = nil,
+        statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)? = nil
+    ) {
+        self.init(
+            persistence: persistence, currentUserId: currentUserId, listLoader: listLoader, detailLoader: detailLoader,
+            statusUpdater: statusUpdater,
+            client: SupabaseService.apiClient(url: URL(string: "https://loader-only.invalid")!, key: "test-only"))
+    }
+}
+
 @MainActor
 final class PollServiceLifecycleTests: XCTestCase {
     private final class Identity {

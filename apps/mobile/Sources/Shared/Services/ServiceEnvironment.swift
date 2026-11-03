@@ -1,70 +1,58 @@
 import SwiftUI
 
-// MARK: - AuthService
-
-private struct AuthServiceKey: EnvironmentKey {
-    static var defaultValue: any AuthServiceProtocol {
-        MainActor.assumeIsolated { AuthService.shared }
-    }
+/// Every service a view can read. The fields have no defaults, so adding one stops
+/// `appServices(_:)` and `previewServices(auth:polls:calendar:purchases:)` compiling until
+/// both supply it.
+private struct ServiceSet {
+    let auth: any AuthServiceProtocol
+    let polls: any PollServiceProtocol
+    let calendar: any CalendarServiceProtocol
+    let purchases: any PurchaseServiceProtocol
 }
 
-// MARK: - PollService
-
-private struct PollServiceKey: EnvironmentKey {
-    static var defaultValue: any PollServiceProtocol {
-        MainActor.assumeIsolated { PollService.shared }
-    }
+private struct ServiceSetKey: EnvironmentKey {
+    // Not a trap: applying `environment(_:_:)` also reads this default.
+    static let defaultValue: ServiceSet? = nil
 }
 
-// MARK: - CalendarService
-
-private struct CalendarServiceKey: EnvironmentKey {
-    static var defaultValue: any CalendarServiceProtocol {
-        MainActor.assumeIsolated { CalendarService.shared }
-    }
-}
-
-// MARK: - PurchaseService
-
-private struct PurchaseServiceKey: EnvironmentKey {
-    static var defaultValue: any PurchaseServiceProtocol {
-        MainActor.assumeIsolated { PurchaseService.shared }
-    }
-}
-
-// MARK: - PersistenceProvider
-
-private struct PersistenceProviderKey: EnvironmentKey {
-    static var defaultValue: any PersistenceProviderProtocol {
-        MainActor.assumeIsolated { AccountPersistence.shared }
-    }
-}
-
-// MARK: - EnvironmentValues
-
+// The accessors are read-only and the key is private to this file, so the two modifiers below
+// are the only ways to bind services, and they always bind all of them.
 extension EnvironmentValues {
-    public var persistenceProvider: any PersistenceProviderProtocol {
-        get { self[PersistenceProviderKey.self] }
-        set { self[PersistenceProviderKey.self] = newValue }
+    fileprivate var boundServices: ServiceSet? {
+        get { self[ServiceSetKey.self] }
+        set { self[ServiceSetKey.self] = newValue }
     }
 
-    public var authService: any AuthServiceProtocol {
-        get { self[AuthServiceKey.self] }
-        set { self[AuthServiceKey.self] = newValue }
+    private var serviceSet: ServiceSet {
+        guard let boundServices else {
+            fatalError("No services bound. Apply appServices(_:) at the root, or previewServices() in a preview.")
+        }
+        return boundServices
     }
 
-    public var pollService: any PollServiceProtocol {
-        get { self[PollServiceKey.self] }
-        set { self[PollServiceKey.self] = newValue }
+    public var authService: any AuthServiceProtocol { serviceSet.auth }
+    public var pollService: any PollServiceProtocol { serviceSet.polls }
+    public var calendarService: any CalendarServiceProtocol { serviceSet.calendar }
+    public var purchaseService: any PurchaseServiceProtocol { serviceSet.purchases }
+}
+
+extension View {
+    /// Binds the production services in `services`.
+    public func appServices(_ services: AppServices) -> some View {
+        environment(
+            \.boundServices,
+            ServiceSet(
+                auth: services.auth, polls: services.polls, calendar: services.calendar,
+                purchases: services.purchases))
     }
 
-    public var calendarService: any CalendarServiceProtocol {
-        get { self[CalendarServiceKey.self] }
-        set { self[CalendarServiceKey.self] = newValue }
-    }
-
-    public var purchaseService: any PurchaseServiceProtocol {
-        get { self[PurchaseServiceKey.self] }
-        set { self[PurchaseServiceKey.self] = newValue }
+    /// Binds mocks for a preview. Pass only the services the preview cares about.
+    public func previewServices(
+        auth: any AuthServiceProtocol = MockAuthService.signedOut,
+        polls: any PollServiceProtocol = MockPollService.empty,
+        calendar: any CalendarServiceProtocol = MockCalendarService.disabled,
+        purchases: any PurchaseServiceProtocol = MockPurchaseService.free
+    ) -> some View {
+        environment(\.boundServices, ServiceSet(auth: auth, polls: polls, calendar: calendar, purchases: purchases))
     }
 }

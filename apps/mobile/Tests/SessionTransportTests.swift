@@ -4,11 +4,18 @@ import XCTest
 
 @testable import Shared
 
-private final class LifecycleURLProtocol: URLProtocol, @unchecked Sendable {
-    static let waiting = Mutex<[LifecycleURLProtocol]>([])
+private final class LifecycleURLProtocol: URLProtocol {
+    /// `URLProtocol` marks `Sendable` unavailable, so a subclass can't conform itself.
+    /// Storing `self` in the `Mutex` directly compiled in some Xcode 26.6 builds and not others.
+    struct Waiter: @unchecked Sendable {
+        let item: LifecycleURLProtocol
+        var request: URLRequest { item.request }
+    }
+
+    static let waiting = Mutex<[Waiter]>([])
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-    override func startLoading() { Self.waiting.withLock { $0.append(self) } }
+    override func startLoading() { Self.waiting.withLock { $0.append(Waiter(item: self)) } }
     override func stopLoading() {}
     static func requestURLs() -> [URL] { waiting.withLock { $0.map { $0.request.url! } } }
     static func count(path: String, method: String? = nil) -> Int {
@@ -17,10 +24,10 @@ private final class LifecycleURLProtocol: URLProtocol, @unchecked Sendable {
         }
     }
     static func reply(path: String, method: String? = nil, status: Int = 200, data: Data) {
-        let item = waiting.withLock { items -> LifecycleURLProtocol in
+        let item = waiting.withLock { items -> Waiter in
             items.remove(
                 at: items.firstIndex { $0.request.url?.path == path && (method == nil || $0.request.httpMethod == method) }!)
-        }
+        }.item
         let response = HTTPURLResponse(
             url: item.request.url!, statusCode: status, httpVersion: nil,
             headerFields: ["Content-Type": "application/json"])!
@@ -66,6 +73,12 @@ private final class AppleReplyGate {
     }
 }
 
+/// A token the SDK accepts for `id`, with a fresh session ID on each call.
+func unsignedAccessToken(for id: UUID) -> String {
+    let claims = "{\"exp\":4102444800,\"sub\":\"\(id.uuidString)\",\"session_id\":\"\(UUID())\"}"
+    return "e30." + Data(claims.utf8).base64EncodedString().replacingOccurrences(of: "=", with: "") + ".signature"
+}
+
 @MainActor
 final class SessionTransportTests: XCTestCase {
     private func client() -> SupabaseClient {
@@ -92,10 +105,7 @@ final class SessionTransportTests: XCTestCase {
         let user = User(id: id, appMetadata: [:], userMetadata: [:], aud: "authenticated", createdAt: Date(), updatedAt: Date())
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        let token =
-            "e30."
-            + Data("{\"exp\":4102444800,\"sub\":\"\(id.uuidString)\",\"session_id\":\"\(UUID())\"}".utf8).base64EncodedString()
-            .replacingOccurrences(of: "=", with: "") + ".signature"
+        let token = unsignedAccessToken(for: id)
         let task = Task { try await auth.setSession(accessToken: token, refreshToken: id.uuidString) }
         await settle { LifecycleURLProtocol.count(path: "/auth/v1/user", method: "GET") == 1 }
         LifecycleURLProtocol.reply(path: "/auth/v1/user", method: "GET", data: try encoder.encode(user))
@@ -180,7 +190,7 @@ final class SessionTransportTests: XCTestCase {
         let suite = "calendar-queued-\(UUID())"
         let preferences = UserDefaults(suiteName: suite)!
         defer { preferences.removePersistentDomain(forName: suite) }
-        let service = CalendarService(preferences: preferences, clientFactory: { api }, requestCredentials: { credentials })
+        let service = CalendarService(preferences: preferences, client: api, requestCredentials: { credentials })
         service.accountDidChange(to: a)
         let old = Task { await service.setGoogleCalendarEnabled(false) }
         await settle { gate.waiting.count == 1 }
@@ -206,10 +216,9 @@ final class SessionTransportTests: XCTestCase {
                 let sdk = client()
                 let a = UUID()
                 let b = returnsToA ? a : UUID()
-                var dependencies = AuthService.Dependencies.live(client: sdk)
-                dependencies.accountChanged = { _ in }
-                dependencies.refreshCalendar = {}
-                dependencies.refreshProviderIdentity = {}
+                var dependencies = AuthService.Dependencies.live(
+                    client: sdk, accountChanged: { _ in }, refreshCalendar: {},
+                    refreshProviderIdentity: {})
                 dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid", timezone: "UTC") }
                 let service = AuthService(persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk)
                 await service.initialize()
@@ -302,8 +311,9 @@ final class SessionTransportTests: XCTestCase {
         launch: (@MainActor (URL) async throws -> URL)? = nil,
         launchApple: (@MainActor () async throws -> AuthService.AppleCredentials)? = nil
     ) -> AuthService {
-        var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
-        dependencies.accountChanged = { _ in adapter.accountDidChange() }
+        var dependencies = AuthService.Dependencies.live(
+            client: sdk, auth: adapter.auth, accountChanged: { _ in adapter.accountDidChange() }, refreshCalendar: {},
+            refreshProviderIdentity: {})
         dependencies.authRevision = { adapter.revision }
         dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
         dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
@@ -314,8 +324,6 @@ final class SessionTransportTests: XCTestCase {
         dependencies.callbackIntents = intents
         dependencies.launchOAuth = launch
         dependencies.launchApple = launchApple
-        dependencies.refreshCalendar = {}
-        dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
         return AuthService(
             persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk, auth: adapter.auth)
@@ -412,13 +420,12 @@ final class SessionTransportTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let coldIntent = AuthCallbackIntentStore(defaults: defaults).begin(session: nil)
-        var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
-        dependencies.accountChanged = { _ in adapter.accountDidChange() }
+        var dependencies = AuthService.Dependencies.live(
+            client: sdk, auth: adapter.auth, accountChanged: { _ in adapter.accountDidChange() }, refreshCalendar: {},
+            refreshProviderIdentity: {})
         dependencies.authRevision = { adapter.revision }
         dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
         dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
-        dependencies.refreshCalendar = {}
-        dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
         dependencies.callbackIntents = AuthCallbackIntentStore(defaults: defaults)
         let service = AuthService(
@@ -789,13 +796,12 @@ final class SessionTransportTests: XCTestCase {
         let sdk = client()
         let a = UUID()
         try await signIn(a, auth: adapter.auth)
-        var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
-        dependencies.accountChanged = { _ in adapter.accountDidChange() }
+        var dependencies = AuthService.Dependencies.live(
+            client: sdk, auth: adapter.auth, accountChanged: { _ in adapter.accountDidChange() }, refreshCalendar: {},
+            refreshProviderIdentity: {})
         dependencies.authRevision = { adapter.revision }
         dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
         dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
-        dependencies.refreshCalendar = {}
-        dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
         let service = AuthService(
             persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk, auth: adapter.auth)
@@ -832,14 +838,13 @@ final class SessionTransportTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let intents = AuthCallbackIntentStore(defaults: defaults)
-        var dependencies = AuthService.Dependencies.live(client: sdk, auth: adapter.auth)
-        dependencies.accountChanged = { _ in adapter.accountDidChange() }
+        var dependencies = AuthService.Dependencies.live(
+            client: sdk, auth: adapter.auth, accountChanged: { _ in adapter.accountDidChange() }, refreshCalendar: {},
+            refreshProviderIdentity: {})
         dependencies.authRevision = { adapter.revision }
         dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
         dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.callbackIntents = intents
-        dependencies.refreshCalendar = {}
-        dependencies.refreshProviderIdentity = {}
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
         let service = AuthService(
             persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk, auth: adapter.auth)
@@ -928,10 +933,9 @@ final class SessionTransportTests: XCTestCase {
                 global: .init(session: URLSession(configuration: configuration))))
         let b = UUID()
         try await signIn(b, client: sdk)
-        var dependencies = AuthService.Dependencies.live(client: sdk)
-        dependencies.accountChanged = { _ in }
-        dependencies.refreshCalendar = {}
-        dependencies.refreshProviderIdentity = {}
+        var dependencies = AuthService.Dependencies.live(
+            client: sdk, accountChanged: { _ in }, refreshCalendar: {},
+            refreshProviderIdentity: {})
         dependencies.loadProfile = { Profile(id: $0, email: "test@example.invalid") }
         let service = AuthService(persistence: InMemoryPersistenceProvider(), dependencies: dependencies, client: sdk)
         await service.initialize()

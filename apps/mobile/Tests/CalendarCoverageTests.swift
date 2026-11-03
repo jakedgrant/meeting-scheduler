@@ -135,7 +135,7 @@ final class CalendarCoverageTests: XCTestCase {
             CoverageURLProtocol.replies.withLock { $0 = [:] }
         }
         let account = UUID()
-        let service = CalendarService(preferences: preferences, clientFactory: { api },
+        let service = CalendarService(preferences: preferences, client: api,
                                       requestCredentials: { AccountRequestCredentials(accountId: account, generation: 1, accessToken: "token") })
         service.accountDidChange(to: account)
         CoverageURLProtocol.replies.withLock {

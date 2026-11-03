@@ -1,12 +1,10 @@
 import SwiftUI
 import Shared
 
-public struct ContentView: View {
+struct ContentView: View {
     @Environment(\.authService) var authService
 
-    public init() {}
-
-    public var body: some View {
+    var body: some View {
         Group {
             if authService.isLoading {
                 loadingView
@@ -46,15 +44,15 @@ struct MainTabView: View {
 
 #Preview("Signed In") {
     ContentView()
-        .environment(\.authService, MockAuthService.signedIn)
+        .previewServices(auth: MockAuthService.signedIn)
 }
 
 #Preview("Signed Out") {
     ContentView()
-        .environment(\.authService, MockAuthService.signedOut)
+        .previewServices(auth: MockAuthService.signedOut)
 }
 
 #Preview("Loading") {
     ContentView()
-        .environment(\.authService, MockAuthService.loading)
+        .previewServices(auth: MockAuthService.loading)
 }

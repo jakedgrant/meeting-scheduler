@@ -7,8 +7,6 @@ import Supabase
 @MainActor
 @Observable
 public final class AuthService: NSObject, AuthServiceProtocol {
-    public static let shared = AuthService()
-
     public private(set) var currentUser: User?
     public private(set) var currentSession: Session?
     public private(set) var profile: Profile?
@@ -21,8 +19,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     public var currentUserId: UUID? { currentUser?.id }
     public var currentUserEmail: String? { currentUser?.email }
 
-    private let clientFactory: @MainActor () -> SupabaseClient
-    private var supabase: SupabaseClient { clientFactory() }
+    private let supabase: SupabaseClient
     private let auth: AuthClient
     private let dependencies: Dependencies
     private let persistence: any PersistenceProviderProtocol
@@ -77,7 +74,10 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         }
 
         static func live(
-            client: SupabaseClient, auth suppliedAuth: AuthClient? = nil, clientFactory: (@MainActor () -> SupabaseClient)? = nil
+            client: SupabaseClient, auth suppliedAuth: AuthClient? = nil,
+            accountChanged: @escaping @MainActor (UUID?) -> Void,
+            refreshCalendar: @escaping @MainActor () async -> Void,
+            refreshProviderIdentity: @escaping @MainActor () -> Void
         ) -> Self {
             let auth = suppliedAuth ?? client.auth
             return Self(
@@ -102,57 +102,42 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                     return session
                 },
                 loadProfile: { id in
-                    try await (clientFactory?() ?? client).from("profiles").select().eq("id", value: id.uuidString).single()
+                    try await client.from("profiles").select().eq("id", value: id.uuidString).single()
                         .execute().value
                 }, signOut: { try await auth.signOut(scope: .local) },
-                accountChanged: { id in
-                    SupabaseService.shared.sessionAdapter.accountDidChange()
-                    PollService.shared.accountDidChange(to: id)
-                    CalendarService.shared.accountDidChange(to: id)
-                    PurchaseService.shared.resetAccountState(userId: id?.uuidString)
-                }, refreshCalendar: { await CalendarService.shared.refreshGoogleCalendarConnection() },
-                refreshProviderIdentity: { PurchaseService.shared.retryAccountIdentity() },
+                accountChanged: accountChanged, refreshCalendar: refreshCalendar,
+                refreshProviderIdentity: refreshProviderIdentity,
                 isStoredSession: { $0 == auth.currentSession })
         }
     }
 
-    private override init() {
-        let client = SupabaseService.shared.client
-        self.clientFactory = { SupabaseService.shared.client }
-        self.auth = SupabaseService.shared.sessionAdapter.auth
-        var dependencies = Dependencies.live(client: client, auth: auth, clientFactory: { SupabaseService.shared.client })
-        dependencies.sessionAccepted = { SupabaseService.shared.acceptSession($0) }
-        dependencies.authRevision = { SupabaseService.shared.sessionAdapter.revision }
-        dependencies.invalidateAuthAttempts = { SupabaseService.shared.sessionAdapter.accountDidChange() }
+    /// Connects auth to the session adapter held by `supabase` and to its own OAuth browser.
+    /// The caller supplies callbacks that keep account-scoped services in step with every
+    /// identity transition.
+    init(
+        supabase: SupabaseService, persistence: any PersistenceProviderProtocol, preferences: UserDefaults,
+        accountChanged: @escaping @MainActor (UUID?) -> Void,
+        refreshCalendar: @escaping @MainActor () async -> Void,
+        refreshProviderIdentity: @escaping @MainActor () -> Void
+    ) {
+        let adapter = supabase.sessionAdapter
+        self.supabase = supabase.client
+        self.auth = adapter.auth
+        var dependencies = Dependencies.live(
+            client: supabase.client, auth: adapter.auth,
+            accountChanged: { id in
+                adapter.accountDidChange()
+                accountChanged(id)
+            }, refreshCalendar: refreshCalendar, refreshProviderIdentity: refreshProviderIdentity)
+        dependencies.sessionAccepted = { supabase.acceptSession($0) }
+        dependencies.authRevision = { adapter.revision }
+        dependencies.invalidateAuthAttempts = { adapter.accountDidChange() }
         dependencies.signOutSession = { session, revision in
-            let adapter = SupabaseService.shared.sessionAdapter
             try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
         }
-        dependencies.callbackIntents = AuthCallbackIntentStore(defaults: .standard)
-        dependencies.beginAuthAttempt = { SupabaseService.shared.sessionAdapter.beginAuthAttempt($0) }
-        dependencies.endAuthAttempt = { SupabaseService.shared.sessionAdapter.endAuthAttempt($0) }
-        dependencies.launchOAuth = { [authBrowser] in try await authBrowser.authenticate(url: $0) }
-        self.dependencies = dependencies
-        self.persistence = AccountPersistence.shared
-        super.init()
-        Task { await initialize() }
-    }
-
-    public init(persistence: any PersistenceProviderProtocol) {
-        let client = SupabaseService.shared.client
-        self.clientFactory = { SupabaseService.shared.client }
-        self.auth = SupabaseService.shared.sessionAdapter.auth
-        var dependencies = Dependencies.live(client: client, auth: auth, clientFactory: { SupabaseService.shared.client })
-        dependencies.sessionAccepted = { SupabaseService.shared.acceptSession($0) }
-        dependencies.authRevision = { SupabaseService.shared.sessionAdapter.revision }
-        dependencies.invalidateAuthAttempts = { SupabaseService.shared.sessionAdapter.accountDidChange() }
-        dependencies.signOutSession = { session, revision in
-            let adapter = SupabaseService.shared.sessionAdapter
-            try await adapter.signOut(session: session, revision: revision ?? adapter.revision)
-        }
-        dependencies.callbackIntents = AuthCallbackIntentStore(defaults: .standard)
-        dependencies.beginAuthAttempt = { SupabaseService.shared.sessionAdapter.beginAuthAttempt($0) }
-        dependencies.endAuthAttempt = { SupabaseService.shared.sessionAdapter.endAuthAttempt($0) }
+        dependencies.callbackIntents = AuthCallbackIntentStore(defaults: preferences)
+        dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
+        dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.launchOAuth = { [authBrowser] in try await authBrowser.authenticate(url: $0) }
         self.dependencies = dependencies
         self.persistence = persistence
@@ -164,7 +149,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     ) {
         self.persistence = persistence
         self.dependencies = dependencies
-        self.clientFactory = { client }
+        self.supabase = client
         self.auth = auth ?? client.auth
         super.init()
     }
@@ -473,7 +458,6 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             let generation = sessionGeneration
             // A profile read started before this edit cannot restore its older row.
             profileTask?.cancel()
-            let supabase = self.supabase
             var updates: [String: AnyJSON] = [:]
             if let displayName = displayName {
                 updates["display_name"] = .string(displayName)

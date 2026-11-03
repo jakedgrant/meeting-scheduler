@@ -4,8 +4,6 @@ import RevenueCat
 @MainActor
 @Observable
 public final class PurchaseService: PurchaseServiceProtocol {
-    public static let shared = PurchaseService()
-
     public private(set) var customerInfo: CustomerInfo?
     public private(set) var offerings: Offerings?
     public private(set) var isLoading = false
@@ -62,16 +60,18 @@ public final class PurchaseService: PurchaseServiceProtocol {
         startReconciliation()
     }
 
-    private init() {
-        dependencies = .live
+    /// Configures the process-wide RevenueCat SDK, so call this once per launch.
+    static func live() -> PurchaseService {
         #if DEBUG
             Purchases.logLevel = .debug
         #else
             Purchases.logLevel = .warn
         #endif
         Purchases.configure(withAPIKey: Config.revenueCatAPIKey)
+        let service = PurchaseService(dependencies: .live)
         // Remove a persisted provider identity even when auth restores signed out.
-        startReconciliation()
+        service.startReconciliation()
+        return service
     }
 
     init(dependencies: Dependencies) { self.dependencies = dependencies }

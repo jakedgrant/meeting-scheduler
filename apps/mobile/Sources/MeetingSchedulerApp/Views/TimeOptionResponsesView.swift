@@ -231,5 +231,5 @@ struct ResponseRow: View {
             pollTimeZone: "UTC"
         )
     }
-    .environment(\.pollService, MockPollService.withSamplePolls)
+    .previewServices(polls: MockPollService.withSamplePolls)
 }

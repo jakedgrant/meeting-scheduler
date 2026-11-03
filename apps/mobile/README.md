@@ -1,4 +1,14 @@
-# iOS authentication redirects
+# Meeting Scheduler - iOS App
+
+## Service composition
+
+The app wrapper calls `AppServices.live()` once at launch, and `AppRootView(services:)` places the services in the SwiftUI environment through `appServices(_:)`. Views read them through `@Environment(\.authService)` and its siblings. There are no service singletons.
+
+A preview binds mocks with `previewServices()`, passing only the services it cares about. Those two modifiers are the only ways to bind services, and both bind all of them. The compiler can't check that a view has services bound, so reading one with none bound traps in every build configuration. `AppServices.live()` is public for the wrapper; don't call it from previews or tests.
+
+To add a service, add it to `AppServices` and add a field and a read-only accessor to `ServiceSet` in `ServiceEnvironment.swift`. `appServices(_:)` and `previewServices()` then won't compile until they supply it. `AppServicesTests` checks each binding, so extend its environment tests too. `scripts/ci/check-ios-environment-keys.sh` fails on an environment key outside `ServiceSet`. If the service holds account state, also add it to the identity fan-out in `AppServices` and extend `testIdentityTransitionsReachEveryAccountScopedServiceAndTransport`.
+
+## Authentication redirects
 
 Email links and browser Google sign-in use Supabase PKCE with a persisted, single-use attempt UUID. The emitted redirect is:
 

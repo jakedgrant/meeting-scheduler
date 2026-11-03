@@ -13,8 +13,6 @@ public enum CalendarSource: String, Codable, Sendable {
 @MainActor
 @Observable
 public final class CalendarService: CalendarServiceProtocol {
-    public static let shared = CalendarService()
-
     private let eventStore = EKEventStore()
 
     // Apple Calendar properties
@@ -31,7 +29,7 @@ public final class CalendarService: CalendarServiceProtocol {
     private var accountId: UUID?
     private var accountGeneration: UInt64 = 0
     private let preferences: UserDefaults
-    private let clientFactory: @MainActor () -> SupabaseClient
+    private let client: SupabaseClient
     private let requestCredentials: @MainActor () -> AccountRequestCredentials?
     private let accessRequest: (@MainActor () async -> Bool)?
 
@@ -40,22 +38,14 @@ public final class CalendarService: CalendarServiceProtocol {
         appleCalendarEnabled || googleCalendarEnabled
     }
 
-    private convenience init() {
-        self.init(preferences: .standard, clientFactory: { SupabaseService.shared.client })
-    }
-
-    convenience init(preferences: UserDefaults, client: SupabaseClient, accessRequest: (@MainActor () async -> Bool)? = nil) {
-        self.init(preferences: preferences, clientFactory: { client }, accessRequest: accessRequest, requestCredentials: { nil })
-    }
-
     init(
-        preferences: UserDefaults, clientFactory: @escaping @MainActor () -> SupabaseClient,
+        preferences: UserDefaults, client: SupabaseClient,
         accessRequest: (@MainActor () async -> Bool)? = nil,
-        requestCredentials: @escaping @MainActor () -> AccountRequestCredentials? = { SupabaseService.shared.requestCredentials }
+        requestCredentials: @escaping @MainActor () -> AccountRequestCredentials? = { nil }
     ) {
         self.requestCredentials = requestCredentials
         self.preferences = preferences
-        self.clientFactory = clientFactory
+        self.client = client
         self.accessRequest = accessRequest
         updateAuthorizationStatus()
         // Never import unowned legacy device preferences into an account.
@@ -148,7 +138,6 @@ public final class CalendarService: CalendarServiceProtocol {
     public func refreshGoogleCalendarConnection() async {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let client = clientFactory()
             guard !googleCalendarLoading else { return }
             guard let userId = accountId else {
                 resetGoogleCalendarState()
@@ -179,7 +168,6 @@ public final class CalendarService: CalendarServiceProtocol {
     public func setGoogleCalendarEnabled(_ enabled: Bool) async {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let client = clientFactory()
             guard let userId = accountId, credentials == nil || credentials?.accountId == userId else { return }
             oauthSession.cancel()
             connectionGeneration += 1
@@ -302,7 +290,6 @@ public final class CalendarService: CalendarServiceProtocol {
 
     /// Busy options from the Google primary calendar, or nil when it could not be checked.
     private func checkGoogleCalendarConflicts(for timeOptions: [PollTimeOption]) async -> Set<UUID>? {
-        let client = clientFactory()
         guard let userId = accountId else { return nil }
         let generation = connectionGeneration
         do {

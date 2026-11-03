@@ -79,7 +79,7 @@ struct PollRowView: View {
             latest: Calendar.current.date(bySettingHour: 15, minute: 0, second: 0, of: tomorrow)!
         )
     )
-    .environment(\.pollService, MockPollService.withSamplePolls)
+    .previewServices(polls: MockPollService.withSamplePolls)
     .padding()
 }
 
@@ -101,7 +101,7 @@ struct PollRowView: View {
             latest: Calendar.current.date(bySettingHour: 11, minute: 30, second: 0, of: tomorrow)!
         )
     )
-    .environment(\.pollService, MockPollService.withSamplePolls)
+    .previewServices(polls: MockPollService.withSamplePolls)
     .padding()
 }
 
@@ -117,7 +117,7 @@ struct PollRowView: View {
         isOwner: true,
         timeRange: nil
     )
-    .environment(\.pollService, MockPollService.withSamplePolls)
+    .previewServices(polls: MockPollService.withSamplePolls)
     .padding()
 }
 
@@ -134,6 +134,6 @@ struct PollRowView: View {
         isOwner: false,
         timeRange: nil
     )
-    .environment(\.pollService, MockPollService.withSamplePolls)
+    .previewServices(polls: MockPollService.withSamplePolls)
     .padding()
 }

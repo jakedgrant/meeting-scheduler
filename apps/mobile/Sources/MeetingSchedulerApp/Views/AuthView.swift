@@ -146,5 +146,5 @@ struct AuthView: View {
 
 #Preview {
     AuthView()
-        .environment(\.authService, MockAuthService.signedOut)
+        .previewServices(auth: MockAuthService.signedOut)
 }

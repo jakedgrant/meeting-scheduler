@@ -4,8 +4,6 @@ import Supabase
 @MainActor
 @Observable
 public final class PollService: PollServiceProtocol {
-    public static let shared = PollService()
-
     public private(set) var myPolls: [Poll] = []
     public private(set) var createdPolls: [Poll] = []
     public private(set) var joinedPolls: [Poll] = []
@@ -25,8 +23,7 @@ public final class PollService: PollServiceProtocol {
     /// Time ranges keyed by poll ID — returned by the bounded summary RPC.
     public private(set) var pollTimeRanges: [UUID: (earliest: Date, latest: Date)] = [:]
 
-    var supabase: SupabaseClient { injectedClient ?? SupabaseService.shared.client }
-    private let injectedClient: SupabaseClient?
+    let supabase: SupabaseClient
     let requestCredentials: @MainActor () -> AccountRequestCredentials?
     private let currentUserId: @MainActor () -> UUID?
     private let listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))?
@@ -43,37 +40,22 @@ public final class PollService: PollServiceProtocol {
         return formatter
     }()
 
-    private init() {
-        self.injectedClient = nil
-        self.requestCredentials = { SupabaseService.shared.requestCredentials }
-        self.persistence = AccountPersistence.shared
-        self.currentUserId = { AuthService.shared.currentUserId }
-        self.listLoader = nil
-        self.detailLoader = nil
-        self.statusUpdater = nil
-    }
-
-    public init(
+    init(
         persistence: any PersistenceProviderProtocol,
-        currentUserId: @escaping @MainActor () -> UUID? = { AuthService.shared.currentUserId },
+        currentUserId: @escaping @MainActor () -> UUID?,
         listLoader: (@MainActor () async throws -> (created: [Poll], joined: [Poll]))? = nil,
         detailLoader: (@MainActor (UUID) async throws -> PollDetail)? = nil,
         statusUpdater: (@MainActor (UUID, PollStatus) async throws -> Void)? = nil,
-        client: SupabaseClient? = nil,
-        requestCredentials: (@MainActor () -> AccountRequestCredentials?)? = nil
+        client: SupabaseClient,
+        requestCredentials: @escaping @MainActor () -> AccountRequestCredentials? = { nil }
     ) {
-        self.injectedClient = client
-        self.requestCredentials = requestCredentials ?? { nil }
+        self.supabase = client
+        self.requestCredentials = requestCredentials
         self.persistence = persistence
         self.currentUserId = currentUserId
         self.listLoader = listLoader
         self.detailLoader = detailLoader
         self.statusUpdater = statusUpdater
-    }
-
-    /// Uses an isolated cache and identity for intercepted-transport tests.
-    public convenience init(client: SupabaseClient) {
-        self.init(persistence: InMemoryPersistenceProvider(), currentUserId: { nil }, client: client)
     }
 
     /// Called synchronously at every auth identity boundary, before any new account work.
@@ -234,7 +216,6 @@ public final class PollService: PollServiceProtocol {
     public func loadPoll(id: UUID) async -> Poll? {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             do {
                 let response: Poll =
@@ -260,7 +241,6 @@ public final class PollService: PollServiceProtocol {
     public func loadPollByCode(_ code: String) async -> PollLookupResponse? {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             do {
                 let response: [PollLookupResponse] =
@@ -358,7 +338,6 @@ public final class PollService: PollServiceProtocol {
     public func createPoll(_ request: CreatePollRequest) async throws -> PollCreationResult {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return try await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             guard let accountId else { throw PollCreationError.authentication }
             do {
@@ -412,7 +391,6 @@ public final class PollService: PollServiceProtocol {
     public func loadTimeOptions(pollId: UUID) async -> [PollTimeOption] {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             do {
                 let response: [PollTimeOption] =
@@ -440,7 +418,6 @@ public final class PollService: PollServiceProtocol {
     public func updatePollStatus(pollId: UUID, status: PollStatus) async throws {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return try await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             do {
                 if let statusUpdater {
@@ -471,7 +448,6 @@ public final class PollService: PollServiceProtocol {
     public func loadParticipants(pollId: UUID) async -> [PollParticipant] {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             do {
                 let response: [PollParticipant] =
@@ -496,7 +472,6 @@ public final class PollService: PollServiceProtocol {
     public func joinPoll(pollId: UUID, anonymousName: String? = nil) async throws -> PollParticipant {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return try await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             struct JoinResult: Decodable {
                 let participant: PollParticipant
@@ -523,7 +498,6 @@ public final class PollService: PollServiceProtocol {
     public func loadResponses(participantIds: [UUID]) async -> [AvailabilityResponse] {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
-            let supabase = self.supabase
             let generation = beginRequest()
             guard !participantIds.isEmpty else { return [] }
 
