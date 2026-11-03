@@ -89,7 +89,9 @@ final class AppServicesTests: XCTestCase {
                     provider.current = "anonymous"
                 }, currentUserId: { provider.current }, customerInfo: { nil }, offerings: { nil }))
         let services = AppServices(
-            supabase: supabase, persistence: InMemoryPersistenceProvider(), preferences: preferences, purchases: purchases)
+            supabase: supabase, makePersistence: { clock in InMemoryPersistenceProvider(now: { clock.now }) },
+            preferences: preferences, purchases: purchases,
+            clock: .system)
         await services.auth.initialize()
         XCTAssertFalse(services.auth.isLoading)
         XCTAssertNil(supabase.requestCredentials.accountId)
@@ -124,6 +126,8 @@ final class AppServicesTests: XCTestCase {
         await settle { provider.logouts == 1 }
     }
 
+    private static let fixedTime = Date(timeIntervalSince1970: 1_800_000_000)
+
     private func offlineServices(preferences: UserDefaults) -> AppServices {
         let url = URL(string: "https://app-services.invalid")!
         let adapter = SessionAuthAdapter(
@@ -134,11 +138,12 @@ final class AppServicesTests: XCTestCase {
         return AppServices(
             supabase: SupabaseService(
                 client: SupabaseService.apiClient(url: url, key: "test-only"), sessionAdapter: adapter),
-            persistence: InMemoryPersistenceProvider(), preferences: preferences,
+            makePersistence: { clock in InMemoryPersistenceProvider(now: { clock.now }) }, preferences: preferences,
             purchases: PurchaseService(
                 dependencies: .init(
                     login: { _ in nil }, logout: {}, currentUserId: { "anonymous" }, customerInfo: { nil },
-                    offerings: { nil })))
+                    offerings: { nil })),
+            clock: .fixed(Self.fixedTime))
     }
 
     func testAppServicesModifierBindsEveryServiceIntoTheEnvironment() throws {
@@ -156,13 +161,16 @@ final class AppServicesTests: XCTestCase {
         XCTAssertTrue(values.polls === services.polls)
         XCTAssertTrue(values.calendar === services.calendar)
         XCTAssertTrue(values.purchases === services.purchases)
+        XCTAssertEqual(values.clock.now, Self.fixedTime)
     }
 
     func testPreviewServicesBindsTheOverrideAndMocksForTheRest() throws {
         let auth = MockAuthService.signedIn
 
         var rendered: EnvironmentProbe.Values?
-        let renderer = ImageRenderer(content: EnvironmentProbe { rendered = $0 }.previewServices(auth: auth))
+        let time = Date(timeIntervalSince1970: 1_700_000_000)
+        let renderer = ImageRenderer(
+            content: EnvironmentProbe { rendered = $0 }.previewServices(auth: auth, clock: .fixed(time)))
         _ = renderer.uiImage
 
         let values = try XCTUnwrap(rendered)
@@ -170,6 +178,7 @@ final class AppServicesTests: XCTestCase {
         XCTAssertTrue(values.polls is MockPollService)
         XCTAssertTrue(values.calendar is MockCalendarService)
         XCTAssertTrue(values.purchases is MockPurchaseService)
+        XCTAssertEqual(values.clock.now, time)
     }
 
     /// Reading an unbound service traps, so this crashes the run if `AppRootView` stops binding.
@@ -190,16 +199,18 @@ private struct EnvironmentProbe: View {
         let polls: any PollServiceProtocol
         let calendar: any CalendarServiceProtocol
         let purchases: any PurchaseServiceProtocol
+        let clock: AppClock
     }
 
     @Environment(\.authService) private var auth
     @Environment(\.pollService) private var polls
     @Environment(\.calendarService) private var calendar
     @Environment(\.purchaseService) private var purchases
+    @Environment(\.appClock) private var clock
     let report: @MainActor (Values) -> Void
 
     var body: some View {
-        let _ = report(Values(auth: auth, polls: polls, calendar: calendar, purchases: purchases))
+        let _ = report(Values(auth: auth, polls: polls, calendar: calendar, purchases: purchases, clock: clock))
         Color.clear.frame(width: 1, height: 1)
     }
 }

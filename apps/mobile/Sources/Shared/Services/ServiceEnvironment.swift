@@ -1,13 +1,14 @@
 import SwiftUI
 
 /// Every service a view can read. The fields have no defaults, so adding one stops
-/// `appServices(_:)` and `previewServices(auth:polls:calendar:purchases:)` compiling until
+/// `appServices(_:)` and `previewServices(auth:polls:calendar:purchases:clock:)` compiling until
 /// both supply it.
 private struct ServiceSet {
     let auth: any AuthServiceProtocol
     let polls: any PollServiceProtocol
     let calendar: any CalendarServiceProtocol
     let purchases: any PurchaseServiceProtocol
+    let clock: AppClock
 }
 
 private struct ServiceSetKey: EnvironmentKey {
@@ -34,6 +35,7 @@ extension EnvironmentValues {
     public var pollService: any PollServiceProtocol { serviceSet.polls }
     public var calendarService: any CalendarServiceProtocol { serviceSet.calendar }
     public var purchaseService: any PurchaseServiceProtocol { serviceSet.purchases }
+    public var appClock: AppClock { serviceSet.clock }
 }
 
 extension View {
@@ -43,7 +45,7 @@ extension View {
             \.boundServices,
             ServiceSet(
                 auth: services.auth, polls: services.polls, calendar: services.calendar,
-                purchases: services.purchases))
+                purchases: services.purchases, clock: services.clock))
     }
 
     /// Binds mocks for a preview. Pass only the services the preview cares about.
@@ -51,8 +53,11 @@ extension View {
         auth: any AuthServiceProtocol = MockAuthService.signedOut,
         polls: any PollServiceProtocol = MockPollService.empty,
         calendar: any CalendarServiceProtocol = MockCalendarService.disabled,
-        purchases: any PurchaseServiceProtocol = MockPurchaseService.free
+        purchases: any PurchaseServiceProtocol = MockPurchaseService.free,
+        clock: AppClock = .system
     ) -> some View {
-        environment(\.boundServices, ServiceSet(auth: auth, polls: polls, calendar: calendar, purchases: purchases))
+        environment(
+            \.boundServices,
+            ServiceSet(auth: auth, polls: polls, calendar: calendar, purchases: purchases, clock: clock))
     }
 }

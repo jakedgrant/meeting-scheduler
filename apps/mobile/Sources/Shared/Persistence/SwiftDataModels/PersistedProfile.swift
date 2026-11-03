@@ -20,7 +20,7 @@ public final class PersistedProfile {
         timezone: String,
         createdAt: Date,
         updatedAt: Date,
-        lastSyncedAt: Date = Date()
+        lastSyncedAt: Date
     ) {
         self.id = id
         self.email = email
@@ -44,17 +44,17 @@ public final class PersistedProfile {
         )
     }
 
-    public func update(from profile: Profile) {
+    public func update(from profile: Profile, syncedAt: Date) {
         email = profile.email
         displayName = profile.displayName
         avatarUrl = profile.avatarUrl
         timezone = profile.timezone
         createdAt = profile.createdAt
         updatedAt = profile.updatedAt
-        lastSyncedAt = Date()
+        lastSyncedAt = syncedAt
     }
 
-    public static func from(_ profile: Profile) -> PersistedProfile {
+    public static func from(_ profile: Profile, syncedAt: Date) -> PersistedProfile {
         PersistedProfile(
             id: profile.id,
             email: profile.email,
@@ -62,7 +62,8 @@ public final class PersistedProfile {
             avatarUrl: profile.avatarUrl,
             timezone: profile.timezone,
             createdAt: profile.createdAt,
-            updatedAt: profile.updatedAt
+            updatedAt: profile.updatedAt,
+            lastSyncedAt: syncedAt
         )
     }
 }

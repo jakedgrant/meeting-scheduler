@@ -8,6 +8,10 @@ A preview binds mocks with `previewServices()`, passing only the services it car
 
 To add a service, add it to `AppServices` and add a field and a read-only accessor to `ServiceSet` in `ServiceEnvironment.swift`. `appServices(_:)` and `previewServices()` then won't compile until they supply it. `AppServicesTests` checks each binding, so extend its environment tests too. `scripts/ci/check-ios-environment-keys.sh` fails on an environment key outside `ServiceSet`. If the service holds account state, also add it to the identity fan-out in `AppServices` and extend `testIdentityTransitionsReachEveryAccountScopedServiceAndTransport`.
 
+`AppServices` also owns one `AppClock`, bound beside the services and read as `@Environment(\.appClock)`. Read the time from it rather than calling `Date()` in services, persistence or views, so tests and previews can pin it with `AppClock.fixed(_:)`.
+
+The poll detail and creation screens keep their orchestration in a `Shared` model that takes its services and clock in its initializer: `PollDetailModel` and `PollCreationModel`. The view builds the model from the environment and holds it in `@State`, and tests drive the model with the mocks. Follow the same shape when moving another screen's commands out of its view.
+
 ## Authentication redirects
 
 Email links and browser Google sign-in use Supabase PKCE with a persisted, single-use attempt UUID. The emitted redirect is:

@@ -116,7 +116,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     /// identity transition.
     init(
         supabase: SupabaseService, persistence: any PersistenceProviderProtocol, preferences: UserDefaults,
-        accountChanged: @escaping @MainActor (UUID?) -> Void,
+        clock: AppClock, accountChanged: @escaping @MainActor (UUID?) -> Void,
         refreshCalendar: @escaping @MainActor () async -> Void,
         refreshProviderIdentity: @escaping @MainActor () -> Void
     ) {
@@ -139,6 +139,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         dependencies.beginAuthAttempt = { adapter.beginAuthAttempt($0) }
         dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.launchOAuth = { [authBrowser] in try await authBrowser.authenticate(url: $0) }
+        dependencies.now = { clock.now }
         self.dependencies = dependencies
         self.persistence = persistence
         super.init()

@@ -110,10 +110,10 @@ final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
             )
             if let existing = try modelContext.fetch(descriptor).first {
                 if poll.updatedAt >= existing.updatedAt {
-                    existing.update(from: poll)
+                    existing.update(from: poll, syncedAt: now())
                 }
             } else {
-                modelContext.insert(PersistedPoll.from(poll))
+                modelContext.insert(PersistedPoll.from(poll, syncedAt: now()))
             }
         }
         try saveChanges()
@@ -222,9 +222,9 @@ final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
                 predicate: #Predicate { $0.id == option.id }
             )
             if let existing = try modelContext.fetch(descriptor).first {
-                existing.update(from: option)
+                existing.update(from: option, syncedAt: now())
             } else {
-                let persisted = PersistedTimeOption.from(option)
+                let persisted = PersistedTimeOption.from(option, syncedAt: now())
                 persisted.poll = persistedPoll
                 modelContext.insert(persisted)
             }
@@ -258,10 +258,10 @@ final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
             )
             if let existing = try modelContext.fetch(descriptor).first {
                 if participant.updatedAt >= existing.updatedAt {
-                    existing.update(from: participant)
+                    existing.update(from: participant, syncedAt: now())
                 }
             } else {
-                let persisted = PersistedParticipant.from(participant)
+                let persisted = PersistedParticipant.from(participant, syncedAt: now())
                 persisted.poll = persistedPoll
                 modelContext.insert(persisted)
             }
@@ -285,10 +285,10 @@ final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
             )
             if let existing = try modelContext.fetch(descriptor).first {
                 if response.updatedAt >= existing.updatedAt {
-                    existing.update(from: response)
+                    existing.update(from: response, syncedAt: now())
                 }
             } else {
-                let persisted = PersistedAvailabilityResponse.from(response)
+                let persisted = PersistedAvailabilityResponse.from(response, syncedAt: now())
                 // Link to participant if available
                 let participantDescriptor = FetchDescriptor<PersistedParticipant>(
                     predicate: #Predicate { $0.id == response.participantId }
@@ -327,10 +327,10 @@ final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
         )
         if let existing = try modelContext.fetch(descriptor).first {
             if profile.updatedAt >= existing.updatedAt {
-                existing.update(from: profile)
+                existing.update(from: profile, syncedAt: now())
             }
         } else {
-            modelContext.insert(PersistedProfile.from(profile))
+            modelContext.insert(PersistedProfile.from(profile, syncedAt: now()))
         }
         try saveChanges()
     }
@@ -363,7 +363,7 @@ final class SwiftDataPersistenceProvider: PersistenceProviderProtocol {
     }
 
     public func isFresh(_ entityId: UUID, maxAge: TimeInterval) -> Bool {
-        let cutoff = Date().addingTimeInterval(-maxAge)
+        let cutoff = now().addingTimeInterval(-maxAge)
 
         // Check polls first (most common)
         if let poll = try? modelContext.fetch(

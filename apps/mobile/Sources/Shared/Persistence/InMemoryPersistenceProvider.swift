@@ -51,11 +51,11 @@ final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
             if let existing = self.polls[poll.id] {
                 if poll.updatedAt >= existing.updatedAt {
                     self.polls[poll.id] = poll
-                    syncTimestamps[poll.id] = Date()
+                    syncTimestamps[poll.id] = now()
                 }
             } else {
                 self.polls[poll.id] = poll
-                syncTimestamps[poll.id] = Date()
+                syncTimestamps[poll.id] = now()
             }
         }
     }
@@ -131,7 +131,7 @@ final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
             responses[participant.id]?.removeAll { !retained.contains($0.timeOptionId) }
         }
         timeOptions[pollId] = options
-        syncTimestamps[pollId] = Date()
+        syncTimestamps[pollId] = now()
     }
 
     public func fetchTimeOptions(for pollId: UUID) throws -> [PollTimeOption] {
@@ -183,11 +183,11 @@ final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
         if let existing = profiles[profile.id] {
             if profile.updatedAt >= existing.updatedAt {
                 profiles[profile.id] = profile
-                syncTimestamps[profile.id] = Date()
+                syncTimestamps[profile.id] = now()
             }
         } else {
             profiles[profile.id] = profile
-            syncTimestamps[profile.id] = Date()
+            syncTimestamps[profile.id] = now()
         }
     }
 
@@ -211,7 +211,7 @@ final class InMemoryPersistenceProvider: PersistenceProviderProtocol {
 
     public func isFresh(_ entityId: UUID, maxAge: TimeInterval) -> Bool {
         guard let timestamp = syncTimestamps[entityId] else { return false }
-        return Date().timeIntervalSince(timestamp) < maxAge
+        return now().timeIntervalSince(timestamp) < maxAge
     }
 
     public func clearAll() throws {
