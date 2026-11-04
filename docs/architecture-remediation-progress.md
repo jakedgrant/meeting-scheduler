@@ -2,6 +2,18 @@
 
 Updated November 3, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F23 Android client injection and plan limits, November 3
+
+Branch `claude/next-remedy-tranche-3` started from fetched main `a7d52c9`, which contains merged #82. It takes two of the three items the section below left open: Android's global `SupabaseService` object and the Android paywall's copy of the limits.
+
+The `SupabaseService` object is gone. Its configuration moved to `createAppSupabaseClient()`, a private function in `AppContainer.kt`, so nothing else can build a second client that would share the persisted session key. `AppContainer` calls it once and passes the client to `SupabaseAuthGateway`, `PollService` and `CalendarService` as a required constructor argument. `AuthService` no longer defaults to a gateway built on the global client. Before, each of those services fell back to the singleton when a test didn't pass a client; now a missing client doesn't compile. Unit tests that replace every request with a transport pass `unusedSupabaseClient()`, whose mock engine fails the test on any request. The instrumented `SessionActivityTest` reads the container's client, which is `internal` for that purpose. The client used to be created when `AuthService` first read the session status, which already happened while `AppContainer` was being built, so it is still created during `Application.onCreate` on the main thread.
+
+`PollCreationEntitlement` mirrors the iOS enum of the same name: `free`, `pro_access`, `team_access` and `event_pass`, each with `participantLimit` and `allowsUnlimitedActivePolls`. The paywall's participant and unlimited-polls lines, `Poll`'s default capacity, and the entitlement ids in `PurchaseService` and `Subscription` read from it. `PollCreationResult.entitlement` stays a `String`. Nothing on Android reads it, and decoding it into the enum would make a tier the client doesn't know fail a creation the server had already committed, with every replay failing the same way. iOS decodes that field into its enum and has this risk; it is not changed here. The new `EntitlementContractTest` compares the enum with `packages/shared-config/entitlements.json`, checks that the fixture has no paid tier the enum lacks, and checks that each id is the serialized name. The Android workflow now also runs when the fixture changes.
+
+Local results: none. No JDK that Gradle 8.11 supports and no Android SDK is installed, so the Android build and JVM tests did not run locally. PR #83's Android CI, at commit `1d6a2c4`, ran `assembleDebug`, `assembleDebugAndroidTest` and `testDebugUnitTest` (including the new `EntitlementContractTest`), and the throwaway-keystore and unsigned-release checks; all passed. The instrumented tests were compiled but not run on a device. The app was not launched, and real sign-in, purchases and calendars were not exercised. No merge, deployment or hosted change is included.
+
+Still open in F23: Android screen orchestration (save and calendar workflows in `PollDetailView` and `CreatePollView`) and runtime validation of the `json` results the web still casts.
+
 ## F23 web database types and plan limits, November 3
 
 Branch `claude/next-remedy-tranche-2` started from fetched main `1d18ce6`, which contains merged #81. It takes web type generation and the web paywall's copy of the limits from the open F23 items.

@@ -18,14 +18,15 @@ app/src/main/
 ├── kotlin/com/meetingscheduler/android/
 │   ├── Config.kt                      # Configuration constants
 │   ├── MainActivity.kt                # Main activity entry point
+│   ├── AppContainer.kt                # Builds the Supabase client and services once per process
 │   │
 │   ├── models/                        # Data models
 │   │   ├── User.kt                    # Profile model
 │   │   ├── Poll.kt                    # Poll-related models
+│   │   ├── PollCreation.kt            # Creation commands and plan limits (checked against packages/shared-config/entitlements.json)
 │   │   └── Subscription.kt            # Subscription models
 │   │
 │   ├── services/                      # Business logic services
-│   │   ├── SupabaseService.kt         # Database service
 │   │   ├── AuthService.kt             # Authentication
 │   │   ├── PollService.kt             # Poll operations
 │   │   ├── CalendarService.kt         # Calendar integration

@@ -373,7 +373,7 @@ class AuthSdkTransportTest {
                 val replacementToken = if (returnToA) "new-A" else "token-B"
                 client.auth.importSession(session(replacementId, token = replacementToken), autoRefresh = false)
                 assertEquals(replacementToken, client.auth.currentAccessTokenOrNull())
-                val polls = PollService(owner, injectedClient = client)
+                val polls = PollService(owner, supabase = client)
                 val pending = async(start = CoroutineStart.UNDISPATCHED) { runCatching {
                     when (command) {
                         "create_poll" -> polls.createPoll(PollCreationRequest("operation-A", payload))
@@ -434,7 +434,7 @@ class AuthSdkTransportTest {
         val scope = createApplicationScope(Dispatchers.Unconfined)
         val auth = AuthService(scope, null, gateway)
         events.emit(SessionStatus.Authenticated(session("A")))
-        val calendar = CalendarService(null, auth, scope, injectedClient = client)
+        val calendar = CalendarService(null, auth, scope, supabase = client)
         client.auth.importSession(session("B"), autoRefresh = false)
         val old = async(start = CoroutineStart.UNDISPATCHED) { calendar.setGoogleCalendarEnabled(false) }
         withTimeout(1000) { sent.await() }

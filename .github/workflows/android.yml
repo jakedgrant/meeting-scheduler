@@ -5,12 +5,14 @@ on:
     paths:
       - 'apps/android/**'
       - 'packages/shared-config/date-time-fixtures.json'
+      - 'packages/shared-config/entitlements.json'
       - '.github/workflows/android.yml'
   push:
     branches: [main]
     paths:
       - 'apps/android/**'
       - 'packages/shared-config/date-time-fixtures.json'
+      - 'packages/shared-config/entitlements.json'
       - '.github/workflows/android.yml'
 
 permissions:

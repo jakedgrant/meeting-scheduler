@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.meetingscheduler.android.models.PollCreationEntitlement
 import com.meetingscheduler.android.services.PurchaseService
 import com.revenuecat.purchases.Package
 import kotlinx.coroutines.launch
@@ -128,8 +129,10 @@ fun PaywallView(
                     ) {
                         Text("What you get:", style = MaterialTheme.typography.titleSmall)
 
-                        FeatureRow(Icons.Default.AllInclusive, "Unlimited active polls")
-                        FeatureRow(Icons.Default.People, "Up to 50 participants per poll")
+                        if (PollCreationEntitlement.PRO.allowsUnlimitedActivePolls) {
+                            FeatureRow(Icons.Default.AllInclusive, "Unlimited active polls")
+                        }
+                        FeatureRow(Icons.Default.People, "Up to ${PollCreationEntitlement.PRO.participantLimit} participants per poll")
                         FeatureRow(Icons.Default.CalendarToday, "Calendar integrations")
                         FeatureRow(Icons.Default.Notifications, "Priority notifications")
                     }

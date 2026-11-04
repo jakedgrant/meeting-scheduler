@@ -20,7 +20,7 @@ class SessionActivityTest {
         val context = instrumentation.targetContext
         val app = context.applicationContext as MeetingSchedulerApplication
         val auth = app.container.authService
-        val sdk = com.meetingscheduler.android.services.SupabaseService.client
+        val sdk = app.container.supabase
         fun session(lineage: String, revision: Int): io.github.jan.supabase.auth.user.UserSession {
             val encoder = java.util.Base64.getUrlEncoder().withoutPadding()
             fun encode(value: String) = encoder.encodeToString(value.toByteArray())

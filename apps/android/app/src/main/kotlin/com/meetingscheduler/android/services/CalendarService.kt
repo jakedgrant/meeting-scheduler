@@ -54,14 +54,13 @@ class CalendarService(
     private val context: Application?,
     private val authService: AuthService,
     private val scope: CoroutineScope,
+    private val supabase: io.github.jan.supabase.SupabaseClient,
     private val connectionTransport: (suspend (String, String?) -> String)? = null,
     private val readDevicePreference: (suspend (String) -> Boolean)? = null,
     private val writeDevicePreference: (suspend (String, Boolean) -> Unit)? = null,
     private val readPermission: (() -> Boolean)? = null,
-    private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
     private val readDeviceConflicts: (suspend (List<PollTimeOption>, String) -> Set<String>)? = null,
 ) {
-    private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val json = Json { ignoreUnknownKeys = true }
     private var connectionGeneration = 0
     var calendarError by mutableStateOf<String?>(null)

@@ -33,10 +33,10 @@ data class Subscription(
     val updatedAt: Instant
 ) {
     val hasProAccess: Boolean
-        get() = isActive && (entitlement == "pro_access" || entitlement == "team_access")
+        get() = hasTeamAccess || (isActive && entitlement == PollCreationEntitlement.PRO.id)
 
     val hasTeamAccess: Boolean
-        get() = isActive && entitlement == "team_access"
+        get() = isActive && entitlement == PollCreationEntitlement.TEAM.id
 }
 
 @Serializable

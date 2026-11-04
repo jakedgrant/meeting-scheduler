@@ -39,11 +39,10 @@ private class AccountRequestIdentity(val accountKey: String, val token: String?)
 @OptIn(io.github.jan.supabase.annotations.SupabaseInternal::class, io.github.jan.supabase.annotations.SupabaseExperimental::class)
 class PollService(
     private val authService: PollSessionIdentity,
+    private val supabase: io.github.jan.supabase.SupabaseClient,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
-    private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
 ) {
-    private val supabase by lazy { injectedClient ?: SupabaseService.client }
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())

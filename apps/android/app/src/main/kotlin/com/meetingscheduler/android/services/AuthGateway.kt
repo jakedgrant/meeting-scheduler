@@ -29,13 +29,12 @@ interface AuthGateway {
 
 @OptIn(io.github.jan.supabase.annotations.SupabaseExperimental::class)
 class SupabaseAuthGateway(
-    private val injectedClient: io.github.jan.supabase.SupabaseClient? = null,
+    private val client: io.github.jan.supabase.SupabaseClient,
     private val dispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Main.immediate,
     private val revocationClient: (() -> io.github.jan.supabase.SupabaseClient)? = null,
 ) : AuthGateway {
     private val starts = kotlinx.coroutines.sync.Mutex()
     private val mutations = kotlinx.coroutines.sync.Mutex()
-    private val client get() = injectedClient ?: SupabaseService.client
     override val status get() = client.auth.sessionStatus
     override suspend fun loadProfile(userId: String, credential: String): Profile = accountPostgrest(client, credential).from("profiles").select {
         filter { eq("id", userId) }

@@ -49,7 +49,7 @@ class PollReadTransportTest {
             respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json"))
         })
         try {
-            val service = PollService(Identity(), injectedClient = client)
+            val service = PollService(Identity(), supabase = client)
             service.loadMyPolls()
             assertEquals(1, requests.size); assertEquals(50, service.myPolls.size)
             assertEquals(52, service.listTotalCount); assertTrue(service.hasMorePolls)
@@ -65,7 +65,7 @@ class PollReadTransportTest {
         val replies = ArrayDeque(listOf(list(listOf(poll("a")), 3, "cursor"), list(listOf(poll("b")), 3, "cursor"), list(listOf(poll("b")), 2)))
         val client = client(MockEngine { respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json")) })
         try {
-            val service = PollService(Identity(), injectedClient = client)
+            val service = PollService(Identity(), supabase = client)
             service.loadMyPolls(); service.loadMorePolls()
             assertEquals(listOf("a"), service.myPolls.map { it.id }); assertNotNull(service.listLoadError)
             assertFalse(service.isLoadingMore)
@@ -78,7 +78,7 @@ class PollReadTransportTest {
         val replies = ArrayDeque(listOf(list(listOf(poll("old")), 1), list(listOf(poll("partial")), 2)))
         val client = client(MockEngine { respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json")) })
         try {
-            val service = PollService(Identity(), injectedClient = client)
+            val service = PollService(Identity(), supabase = client)
             service.loadMyPolls(); service.loadMyPolls()
             assertEquals(listOf("old"), service.myPolls.map { it.id }); assertNotNull(service.listLoadError)
         } finally { client.close() }
@@ -101,7 +101,7 @@ class PollReadTransportTest {
                 respond(reply, headers = headersOf(HttpHeaders.ContentType, "application/json"))
             })
             try {
-                val service = PollService(Identity(), injectedClient = client)
+                val service = PollService(Identity(), supabase = client)
                 if (!initial) service.loadMyPolls()
                 val pending = launch { service.loadMyPolls() }
                 withTimeout(5000) { ready.await() }
@@ -125,7 +125,7 @@ class PollReadTransportTest {
                 headers = headersOf(HttpHeaders.ContentType, "application/json"))
         })
         try {
-            val service = PollService(Identity(), injectedClient = client)
+            val service = PollService(Identity(), supabase = client)
             service.loadMyPolls(); service.loadMyPolls()
             assertTrue(service.hasMorePolls); assertNotNull(service.listLoadError)
             service.retryPollLoad()
@@ -152,7 +152,7 @@ class PollReadTransportTest {
             respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json"))
         })
         try {
-            val service = PollService(Identity(), injectedClient = client)
+            val service = PollService(Identity(), supabase = client)
             val detail = service.loadPollDetail("p")
             assertEquals(fixture.rows, detail.responses)
             assertEquals(listOf("/rest/v1/rpc/get_poll_detail") + List(3) { "/rest/v1/rpc/list_poll_responses" }, requests)
@@ -168,7 +168,7 @@ class PollReadTransportTest {
             val replies = ArrayDeque(listOf(fixture.header(), reply))
             val client = client(MockEngine { respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json")) })
             try {
-                try { PollService(Identity(), injectedClient = client).loadPollDetail("p"); fail("Incomplete response accepted") }
+                try { PollService(Identity(), supabase = client).loadPollDetail("p"); fail("Incomplete response accepted") }
                 catch (_: IncompletePollRead) { }
             } finally { client.close() }
         }
@@ -181,7 +181,7 @@ class PollReadTransportTest {
         var calls = 0
         val client = client(MockEngine { calls++; respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json")) })
         try {
-            try { PollService(Identity(), injectedClient = client).loadPollDetail("p"); fail("Cursor cycle accepted") }
+            try { PollService(Identity(), supabase = client).loadPollDetail("p"); fail("Cursor cycle accepted") }
             catch (_: IncompletePollRead) { }
             assertEquals(3, calls)
         } finally { client.close() }
@@ -192,7 +192,7 @@ class PollReadTransportTest {
         var calls = 0
         val client = client(MockEngine { calls++; respond(fixture.header(count = 3), headers = headersOf(HttpHeaders.ContentType, "application/json")) })
         try {
-            try { PollService(Identity(), injectedClient = client).loadPollDetail("p"); fail("Truncated metadata accepted") }
+            try { PollService(Identity(), supabase = client).loadPollDetail("p"); fail("Truncated metadata accepted") }
             catch (_: IncompletePollRead) { }
             assertEquals(1, calls)
         } finally { client.close() }
@@ -212,7 +212,7 @@ class PollReadTransportTest {
             respond(reply, headers = headersOf(HttpHeaders.ContentType, "application/json"))
         })
         try {
-            val service = PollService(identity, injectedClient = client)
+            val service = PollService(identity, supabase = client)
             val pending = async { runCatching { service.loadPollDetail("p") } }
             withTimeout(5000) { ready.await() }
             identity.pollUserId = "B"; identity.identityGeneration++; service.resetSession()
@@ -235,7 +235,7 @@ class PollReadTransportTest {
             respond(reply, headers = headersOf(HttpHeaders.ContentType, "application/json"))
         })
         try {
-            val service = PollService(Identity(), injectedClient = client)
+            val service = PollService(Identity(), supabase = client)
             service.loadMyPolls()
             val pending = launch { service.loadMorePolls() }
             withTimeout(5000) { ready.await() }

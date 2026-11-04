@@ -56,7 +56,7 @@ data class Poll(
     @SerialName("is_premium")
     val isPremium: Boolean = false,
     @SerialName("max_participants")
-    val maxParticipants: Int = 10,
+    val maxParticipants: Int = PollCreationEntitlement.FREE.participantLimit,
     @SerialName("created_at")
     val createdAt: Instant,
     @SerialName("updated_at")

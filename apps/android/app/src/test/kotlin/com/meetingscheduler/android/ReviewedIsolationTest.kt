@@ -171,7 +171,7 @@ class ReviewedIsolationTest {
             shared.auth.setSessionStatus(SessionStatus.NotAuthenticated())
             shared.auth.importSession(session("B", "B-session"), autoRefresh = false)
             val owner = object : PollSessionIdentity { override val pollUserId = "A"; override val identityGeneration = 1L; override val pollAccessToken = "original-A" }
-            val polls = PollService(owner, injectedClient = shared)
+            val polls = PollService(owner, supabase = shared)
             val pending = async(start = CoroutineStart.UNDISPATCHED) {
                 when (read) {
                     "poll" -> assertEquals("poll-A", polls.loadPoll("poll-A")!!.id)
@@ -284,7 +284,7 @@ class ReviewedIsolationTest {
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId, "current-$userId")
             })
             events.emit(SessionStatus.Authenticated(session("A", "original")))
-            val polls = PollService(auth, injectedClient = shared)
+            val polls = PollService(auth, supabase = shared)
             val pending = async { runCatching {
                 when (kind) {
                     "poll" -> polls.loadPoll("poll-A")
@@ -317,7 +317,7 @@ class ReviewedIsolationTest {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
             })
-            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared, readDeviceConflicts = { _, _ -> emptySet() })
+            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, supabase = shared, readDeviceConflicts = { _, _ -> emptySet() })
             auth.onBoundary { calendar.resetSession() }; events.emit(SessionStatus.Authenticated(session("A", "original")))
             val old = async { calendar.checkPollConflicts(listOf(PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)), "UTC") }
             started.await(); events.emit(SessionStatus.Authenticated(session(replacement, "replacement"))); reply.complete(Unit)
@@ -349,7 +349,7 @@ class ReviewedIsolationTest {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
             })
-            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared,
+            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, supabase = shared,
                 readDeviceConflicts = { _, zone -> assertEquals("Pacific/Auckland", zone); if (deviceFails) error("permission revoked"); setOf("device-busy") })
             auth.onBoundary { calendar.resetSession() }; events.emit(SessionStatus.Authenticated(session("A", "original")))
             val check = calendar.checkPollConflicts(options, "Pacific/Auckland")
@@ -385,7 +385,7 @@ class ReviewedIsolationTest {
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
             })
             val gate = CompletableDeferred<Unit>(); val started = CompletableDeferred<Unit>()
-            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, injectedClient = shared,
+            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, supabase = shared,
                 readDeviceConflicts = { _, _ -> started.complete(Unit); gate.await(); if (fails) error("old device failure"); setOf("old-conflict") })
             auth.onBoundary { calendar.resetSession() }
             events.emit(SessionStatus.Authenticated(session("A", "old-session")))
