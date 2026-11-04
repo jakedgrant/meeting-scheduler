@@ -15,14 +15,17 @@ export class IncompleteReadError extends Error {
   }
 }
 
-export function checkedPage<T>(value: unknown): Page<T> {
-  const page = value as Page<T>
-  if (!page || !Array.isArray(page.items) || typeof page.has_more !== 'boolean'
-      || page.has_more !== (typeof page.next_cursor === 'string')
-      || (page.total_count !== null && !Number.isSafeInteger(page.total_count))) {
-    throw new IncompleteReadError()
-  }
-  return page
+function isPage(value: unknown): value is Page<unknown> {
+  const page = value as Page<unknown> | null
+  return !!page && Array.isArray(page.items) && typeof page.has_more === 'boolean'
+    && page.has_more === (typeof page.next_cursor === 'string')
+    && (page.total_count === null || Number.isSafeInteger(page.total_count))
+}
+
+/** A page whose envelope and every item pass; anything else is incomplete. */
+export function checkedPage<T>(value: unknown, isItem: (item: unknown) => item is T): Page<T> {
+  if (!isPage(value) || !value.items.every(isItem)) throw new IncompleteReadError()
+  return value as Page<T>
 }
 
 /**
@@ -41,7 +44,8 @@ export async function readAllPages<T>(
   let total: number | null = null
   for (let pages = 0; ; pages++) {
     if (pages >= maxPages) throw new IncompleteReadError()
-    const page: Page<T> = checkedPage<T>(await fetchPage(cursor))
+    const page = await fetchPage(cursor)
+    if (!isPage(page)) throw new IncompleteReadError()
     if (pages === 0) total = page.total_count
     for (const item of page.items) {
       const id = key(item)

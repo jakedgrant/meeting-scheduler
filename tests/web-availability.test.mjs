@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { participantRow, pollRow, timeOptionRow } from './helpers/web-rows.mjs';
 
 const requireWeb = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { build } = requireWeb('esbuild');
@@ -17,8 +18,8 @@ const participantId = '22222222-2222-4222-8222-222222222222';
 const memberId = '33333333-3333-4333-8333-333333333333';
 const optionId = '44444444-4444-4444-8444-444444444444';
 const secondOption = '44444444-4444-4444-8444-444444444445';
-const poll = { id: pollId, title: 'Planning', creator_id: memberId, status: 'active', closes_at: null, share_code: 'TEST', timezone: 'UTC' };
-const option = { id: optionId, poll_id: pollId, start_time: '2026-11-01T12:00:00Z', end_time: '2026-11-01T13:00:00Z', is_all_day: false };
+const poll = pollRow({ id: pollId, title: 'Planning', creator_id: memberId, share_code: 'TEST' });
+const option = timeOptionRow({ id: optionId, poll_id: pollId });
 const snapshot = (overrides = {}) => ({ participant_id: participantId, poll_id: pollId, version: 1, comment: 'Saved comment', responses: [], ...overrides });
 const response = (status = 'available', overrides = {}) => ({ id: 'response', time_option_id: optionId, status, note: 'Keep my note', updated_at: '2026-10-23T00:00:00Z', ...overrides });
 const storage = () => {
@@ -33,7 +34,7 @@ let fixtureSequence = 0;
 async function fixture(t, { member = false, disk = storage() } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'web-availability-'));
   const key = `__webAvailability${++fixtureSequence}`;
-  const state = { calls: [], version: snapshot(), participant: { id: participantId, poll_id: pollId, user_id: member ? memberId : null, anonymous_name: 'Guest', comment: 'Saved comment' } };
+  const state = { calls: [], version: snapshot(), participant: participantRow({ id: participantId, poll_id: pollId, user_id: member ? memberId : null, anonymous_name: 'Guest', comment: 'Saved comment' }) };
   globalThis[key] = state;
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { value: disk, writable: true, configurable: true });
@@ -45,7 +46,7 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
         const result = await state.handler(name, args);
         if (result !== undefined) return result;
       }
-      if (name === 'join_poll_as_guest') return { data: { participant: state.participant, guest_token: args.guest_token }, error: null };
+      if (name === 'join_poll_as_guest') return { data: { participant: state.participant, guest_token: args.guest_token, created: true }, error: null };
       if (name === 'join_poll') return { data: { participant: state.participant, created: false }, error: null };
       if (name === 'get_guest_poll_detail') return { data: { participant_id: participantId, poll, time_options: [option], participants: [state.participant], responses: [] }, error: null };
       if (name === 'get_availability') return { data: state.version, error: null };
@@ -279,6 +280,42 @@ test('member join and finalization use idempotent commands and returned poll row
   assert.equal(state.calls[0].name, 'join_poll');
 });
 
+test('join and finalization results that fail their checks are refused and not published', async t => {
+  const { actual, state } = await fixture(t, { member: true });
+  const { created_at, ...withoutStamp } = state.participant;
+  state.handler = name => name === 'join_poll' ? { data: { participant: withoutStamp, created: true } } : undefined;
+  await assert.rejects(actual.joinPoll(pollId), /join could not be confirmed/);
+  state.handler = name => name === 'join_poll' ? { data: { participant: { ...state.participant, poll_id: otherPollId }, created: false } } : undefined;
+  await assert.rejects(actual.joinPoll(pollId), /join could not be confirmed/);
+  state.handler = undefined;
+  await actual.loadPoll(pollId);
+  for (const finalized of [{ ...poll, status: 'finished' }, { ...poll, selected_start_time: 'tomorrow' }, { ...poll, id: otherPollId }, null]) {
+    state.handler = name => name === 'finalize_poll' ? { data: finalized } : undefined;
+    await assert.rejects(actual.setSelectedFinalDate(pollId, optionId), /final time could not be confirmed/);
+    assert.deepEqual(actual.get(actual.currentPoll), poll);
+  }
+});
+
+test('a guest detail that fails its check keeps the capability; one for another poll drops it', async t => {
+  const { actual, state } = await fixture(t);
+  await actual.joinPoll(pollId, 'Guest');
+  const capability = actual.get(actual.currentGuest);
+  const detail = { participant_id: participantId, poll, time_options: [option], participants: [state.participant], responses: [] };
+  for (const malformed of [{ ...detail, responses: [{ id: 'response', status: 'available' }] }, { ...detail, participant_id: memberId }, { ...detail, poll: { ...poll, max_participants: '10' } }]) {
+    state.handler = name => name === 'get_guest_poll_detail' ? { data: malformed, error: null } : undefined;
+    await actual.loadPoll(pollId);
+    assert.equal(actual.get(actual.currentPoll), null);
+    assert.equal(actual.get(actual.guestNotice), null);
+  }
+  state.handler = undefined;
+  await actual.loadPoll(pollId);
+  assert.deepEqual(actual.get(actual.currentGuest), capability);
+  state.handler = name => name === 'get_guest_poll_detail' ? { data: { ...detail, poll: { ...poll, id: otherPollId } }, error: null } : undefined;
+  await actual.loadPoll(pollId);
+  assert.equal(actual.get(actual.currentGuest), null);
+  assert.match(actual.get(actual.guestNotice), /Join again/);
+});
+
 test('account transition discards an in-flight save result and its editor state', async t => {
   const { actual, state } = await fixture(t, { member: true });
   await actual.loadPoll(pollId);
@@ -399,7 +436,7 @@ for (const boundary of ['destroy', 'route', 'account']) {
     pageSession.activate();
     let complete;
     state.handler = (name, args) => name === 'join_poll_as_guest'
-      ? new Promise(resolve => { complete = () => resolve({ data: { participant: state.participant, guest_token: args.guest_token } }); })
+      ? new Promise(resolve => { complete = () => resolve({ data: { participant: state.participant, guest_token: args.guest_token, created: true } }); })
       : undefined;
     let reloads = 0;
     const joining = pageSession.joinAndReload(
@@ -461,7 +498,7 @@ test('late successful join cannot replace a capability acquired after revocation
   const oldCapability = actual.get(actual.currentGuest);
   let complete;
   state.handler = (name, args) => name === 'join_poll_as_guest'
-    ? new Promise(resolve => { complete = () => resolve({ data: { participant: state.participant, guest_token: args.guest_token } }); })
+    ? new Promise(resolve => { complete = () => resolve({ data: { participant: state.participant, guest_token: args.guest_token, created: true } }); })
     : undefined;
   const oldJoin = actual.joinPoll(pollId, 'Retry guest');
   actual.cleanupPollRealtime();

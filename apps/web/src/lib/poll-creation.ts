@@ -1,6 +1,5 @@
 import { get, writable } from 'svelte/store'
 import type { Poll, PollTimeOption } from './supabase'
-import type { CreationEntitlement } from './entitlements'
 import { allDayInterval, currentZone, DateTimeError, deadlineFor, isCalendarDate, timedInterval } from './date-time'
 
 export type CreationPayload = {
@@ -17,7 +16,9 @@ export interface CreationResult {
 	poll: Poll
 	time_options: PollTimeOption[]
 	redeemed_pass_id: string | null
-	entitlement: CreationEntitlement
+	// Not read. A string, as on Android: a tier this build doesn't know must not
+	// fail a creation the server committed, which every replay would repeat.
+	entitlement: string
 	replayed: boolean
 }
 

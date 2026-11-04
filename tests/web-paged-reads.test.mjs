@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import * as webRows from './helpers/web-rows.mjs';
 
 const requireWeb = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { build } = requireWeb('esbuild');
@@ -15,10 +16,10 @@ const member = '11111111-1111-4111-8111-111111111111';
 const other = '22222222-2222-4222-8222-222222222222';
 const pollId = '33333333-3333-4333-8333-333333333333';
 const id = (prefix, index) => `${prefix}${String(index).padStart(12, '0')}`;
-const pollRow = (index, creator = member) => ({ id: id('44444444-4444-4444-8444-', index), creator_id: creator, title: `Poll ${index}`, status: 'active', description: null });
+const pollRow = (index, creator = member) => webRows.pollRow({ id: id('44444444-4444-4444-8444-', index), creator_id: creator, title: `Poll ${index}` });
 const summary = (poll, role, extra = {}) => ({ poll, role, participant_count: 7, time_option_count: 2, earliest_start: '2026-11-01T12:00:00Z', latest_start: '2026-11-03T12:00:00Z', ...extra });
 const page = (items, nextCursor = null, total = items.length) => ({ items, has_more: nextCursor !== null, next_cursor: nextCursor, total_count: total });
-const responseRow = index => ({ id: id('55555555-5555-4555-8555-', index), participant_id: id('66666666-6666-4666-8666-', Math.floor(index / 30)), time_option_id: id('77777777-7777-4777-8777-', index % 30), status: 'available' });
+const responseRow = index => webRows.responseRow({ id: id('55555555-5555-4555-8555-', index), participant_id: id('66666666-6666-4666-8666-', Math.floor(index / 30)), time_option_id: id('77777777-7777-4777-8777-', index % 30) });
 let sequence = 0;
 
 const settle = async () => { await new Promise(resolve => setImmediate(resolve)); };
@@ -182,8 +183,8 @@ test('a failed list load is reported instead of shown as an empty history', asyn
 test('detail shows responses only after complete traversal beyond the row cap', async t => {
   const { actual, state } = await fixture(t);
   const poll = { ...pollRow(1), id: pollId };
-  const participants = Array.from({ length: 40 }, (_, index) => ({ id: id('66666666-6666-4666-8666-', index), poll_id: pollId, user_id: null, anonymous_name: 'Guest', profiles: null }));
-  const options = Array.from({ length: 30 }, (_, index) => ({ id: id('77777777-7777-4777-8777-', index), poll_id: pollId, start_time: '2026-11-01T12:00:00Z', end_time: '2026-11-01T13:00:00Z', is_all_day: false }));
+  const participants = Array.from({ length: 40 }, (_, index) => webRows.participantRow({ id: id('66666666-6666-4666-8666-', index), poll_id: pollId, anonymous_name: 'Guest', profiles: null }));
+  const options = Array.from({ length: 30 }, (_, index) => webRows.timeOptionRow({ id: id('77777777-7777-4777-8777-', index), poll_id: pollId }));
   const rows = Array.from({ length: 1200 }, (_, index) => responseRow(index));
   let total = rows.length;
   state.handler = (name, args) => {
@@ -258,8 +259,8 @@ test('refresh clock coalesces focus/reconnect, pauses hidden/offline, and dispos
 });
 
 function memberDetail(state) {
-  const participant = { id: 'member-participant', poll_id: pollId, user_id: member, comment: null };
-  state.option = { id: 'option', poll_id: pollId, start_time: '2026-11-01T12:00:00Z', end_time: '2026-11-01T13:00:00Z' };
+  const participant = webRows.participantRow({ id: 'member-participant', poll_id: pollId, user_id: member });
+  state.option = webRows.timeOptionRow({ id: 'option', poll_id: pollId });
   state.poll = { ...pollRow(1), id: pollId };
   state.snapshot = { poll_id: pollId, participant_id: participant.id, version: 1, comment: null, responses: [] };
   state.responses = [];

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { pollRow, timeOptionRow } from './helpers/web-rows.mjs';
 
 const requireWeb = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { build } = requireWeb('esbuild');
@@ -24,8 +25,8 @@ const deferred = () => { let resolve, reject; const promise = new Promise((yes, 
 const flush = async () => { for (let turn = 0; turn < 3; turn++) await new Promise(resolve => setTimeout(resolve, 0)); };
 const disk = () => { const values = new Map(); return { values, getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: key => values.delete(key) }; };
 let sequence = 0;
-const summaryPage = (polls, role) => ({ data: { items: polls.map(poll => ({ poll, role, participant_count: 0, time_option_count: 0, earliest_start: null, latest_start: null })), has_more: false, next_cursor: null, total_count: polls.length }, error: null });
-const pollDetail = poll => ({ data: { poll, time_options: [], participants: [], time_option_count: 0, participant_count: 0 }, error: null });
+const summaryPage = (polls, role) => ({ data: { items: polls.map(poll => ({ poll: pollRow(poll), role, participant_count: 0, time_option_count: 0, earliest_start: null, latest_start: null })), has_more: false, next_cursor: null, total_count: polls.length }, error: null });
+const pollDetail = poll => ({ data: { poll: pollRow(poll), time_options: [], participants: [], time_option_count: 0, participant_count: 0 }, error: null });
 // F19 read RPCs answer for the account that issued the request.
 const defaultRpc = (name, args, account) => name === 'get_poll_detail' ? pollDetail({ id: args.poll_uuid, creator_id: account })
   : name === 'list_poll_responses' || name === 'list_poll_summaries' ? summaryPage([], args?.role_filter)
@@ -414,7 +415,7 @@ for (const outcome of ['success', 'failure']) test(`obsolete poll mutation/detai
   mutation.resolve(outcome === 'success' ? { error: null } : { error: Error('old mutation failed') });
   await old;
   assert.equal(actual.get(actual.polls.currentPoll).id, 'poll-B');
-  assert.equal(actual.get(actual.polls.currentPoll).status, undefined);
+  assert.equal(actual.get(actual.polls.currentPoll).status, 'active');
   newRoute.dispose();
 });
 
@@ -445,12 +446,12 @@ test('creation retry survives A→logout→B→A and recovers original poll with
   const { actual, state, mount } = await fixture(t);
   mount(); state.emit('SIGNED_IN', sessionFor(accountA)); await flush();
   const storage = disk(), calls = [];
-  const poll = { id: 'created-once', creator_id: accountA, is_premium: true, max_participants: 50 };
+  const poll = pollRow({ id: 'created-once', creator_id: accountA, is_premium: true, max_participants: 50 });
   const editor = actual.createPollCreation({ create: actual.polls.createPoll }, storage);
   const stop = actual.auth.user.subscribe(user => editor.setOwner(user?.id ?? null));
   t.after(stop);
   editor.edit({ title: 'Exact draft', useEventPass: true, timeOptions: [{ id: 'draft', date: '2026-11-01', startTime: '12:00', endTime: '13:00' }] });
-  state.rpc = async (name, args) => { assert.equal(name, 'create_poll'); calls.push(structuredClone(args)); if (calls.length === 1) throw Error('Reply lost after committed pass redemption'); return { data: { poll, time_options: [{ id: 'option', poll_id: poll.id }], redeemed_pass_id: 'same-pass', entitlement: 'event_pass', replayed: true }, error: null }; };
+  state.rpc = async (name, args) => { assert.equal(name, 'create_poll'); calls.push(structuredClone(args)); if (calls.length === 1) throw Error('Reply lost after committed pass redemption'); return { data: { poll, time_options: [timeOptionRow({ id: 'option', poll_id: poll.id })], redeemed_pass_id: 'same-pass', entitlement: 'event_pass', replayed: true }, error: null }; };
   assert.equal(await editor.submit(), null);
   state.emit('SIGNED_OUT', null); state.emit('SIGNED_IN', sessionFor(accountB));
   assert.equal(actual.get(editor).draft.title, '');
