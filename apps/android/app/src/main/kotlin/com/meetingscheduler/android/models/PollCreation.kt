@@ -5,6 +5,27 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
+/**
+ * The plan that funds a poll. The ids and limits mirror packages/shared-config/entitlements.json,
+ * and EntitlementContractTest fails when they differ. The server sets each poll's capacity;
+ * the client uses these values to describe plans and as the default when a poll row omits it.
+ */
+@Serializable
+enum class PollCreationEntitlement(
+    /** The most participant rows a poll funded this way can hold. */
+    val participantLimit: Int,
+    /** Whether the account can keep any number of draft or active polls. */
+    val allowsUnlimitedActivePolls: Boolean,
+) {
+    @SerialName("free") FREE(10, false),
+    @SerialName("pro_access") PRO(50, true),
+    @SerialName("team_access") TEAM(100, true),
+    @SerialName("event_pass") EVENT_PASS(50, false);
+
+    /** The wire and RevenueCat identifier, taken from the serial name so the two can't differ. */
+    val id: String get() = serializer().descriptor.getElementName(ordinal)
+}
+
 @Serializable
 data class CreationTimeOption(
     @SerialName("start_time") val startTime: Instant,

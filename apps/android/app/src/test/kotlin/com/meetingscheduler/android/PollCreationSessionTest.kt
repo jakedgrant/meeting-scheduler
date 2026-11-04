@@ -115,7 +115,7 @@ class PollCreationSessionTest {
 
     @Test fun accountBCreateCannotRetainAccountAsLoadedLists() = runBlocking<Unit> {
         val identity = Identity()
-        val service = PollService(identity, createTransport = { result.copy(poll = result.poll.copy(creatorId = identity.pollUserId!!)) },
+        val service = PollService(identity, unusedSupabaseClient(), createTransport = { result.copy(poll = result.poll.copy(creatorId = identity.pollUserId!!)) },
             listTransport = { listOf(result.poll) to listOf(result.poll.copy(id = "joined-A", creatorId = "other-owner")) })
         service.loadMyPolls()
         assertEquals(2, service.myPolls.size)
@@ -128,7 +128,7 @@ class PollCreationSessionTest {
     @Test fun listStartedBeforeCreationCannotEraseAuthoritativeSuccess() = runBlocking<Unit> {
         val response = CompletableDeferred<Pair<List<Poll>, List<Poll>>>()
         val started = CompletableDeferred<Unit>()
-        val service = PollService(Identity(), createTransport = { result },
+        val service = PollService(Identity(), unusedSupabaseClient(), createTransport = { result },
             listTransport = { started.complete(Unit); response.await() })
         val load = async { service.loadMyPolls() }
         started.await()
@@ -142,7 +142,7 @@ class PollCreationSessionTest {
         val identity = Identity()
         val response = CompletableDeferred<PollCreationResult>()
         val started = CompletableDeferred<Unit>()
-        val service = PollService(identity, createTransport = { started.complete(Unit); response.await() })
+        val service = PollService(identity, unusedSupabaseClient(), createTransport = { started.complete(Unit); response.await() })
         val create = async {
             try { service.createPoll(PollCreationRequest("operation", payload)); fail() }
             catch (_: IllegalStateException) { }
@@ -153,7 +153,7 @@ class PollCreationSessionTest {
         response.complete(result)
         create.await()
         assertTrue(service.myPolls.isEmpty())
-        val malformed = PollService(identity, createTransport = { result.copy(timeOptions = result.timeOptions.map { it.copy(pollId = "wrong") }) })
+        val malformed = PollService(identity, unusedSupabaseClient(), createTransport = { result.copy(timeOptions = result.timeOptions.map { it.copy(pollId = "wrong") }) })
         try { malformed.createPoll(PollCreationRequest("operation-2", payload)); fail() }
         catch (_: IllegalStateException) { }
         assertTrue(malformed.myPolls.isEmpty())

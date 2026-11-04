@@ -124,7 +124,7 @@ class SessionLifecycleTest {
     @Test(timeout = 15000) fun actualPollServiceOldCleanupCannotClearNewLoadingAndAbaCannotPublish() = runBlocking {
         val identity = object : PollSessionIdentity { override var pollUserId: String? = "A"; override var identityGeneration = 1L }
         val requests = mutableListOf<CompletableDeferred<Pair<List<Poll>, List<Poll>>>>()
-        val polls = PollService(identity, listTransport = { CompletableDeferred<Pair<List<Poll>, List<Poll>>>().also { requests += it }.await() })
+        val polls = PollService(identity, unusedSupabaseClient(), listTransport = { CompletableDeferred<Pair<List<Poll>, List<Poll>>>().also { requests += it }.await() })
         val old = async { polls.loadMyPolls() }; yield()
         identity.pollUserId = "B"; identity.identityGeneration++; polls.resetSession()
         val new = async { polls.loadMyPolls() }; yield()
@@ -140,7 +140,7 @@ class SessionLifecycleTest {
             val scope = createApplicationScope(Dispatchers.Unconfined)
             val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
             val old = CompletableDeferred<Unit>(); var calls = 0
-            val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ ->
+            val calendar = CalendarService(null, auth, scope, unusedSupabaseClient(), connectionTransport = { _, _ ->
                 val call = ++calls
                 if (call == 1) withContext(NonCancellable) { old.await(); if (fails) error("old calendar failure") }
                 """{"connected":true,"accountEmail":"${if (call == 1) "A" else "B"}@example.test","requiresReconnect":false,"revocationPending":false}"""
@@ -263,7 +263,7 @@ class SessionLifecycleTest {
             val scope = createApplicationScope(Dispatchers.Unconfined)
             val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
             val old = CompletableDeferred<Unit>()
-            val calendar = CalendarService(null, auth, scope,
+            val calendar = CalendarService(null, auth, scope, unusedSupabaseClient(),
                 connectionTransport = { _, _ -> """{"connected":false,"accountEmail":null,"requiresReconnect":false,"revocationPending":false}""" },
                 readDevicePreference = { id ->
                     if (id == "A") withContext(NonCancellable) { old.await(); if (fails) error("old disk failure") }
@@ -348,7 +348,7 @@ class SessionLifecycleTest {
             listOf(PollTimeOption("option", "original-poll", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)),
             "oldest-pass", "event_pass")
         val receipts = mutableMapOf<String, PollCreationResult>(); var redeemed = 0
-        val polls = PollService(auth, createTransport = { request ->
+        val polls = PollService(auth, unusedSupabaseClient(), createTransport = { request ->
             receipts[request.operationId]?.copy(replayed = true) ?: authoritative.also {
                 assertEquals(payload, request.payload)
                 receipts[request.operationId] = it; redeemed++

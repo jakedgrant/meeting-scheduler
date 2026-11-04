@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.meetingscheduler.android.BuildConfig
 import com.meetingscheduler.android.Config
+import com.meetingscheduler.android.models.PollCreationEntitlement
 import com.revenuecat.purchases.CustomerInfo
 import com.revenuecat.purchases.LogLevel
 import com.revenuecat.purchases.Offerings
@@ -57,11 +58,10 @@ class PurchaseService(
         private set
 
     val hasProAccess: Boolean
-        get() = customerInfo?.entitlements?.get("pro_access")?.isActive == true ||
-                customerInfo?.entitlements?.get("team_access")?.isActive == true
+        get() = hasTeamAccess || customerInfo?.entitlements?.get(PollCreationEntitlement.PRO.id)?.isActive == true
 
     val hasTeamAccess: Boolean
-        get() = customerInfo?.entitlements?.get("team_access")?.isActive == true
+        get() = customerInfo?.entitlements?.get(PollCreationEntitlement.TEAM.id)?.isActive == true
 
     val currentOffering: com.revenuecat.purchases.Offering?
         get() = offerings?.current

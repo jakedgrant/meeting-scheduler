@@ -29,7 +29,7 @@ interface BillingIdentity {
 class AuthService(
     private val scope: CoroutineScope,
     private val billingIdentity: BillingIdentity?,
-    private val gateway: AuthGateway = SupabaseAuthGateway(),
+    private val gateway: AuthGateway,
     private val attempts: AuthAttemptStore = MemoryAuthAttemptStore(),
 ) : PollSessionIdentity {
     override var identityGeneration by mutableStateOf(0L)
