@@ -42,7 +42,7 @@ class PollService(
     private val supabase: io.github.jan.supabase.SupabaseClient,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
-) {
+) : PollDetailPolls, PollCreationPolls {
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())
@@ -119,7 +119,7 @@ class PollService(
     }
 
     var availabilityRecovery: AvailabilityRecoveryStore? = null
-    fun availabilitySession(pollId: String): AvailabilitySaveSession =
+    override fun availabilitySession(pollId: String): AvailabilitySaveSession =
         availabilityRecovery?.open(checkNotNull(creationAccountId), pollId) ?: AvailabilitySaveSession()
 
     // MARK: - Formatting
@@ -192,7 +192,7 @@ class PollService(
     }
 
     /** Publish only after bounded metadata and the full response traversal pass validation. */
-    suspend fun loadPollDetail(pollId: String): PollDetail = withSession {
+    override suspend fun loadPollDetail(pollId: String): PollDetail = withSession {
         val header = accountRpc("get_poll_detail", buildJsonObject { put("poll_uuid", pollId) }).decodeAs<PollDetailPage>()
         header.validate(pollId)
         var cursor: String? = null
@@ -254,10 +254,10 @@ class PollService(
 
     // MARK: - Create Poll
 
-    val creationAccountId: String? get() = authService.pollUserId
-    val creationAccountKey: String get() = "${creationAccountId}:${authService.identityGeneration}"
+    override val creationAccountId: String? get() = authService.pollUserId
+    override val creationAccountKey: String get() = "${creationAccountId}:${authService.identityGeneration}"
 
-    suspend fun createPoll(request: PollCreationRequest): PollCreationResult = withSession {
+    override suspend fun createPoll(request: PollCreationRequest): PollCreationResult = withSession {
         selectPollAccount()
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
@@ -311,7 +311,7 @@ class PollService(
 
     // MARK: - Poll Status
 
-    suspend fun updatePollStatus(pollId: String, status: PollStatus) = withSession {
+    override suspend fun updatePollStatus(pollId: String, status: PollStatus): Unit = withSession {
         val key = creationAccountKey
         val credential = requestCredential()
         val update = buildJsonObject {
@@ -334,7 +334,7 @@ class PollService(
         }
     }
 
-    suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = withSession {
+    override suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = withSession {
         val key = creationAccountKey
         val saved = accountRpc("finalize_poll", buildJsonObject {
             put("poll_uuid", pollId)
@@ -364,7 +364,7 @@ class PollService(
         }
     }
 
-    suspend fun joinPoll(pollId: String): PollParticipant = withSession {
+    override suspend fun joinPoll(pollId: String): PollParticipant = withSession {
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         try {
@@ -403,13 +403,13 @@ class PollService(
         }
     }
 
-    suspend fun getAvailability(pollId: String): AvailabilitySnapshot = withSession {
+    override suspend fun getAvailability(pollId: String): AvailabilitySnapshot = withSession {
         accountRpc("get_availability", buildJsonObject {
             put("poll_uuid", pollId)
         }).decodeAs<AvailabilitySnapshot>()
     }
 
-    suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot = withSession {
+    override suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot = withSession {
         val params = buildJsonObject {
             put("poll_uuid", pollId)
             put("request_id", request.requestId)

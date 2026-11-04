@@ -23,21 +23,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.meetingscheduler.android.FailureLog
 import com.meetingscheduler.android.models.*
-import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
-import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atStartOfDayIn
-import kotlinx.datetime.plus
 import java.text.SimpleDateFormat
-import java.time.ZoneId
 import java.util.*
 
 // Extension function to convert kotlinx.datetime.Instant to java.time.Instant
@@ -45,164 +37,33 @@ private fun Instant.toJavaInstant(): java.time.Instant {
     return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
 }
 
-data class ResponseSummary(
-    val available: Int,
-    val maybe: Int,
-    val unavailable: Int
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PollDetailView(
     pollId: String,
-    authService: AuthService,
     pollService: PollService,
     calendarService: CalendarService,
     onNavigateToResponses: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
     val accountKey = pollService.creationAccountKey
-    var detailError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
-    var loadRevision by remember(pollId, accountKey) { mutableStateOf(0) }
-    var joinError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
-    var isJoining by remember(pollId, accountKey) { mutableStateOf(false) }
-    val userId = authService.currentUser?.id
-    var poll by remember(pollId, accountKey) { mutableStateOf<Poll?>(null) }
-    var timeOptions by remember(pollId, accountKey) { mutableStateOf<List<PollTimeOption>>(emptyList()) }
-    var participants by remember(pollId, accountKey) { mutableStateOf<List<PollParticipant>>(emptyList()) }
-    var responses by remember(pollId, accountKey) { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
-    var myParticipant by remember(pollId, accountKey) { mutableStateOf<PollParticipant?>(null) }
-    var localResponses by remember(pollId, accountKey) { mutableStateOf<Map<String, AvailabilityStatus>>(emptyMap()) }
-    var localComment by remember(pollId, accountKey) { mutableStateOf("") }
-    var commentError by remember(pollId, accountKey) { mutableStateOf("") }
-    var calendarCheck by remember(pollId, accountKey) { mutableStateOf(CalendarCheck.NONE) }
-    var isCheckingCalendar by remember(pollId, accountKey) { mutableStateOf(false) }
-
-    val recovery = remember(pollId, accountKey) { runCatching { pollService.availabilitySession(pollId) } }
-    if (recovery.isFailure) {
+    val opened = remember(pollId, accountKey) { runCatching { PollDetailModel(pollId, pollService, calendarService) } }
+    val model = opened.getOrElse {
         Column(Modifier.padding(24.dp)) {
             Text("Your saved response retry could not be read. Check your saved responses before editing.")
             TextButton(onClick = onNavigateBack) { Text("Back") }
         }
         return
     }
-    val saveSession = recovery.getOrThrow()
-    var availabilityLoaded by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
-    var saveError by remember(pollId, authService.currentUser?.id) { mutableStateOf<String?>(null) }
-    var hasVersionConflict by remember(pollId, authService.currentUser?.id) { mutableStateOf(false) }
-    var conflictSnapshot by remember(pollId, authService.currentUser?.id) { mutableStateOf<AvailabilitySnapshot?>(null) }
-    val MAX_COMMENT_LENGTH = 500
-    var isLoading by remember(pollId, accountKey) { mutableStateOf(true) }
-    var isSaving by remember(pollId, accountKey) { mutableStateOf(false) }
-    var showClosePollDialog by remember(pollId, accountKey) { mutableStateOf(false) }
-    var showSelectFinalDateDialog by remember(pollId, accountKey) { mutableStateOf(false) }
-    var finalTimeOption by remember(pollId, accountKey) { mutableStateOf<PollTimeOption?>(null) }
-    var isSelectingFinalDate by remember(pollId, accountKey) { mutableStateOf(false) }
+    var showClosePollDialog by remember(model) { mutableStateOf(false) }
+    var finalTimeOption by remember(model) { mutableStateOf<PollTimeOption?>(null) }
 
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val poll = model.poll
 
-    val isCreator = poll?.creatorId == authService.currentUser?.id
-
-    fun responsesForOption(optionId: String): ResponseSummary {
-        val optionResponses = responses.filter { it.timeOptionId == optionId }
-        return ResponseSummary(
-            available = optionResponses.count { it.status == AvailabilityStatus.AVAILABLE },
-            maybe = optionResponses.count { it.status == AvailabilityStatus.MAYBE },
-            unavailable = optionResponses.count { it.status == AvailabilityStatus.UNAVAILABLE }
-        )
-    }
-
-    val sortedTimeOptions = timeOptions.sortedWith { a, b ->
-        val statsA = responsesForOption(a.id)
-        val statsB = responsesForOption(b.id)
-        when {
-            statsB.available != statsA.available -> statsB.available.compareTo(statsA.available)
-            else -> statsB.maybe.compareTo(statsA.maybe)
-        }
-    }
-
-    fun applySavedAvailability(saved: AvailabilitySnapshot) {
-        responses = responses.filter { it.participantId != saved.participantId } + saved.responseRows()
-        participants = participants.map { if (it.id == saved.participantId) it.copy(comment = saved.comment) else it }
-        myParticipant = participants.firstOrNull { it.id == saved.participantId }
-        localResponses = saveSession.pendingDraft?.responses ?: saved.responses.associate { it.timeOptionId to it.status }
-        localComment = saveSession.pendingDraft?.comment ?: saved.comment.orEmpty()
-    }
-
-    // Only busy options become unavailable suggestions; unchecked options are left alone (F16).
-    suspend fun checkCalendar() {
-        val currentPoll = poll ?: return
-        // The service returns an empty result when no source is enabled, which clears a stale banner on retry.
-        if (timeOptions.isEmpty() || isCheckingCalendar) return
-        isCheckingCalendar = true
-        try {
-            val check = calendarService.checkPollConflicts(timeOptions, currentPoll.timezone)
-            calendarCheck = check
-            check.busy.forEach { conflictId ->
-                if (saveSession.pendingDraft == null && !localResponses.containsKey(conflictId)) {
-                    localResponses = localResponses + (conflictId to AvailabilityStatus.UNAVAILABLE)
-                }
-            }
-        } finally {
-            isCheckingCalendar = false
-        }
-    }
-
-    suspend fun loadSavedAvailability() {
-        val loadingUserId = authService.currentUser?.id
-        try {
-            val saved = saveSession.loadIfCurrent(
-                load = { pollService.getAvailability(pollId) },
-                isCurrent = { authService.currentUser?.id == loadingUserId },
-            ) ?: return
-            applySavedAvailability(saved)
-            availabilityLoaded = true
-            saveError = null
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            if (authService.currentUser?.id == loadingUserId) {
-                saveError = "Could not load your saved availability. Retry before editing."
-            }
-        }
-    }
-
-    LaunchedEffect(pollId, accountKey, loadRevision) {
-        isLoading = true
-        availabilityLoaded = false
-        localResponses = emptyMap()
-        localComment = ""
-        myParticipant = null
-        poll = null; timeOptions = emptyList(); participants = emptyList(); responses = emptyList()
-        detailError = null
-        val detail = try {
-            pollService.loadPollDetail(pollId)
-        } catch (error: CancellationException) { throw error }
-        catch (error: Exception) {
-            detailError = "This poll could not be loaded completely. Please retry."
-            isLoading = false
-            return@LaunchedEffect
-        }
-        poll = detail.poll
-        timeOptions = detail.timeOptions
-        participants = detail.participants
-        responses = detail.responses
-        myParticipant = participants.firstOrNull { it.userId == userId }
-
-        if (poll != null) {
-            myParticipant?.let { participant ->
-                loadSavedAvailability()
-            }
-
-            // Refresh safe connection metadata, then check all slots in one call.
-            calendarService.refreshGoogleCalendarConnection()
-            checkCalendar()
-        }
-
-        isLoading = false
-    }
+    LaunchedEffect(model) { model.load() }
 
     Scaffold(
         topBar = {
@@ -247,7 +108,7 @@ fun PollDetailView(
             )
         }
     ) { padding ->
-        if (isLoading) {
+        if (model.isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -264,8 +125,8 @@ fun PollDetailView(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(detailError ?: "Poll not found")
-                    TextButton(onClick = { loadRevision += 1 }) { Text("Retry") }
+                    Text(model.detailError ?: "Poll not found")
+                    TextButton(onClick = { scope.launch { model.load() } }) { Text("Retry") }
                 }
             }
         } else {
@@ -276,23 +137,23 @@ fun PollDetailView(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                if (calendarCheck.failedSources.isNotEmpty()) {
+                if (model.calendarCheck.failedSources.isNotEmpty()) {
                     item {
                         Column {
-                            Text("${calendarSourceNames(calendarCheck.failedSources)} couldn't be checked. Options marked \"Couldn't check\" may still conflict.",
+                            Text("${calendarSourceNames(model.calendarCheck.failedSources)} couldn't be checked. Options marked \"Couldn't check\" may still conflict.",
                                 style = MaterialTheme.typography.bodySmall)
-                            TextButton(enabled = !isCheckingCalendar, onClick = { scope.launch { checkCalendar() } }) {
+                            TextButton(enabled = !model.isCheckingCalendar, onClick = { scope.launch { model.checkCalendar() } }) {
                                 Text("Retry calendar check")
                             }
                         }
                     }
-                } else if (calendarCheck.checkedSources.isNotEmpty()) {
+                } else if (model.calendarCheck.checkedSources.isNotEmpty()) {
                     item {
-                        Text("Checked ${calendarSourceNames(calendarCheck.checkedSources)}.", style = MaterialTheme.typography.bodySmall,
+                        Text("Checked ${calendarSourceNames(model.calendarCheck.checkedSources)}.", style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                calendarService.calendarError?.let { message ->
+                model.calendarError?.let { message ->
                     item {
                         Text(message, style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -457,59 +318,30 @@ fun PollDetailView(
                 }
 
                 // Join Button
-                if (myParticipant == null && poll?.status == PollStatus.ACTIVE) {
+                if (model.myParticipant == null && poll?.status == PollStatus.ACTIVE) {
                     item {
                         Button(
                             onClick = {
-                                scope.launch {
-                                    isJoining = true
-                                    joinError = null
-                                    try {
-                                        val participant = pollService.joinPoll(pollId)
-                                        if (pollService.creationAccountKey != accountKey) return@launch
-                                        myParticipant = participant
-                                        participants = participants.filterNot { it.id == participant.id } + participant
-                                        loadSavedAvailability()
-                                    } catch (error: Exception) {
-                                        if (error is CancellationException) throw error
-                                        if (pollService.creationAccountKey == accountKey) {
-                                            joinError = if (error is PollCapacityReached) error.message
-                                                else "Joining could not be confirmed. Tap Join This Poll to retry safely."
-                                        }
-                                    } finally {
-                                        if (pollService.creationAccountKey == accountKey) isJoining = false
-                                    }
-                                }
+                                scope.launch { model.join() }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isJoining
+                            enabled = !model.isJoining
                         ) {
-                            Text(if (isJoining) "Joining…" else "Join This Poll")
+                            Text(if (model.isJoining) "Joining…" else "Join This Poll")
                         }
-                        joinError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        model.joinError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     }
                 }
 
                 // Final Date Display
-                poll?.selectedStartTime?.let { selectedStart ->
-                    poll?.selectedEndTime?.let { selectedEnd ->
-                        item {
-                            FinalDateDisplay(
-                                selectedStart = selectedStart,
-                                selectedEnd = selectedEnd,
-                                // Finalization copies the chosen option's interval onto the poll.
-                                isAllDay = timeOptions.any { it.isAllDay && it.startTime == selectedStart && it.endTime == selectedEnd },
-                                pollTimeZone = poll?.timezone ?: "UTC",
-                                pollTitle = poll?.title ?: "",
-                                pollDescription = poll?.description,
-                                pollLocation = poll?.location
-                            )
-                        }
+                model.finalEvent?.let { event ->
+                    item {
+                        FinalDateDisplay(event)
                     }
                 }
 
                 // Final Date Selection (for creator when closed)
-                if (isCreator && poll?.status == PollStatus.CLOSED && poll?.selectedStartTime == null) {
+                if (model.isCreator && poll?.status == PollStatus.CLOSED && poll?.selectedStartTime == null) {
                     item {
                         Card {
                             Column(
@@ -522,17 +354,16 @@ fun PollDetailView(
                                     style = MaterialTheme.typography.bodySmall
                                 )
 
-                                sortedTimeOptions.forEach { option ->
-                                    val stats = responsesForOption(option.id)
+                                model.rankedTimeOptions.forEach { option ->
+                                    val stats = model.responseSummary(option.id)
                                     FinalDateOptionRow(
                                         option = option,
                                         pollTimeZone = poll?.timezone ?: "UTC",
                                         stats = stats,
                                         onClick = {
                                             finalTimeOption = option
-                                            showSelectFinalDateDialog = true
                                         },
-                                        enabled = !isSelectingFinalDate
+                                        enabled = !model.isSelectingFinalDate
                                     )
                                 }
                             }
@@ -545,26 +376,22 @@ fun PollDetailView(
                     Text("Time Options", style = MaterialTheme.typography.titleMedium)
                 }
 
-                items(timeOptions) { option ->
+                items(model.timeOptions) { option ->
                     TimeOptionRow(
                         pollTimeZone = poll?.timezone ?: "UTC",
                         option = option,
-                        responses = responsesForOption(option.id),
-                        myResponse = localResponses[option.id],
-                        hasCalendarConflict = option.id in calendarCheck.busy,
-                        calendarUnchecked = option.id in calendarCheck.unchecked,
-                        canRespond = myParticipant != null && poll?.status == PollStatus.ACTIVE && availabilityLoaded && !isSaving,
-                        onResponseChange = { status ->
-                            if (!isSaving && availabilityLoaded) {
-                                localResponses = localResponses + (option.id to status)
-                            }
-                        },
+                        responses = model.responseSummary(option.id),
+                        myResponse = model.localResponses[option.id],
+                        hasCalendarConflict = option.id in model.calendarCheck.busy,
+                        calendarUnchecked = option.id in model.calendarCheck.unchecked,
+                        canRespond = model.canRespond,
+                        onResponseChange = { status -> model.setResponse(option.id, status) },
                         onClick = { onNavigateToResponses(option.id) }
                     )
                 }
 
                 // Comment Field
-                if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
+                if (model.myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
                         Card {
                             Column(
@@ -582,31 +409,24 @@ fun PollDetailView(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     Text(
-                                        "${localComment.length}/$MAX_COMMENT_LENGTH",
+                                        "${model.localComment.length}/${PollDetailModel.MAX_COMMENT_LENGTH}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 OutlinedTextField(
-                                    value = localComment,
-                                    enabled = !isSaving && availabilityLoaded,
-                                    onValueChange = { newValue ->
-                                        if (newValue.length <= MAX_COMMENT_LENGTH) {
-                                            localComment = newValue
-                                            commentError = ""
-                                        } else {
-                                            commentError = "Comment must be $MAX_COMMENT_LENGTH characters or less"
-                                        }
-                                    },
+                                    value = model.localComment,
+                                    enabled = !model.isSaving && model.availabilityLoaded,
+                                    onValueChange = model::updateComment,
                                     placeholder = { Text("e.g., I'm flexible on timing, or I can only attend virtually...") },
                                     modifier = Modifier.fillMaxWidth(),
                                     minLines = 2,
                                     maxLines = 4,
-                                    isError = commentError.isNotEmpty()
+                                    isError = model.commentError.isNotEmpty()
                                 )
-                                if (commentError.isNotEmpty()) {
+                                if (model.commentError.isNotEmpty()) {
                                     Text(
-                                        commentError,
+                                        model.commentError,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.error
                                     )
@@ -616,73 +436,30 @@ fun PollDetailView(
                     }
                 }
 
-                if (saveError != null) {
+                if (model.saveError != null) {
                     item {
-                        Text(saveError.orEmpty(), color = MaterialTheme.colorScheme.error)
-                        if (myParticipant != null && !availabilityLoaded) {
-                            TextButton(onClick = { scope.launch { loadSavedAvailability() } }) {
+                        Text(model.saveError.orEmpty(), color = MaterialTheme.colorScheme.error)
+                        if (model.myParticipant != null && !model.availabilityLoaded) {
+                            TextButton(onClick = { scope.launch { model.loadSavedAvailability() } }) {
                                 Text("Retry loading saved responses")
                             }
-                        } else if (hasVersionConflict) {
-                            TextButton(onClick = {
-                                scope.launch {
-                                    val loadingUserId = authService.currentUser?.id
-                                    try {
-                                        val latest = pollService.getAvailability(pollId)
-                                        if (authService.currentUser?.id == loadingUserId) conflictSnapshot = latest
-                                    } catch (error: CancellationException) {
-                                        throw error
-                                    } catch (error: Exception) {
-                                        if (authService.currentUser?.id == loadingUserId) {
-                                            saveError = "Could not load the latest version. Your draft is unchanged. Try again."
-                                        }
-                                    }
-                                }
-                            }) { Text("Review latest saved version") }
+                        } else if (model.hasVersionConflict) {
+                            TextButton(onClick = { scope.launch { model.reviewLatestVersion() } }) {
+                                Text("Review latest saved version")
+                            }
                         }
                     }
                 }
 
                 // Save Responses Button
-                if (myParticipant != null && poll?.status == PollStatus.ACTIVE) {
+                if (model.myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
                         Button(
-                            onClick = {
-                                // Validate comment
-                                if (localComment.length > MAX_COMMENT_LENGTH) {
-                                    commentError = "Comment must be $MAX_COMMENT_LENGTH characters or less"
-                                    return@Button
-                                }
-
-                                scope.launch {
-                                    isSaving = true
-                                    val savingUserId = authService.currentUser?.id
-                                    try {
-                                        val draft = AvailabilityDraft(localResponses, localComment.trim().ifEmpty { null })
-                                        val saved = saveSession.save(draft, send = { request ->
-                                            pollService.saveAvailability(pollId, request)
-                                        }, isCurrent = { pollService.creationAccountKey == accountKey })
-                                        if (authService.currentUser?.id == savingUserId) {
-                                            applySavedAvailability(saved)
-                                            saveError = null
-                                            hasVersionConflict = false
-                                        }
-                                    } catch (error: CancellationException) {
-                                        throw error
-                                    } catch (error: AvailabilityVersionConflict) {
-                                        saveError = error.message
-                                        hasVersionConflict = true
-                                    } catch (error: Exception) {
-                                        saveError = "Availability was not confirmed saved. Your draft is unchanged. Tap Save Responses to retry."
-                                    } finally {
-                                        isSaving = false
-                                    }
-                                }
-                            },
+                            onClick = { scope.launch { model.save() } },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !isSaving && availabilityLoaded && !hasVersionConflict && commentError.isEmpty()
+                            enabled = model.canSave
                         ) {
-                            if (isSaving) {
+                            if (model.isSaving) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(20.dp),
                                     color = MaterialTheme.colorScheme.onPrimary
@@ -696,10 +473,10 @@ fun PollDetailView(
 
                 // Participants
                 item {
-                    Text("Participants (${participants.size})", style = MaterialTheme.typography.titleMedium)
+                    Text("Participants (${model.participants.size})", style = MaterialTheme.typography.titleMedium)
                 }
 
-                if (participants.isEmpty()) {
+                if (model.participants.isEmpty()) {
                     item {
                         Text(
                             "No participants yet",
@@ -708,16 +485,16 @@ fun PollDetailView(
                         )
                     }
                 } else {
-                    items(participants) { participant ->
+                    items(model.participants) { participant ->
                         ParticipantRow(
                             participant = participant,
-                            isCurrentUser = participant.userId == authService.currentUser?.id
+                            isCurrentUser = model.isCurrentUser(participant)
                         )
                     }
                 }
 
                 // Close Poll Button
-                if (isCreator && poll?.status == PollStatus.ACTIVE) {
+                if (model.isCreator && poll?.status == PollStatus.ACTIVE) {
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
@@ -744,14 +521,7 @@ fun PollDetailView(
             text = { Text("Are you sure you want to close this poll? Once closed, participants will no longer be able to submit or modify their availability.") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch {
-                        try {
-                            pollService.updatePollStatus(pollId, PollStatus.CLOSED)
-                            poll = poll?.copy(status = PollStatus.CLOSED)
-                        } catch (e: Exception) {
-                            FailureLog.record("PollDetailView", "Failed to update status", e)
-                        }
-                    }
+                    scope.launch { model.close() }
                     showClosePollDialog = false
                 }) {
                     Text("Close Poll")
@@ -765,34 +535,23 @@ fun PollDetailView(
         )
     }
 
-    conflictSnapshot?.let { latest ->
+    model.conflictSnapshot?.let { latest ->
         AlertDialog(
-            onDismissRequest = { conflictSnapshot = null },
+            onDismissRequest = model::dismissConflict,
             title = { Text("Availability changed") },
             text = { Text("Latest saved responses: ${latest.responses.joinToString { it.status.name.lowercase() }}\nComment: ${latest.comment.orEmpty()}\nYour draft is still on this screen.") },
             confirmButton = {
-                TextButton(onClick = {
-                    saveSession.acceptLoaded(latest)
-                    conflictSnapshot = null
-                    hasVersionConflict = false
-                    saveError = "Your draft is unchanged. Tap Save Responses to replace the latest version with your draft."
-                }) { Text("Keep my draft") }
+                TextButton(onClick = model::keepDraft) { Text("Keep my draft") }
             },
             dismissButton = {
-                TextButton(onClick = {
-                    saveSession.acceptLoaded(latest)
-                    applySavedAvailability(latest)
-                    conflictSnapshot = null
-                    hasVersionConflict = false
-                    saveError = null
-                }) { Text("Use saved version") }
+                TextButton(onClick = model::useSavedVersion) { Text("Use saved version") }
             },
         )
     }
 
     // Select Final Date Dialog
-    if (showSelectFinalDateDialog) {
-        val formattedOption = finalTimeOption?.let { option ->
+    finalTimeOption?.let { option ->
+        val formattedOption = run {
             val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
                 .apply { timeZone = PollDates.displayZone(option.isAllDay, poll?.timezone ?: "UTC") }
             val dateStr = dateFormat.format(Date.from(option.startTime.toJavaInstant()))
@@ -805,34 +564,22 @@ fun PollDetailView(
                 val endTime = timeFormat.format(Date.from(option.endTime.toJavaInstant()))
                 "$dateStr $startTime - $endTime"
             }
-        } ?: ""
+        }
 
         AlertDialog(
-            onDismissRequest = { showSelectFinalDateDialog = false },
+            onDismissRequest = { finalTimeOption = null },
             title = { Text("Select Final Date") },
             text = { Text("Set $formattedOption as the final meeting time? All participants will be notified.") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch {
-                        isSelectingFinalDate = true
-                        finalTimeOption?.let { option ->
-                            try {
-                                poll = pollService.finalizePoll(pollId, option.id)
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (error: Exception) {
-                                saveError = "The final date could not be saved. Try again."
-                            }
-                        }
-                        isSelectingFinalDate = false
-                    }
-                    showSelectFinalDateDialog = false
+                    scope.launch { model.finalize(option) }
+                    finalTimeOption = null
                 }) {
                     Text("Confirm")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showSelectFinalDateDialog = false }) {
+                TextButton(onClick = { finalTimeOption = null }) {
                     Text("Cancel")
                 }
             }
@@ -1064,15 +811,7 @@ fun ParticipantRow(participant: PollParticipant, isCurrentUser: Boolean) {
 }
 
 @Composable
-fun FinalDateDisplay(
-    selectedStart: Instant,
-    selectedEnd: Instant,
-    isAllDay: Boolean,
-    pollTimeZone: String,
-    pollTitle: String,
-    pollDescription: String?,
-    pollLocation: String?
-) {
+fun FinalDateDisplay(event: FinalCalendarEvent) {
     val context = LocalContext.current
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1088,25 +827,15 @@ fun FinalDateDisplay(
 
             Button(
                 onClick = {
+                    val (begin, end) = event.insertBounds
                     val intent = Intent(Intent.ACTION_INSERT).apply {
                         data = CalendarContract.Events.CONTENT_URI
-                        putExtra(CalendarContract.Events.TITLE, pollTitle)
-                        if (isAllDay) {
-                            // Calendar Provider all-day events are UTC midnights of their dates.
-                            val date = PollDates.allDayDate(selectedStart, pollTimeZone)
-                            putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, true)
-                            putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds())
-                            putExtra(CalendarContract.EXTRA_EVENT_END_TIME, date.plus(1, DateTimeUnit.DAY).atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds())
-                        } else {
-                            putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, selectedStart.toEpochMilliseconds())
-                            putExtra(CalendarContract.EXTRA_EVENT_END_TIME, selectedEnd.toEpochMilliseconds())
-                        }
-                        pollDescription?.let {
-                            putExtra(CalendarContract.Events.DESCRIPTION, it)
-                        }
-                        pollLocation?.let {
-                            putExtra(CalendarContract.Events.EVENT_LOCATION, it)
-                        }
+                        putExtra(CalendarContract.Events.TITLE, event.title)
+                        if (event.isAllDay) putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, true)
+                        putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin.toEpochMilliseconds())
+                        putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end.toEpochMilliseconds())
+                        event.description?.let { putExtra(CalendarContract.Events.DESCRIPTION, it) }
+                        event.location?.let { putExtra(CalendarContract.Events.EVENT_LOCATION, it) }
                     }
                     context.startActivity(intent)
                 },
@@ -1149,21 +878,21 @@ fun FinalDateDisplay(
                         Icon(Icons.Default.CalendarToday, null, tint = Color.White)
                         Spacer(Modifier.width(8.dp))
                         val dateFormat = SimpleDateFormat("MMMM d, yyyy", Locale.getDefault())
-                            .apply { timeZone = PollDates.displayZone(isAllDay, pollTimeZone) }
+                            .apply { timeZone = PollDates.displayZone(event.isAllDay, event.pollTimeZone) }
                         Text(
-                            dateFormat.format(Date.from(selectedStart.toJavaInstant())),
+                            dateFormat.format(Date.from(event.start.toJavaInstant())),
                             style = MaterialTheme.typography.titleMedium,
                             color = Color.White
                         )
                     }
 
-                    if (!isAllDay) {
+                    if (!event.isAllDay) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.AccessTime, null, tint = Color.White)
                             Spacer(Modifier.width(8.dp))
                             val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
-                            val start = timeFormat.format(Date.from(selectedStart.toJavaInstant()))
-                            val end = timeFormat.format(Date.from(selectedEnd.toJavaInstant()))
+                            val start = timeFormat.format(Date.from(event.start.toJavaInstant()))
+                            val end = timeFormat.format(Date.from(event.end.toJavaInstant()))
                             Text(
                                 "$start - $end",
                                 style = MaterialTheme.typography.bodyLarge,

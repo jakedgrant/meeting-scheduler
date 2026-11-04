@@ -2,6 +2,29 @@
 
 Updated November 4, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F23 Android screen models, November 4
+
+Branch `claude/next-remedy-tranche-5` started from fetched main `98af520`, which contains merged #84. It takes the last item the section below left open: the save and calendar workflows in Android's `PollDetailView` and `CreatePollView`.
+
+`PollDetailModel` in `ui` now does what `PollDetailView` did itself: loading the detail, loading and saving availability, the version-conflict review, joining, the calendar check and its unavailable suggestions, closing, finalizing and the comment limit. It also builds the final meeting as a `FinalCalendarEvent`, including the all-day bounds the Calendar Provider's insert screen takes, so the view only turns it into an intent. `PollCreationModel` takes over the creation form's draft, adding and removing options, the date-range builder and submission through `PollCreationSession`. The models reach the services through the new `PollDetailPolls`, `PollCreationPolls` and `PollDetailCalendar` interfaces in `services`, which `PollService` and `CalendarService` implement, so their tests use fakes instead of a Supabase client. `PollCreationModel` reads and writes the draft and the pending request through `PollCreationStore`, whose `SharedPreferences` implementation keeps the existing `poll_creation_v1` keys and formats. The views keep layout, pickers, dialogs, sharing and the calendar intent. `PollDetailView` no longer takes `AuthService`.
+
+Each screen builds its model for the signed-in account and builds a new one when the account or its session changes, as most of the views' state already did. Four behaviors changed:
+
+- A version conflict, a finalization result or failure, a close and a calendar check that arrive after the account changes are now dropped by the model. Before, a late version conflict or finalization failure could still show its save error after a new session for the same user, because that state survived the session; the other results went to state the screen had already replaced.
+- The detail screen's save state used to survive a new session for the same user; it now resets with the rest of the screen, which reloads anyway.
+- Retry starts a new load instead of restarting the screen's effect. A load that a later one replaced can't publish its detail.
+- The creation draft is saved when a field changes instead of on every recomposition, so an untouched default form isn't written. Edits made while a creation is being sent are saved. As before, a late edit after a creation succeeds can't bring the draft back.
+
+`TimeOption` fields are now read-only, and `TimeOption` and `CreationFormDraft`, which is no longer private, moved to `PollCreationModel.kt` in the same package. Their serialized form is unchanged.
+
+Not changed here: a failed close is still only logged, and the deadline banner still reads the wall clock, because Android has no injected clock.
+
+`PollDetailModelTest` (14 tests) and `PollCreationModelTest` (10 tests) cover load, save, the conflict choices, join, capacity, the comment limit, the all-day and timed final events, the range builder, a lost creation reply, a restored request, rejection, a blank title, and results that arrive after the account changes or after a later load. In scratch copies, removing the detail and finalization account checks, the load generation check or the guard after a completed creation, and letting calendar suggestions overwrite saved answers, each made a test fail.
+
+Local results: no JDK that Gradle 8.11 supports is installed, so the Android build and the existing JVM tests didn't run locally, and the views weren't compiled. The two models, the domain models they use and the 24 new tests compiled and passed with the cached Kotlin 2.2.20 compiler against kotlinx-datetime 0.7.1, the cached Compose runtime and the API 34 `android.jar`; the app uses kotlinx-datetime 0.5.0 and compiles against API 36. PR #85's Android CI, at commit `25e5591`, ran `assembleDebug`, `assembleDebugAndroidTest` and `testDebugUnitTest`, including the two new test classes, and the throwaway-keystore and unsigned-release checks; all passed. The instrumented tests were compiled but not run on a device. The app wasn't launched.
+
+The screen workflows F23 names are now in models on all three clients. Still open in F23: an injected clock for Android's deadline banner, and checking the root and Android README architecture sections the finding names. `SharedPreferencesCreationStore` is still built by the creation view, while `AppContainer` wires the comparable `AvailabilityRecoveryStore`; moving it there would let the composition root own both retry stores.
+
 ## F23 web result checks, November 4
 
 Branch `claude/next-remedy-tranche-4` started from fetched main `46b98ae`, which contains merged #83. It takes the web item the section below left open: the `json` function results the web cast to its row types after checking only some of their fields.
