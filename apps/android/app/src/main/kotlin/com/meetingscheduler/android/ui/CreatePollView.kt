@@ -34,11 +34,7 @@ private fun CreationForm(
 ) {
     val preferences = LocalContext.current.applicationContext.getSharedPreferences("poll_creation_v1", 0)
     val opened = remember { runCatching {
-        PollCreationModel(
-            store = SharedPreferencesCreationStore(preferences, pollService.creationAccountId),
-            accountKey = { pollService.creationAccountKey },
-            createPoll = pollService::createPoll,
-        )
+        PollCreationModel(pollService, SharedPreferencesCreationStore(preferences, pollService.creationAccountId))
     } }
     val model = opened.getOrElse {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {

@@ -1,6 +1,7 @@
 package com.meetingscheduler.android
 
 import com.meetingscheduler.android.models.*
+import com.meetingscheduler.android.services.PollCreationPolls
 import com.meetingscheduler.android.ui.CreationFormDraft
 import com.meetingscheduler.android.ui.PollCreationModel
 import com.meetingscheduler.android.ui.PollCreationStore
@@ -33,8 +34,14 @@ class PollCreationModelTest {
         override fun savePending(request: PollCreationRequest?) { pending = request }
     }
 
+    private class FakePolls(val key: () -> String, val send: suspend (PollCreationRequest) -> PollCreationResult) : PollCreationPolls {
+        override val creationAccountId = "account"
+        override val creationAccountKey get() = key()
+        override suspend fun createPoll(request: PollCreationRequest) = send(request)
+    }
+
     private fun model(store: MemoryStore, key: () -> String = { "account:1" }, send: suspend (PollCreationRequest) -> PollCreationResult = { result }) =
-        PollCreationModel(store, key, send, today = { today }, zone = { chicago })
+        PollCreationModel(FakePolls(key, send), store, today = { today }, zone = { chicago })
 
     private val option = TimeOption("one", LocalDate(2026, 11, 10), LocalTime(9, 0), LocalTime(10, 0))
 
@@ -158,7 +165,7 @@ class PollCreationModelTest {
             override fun loadPending(): PollCreationRequest? = throw IllegalStateException("corrupt")
         }
         assertThrows(IllegalStateException::class.java) {
-            PollCreationModel(store, { "account:1" }, { result })
+            PollCreationModel(FakePolls({ "account:1" }) { result }, store)
         }
     }
 }

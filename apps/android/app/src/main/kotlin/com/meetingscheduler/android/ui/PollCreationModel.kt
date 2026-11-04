@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.meetingscheduler.android.models.*
+import com.meetingscheduler.android.services.PollCreationPolls
 import kotlinx.coroutines.CancellationException
 import kotlinx.datetime.*
 import kotlinx.serialization.Serializable
@@ -85,13 +86,12 @@ class SharedPreferencesCreationStore(
  * after the account changes is dropped.
  */
 class PollCreationModel(
+    private val polls: PollCreationPolls,
     private val store: PollCreationStore,
-    private val accountKey: () -> String,
-    private val createPoll: suspend (PollCreationRequest) -> PollCreationResult,
     private val today: () -> LocalDate = { currentSystemDate },
     private val zone: () -> TimeZone = { TimeZone.currentSystemDefault() },
 ) {
-    private val createdForAccount = accountKey()
+    private val createdForAccount = polls.creationAccountKey
     private val session = PollCreationSession(initial = store.loadPending(), persist = store::savePending)
     private var completed = false
 
@@ -105,7 +105,7 @@ class PollCreationModel(
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
-    private fun isCurrentAccount() = accountKey() == createdForAccount
+    private fun isCurrentAccount() = polls.creationAccountKey == createdForAccount
 
     /** Changes the draft and keeps it, until the poll is created. */
     fun edit(transform: (CreationFormDraft) -> CreationFormDraft) {
@@ -177,7 +177,7 @@ class PollCreationModel(
                 useEventPass = form.useEventPass,
             )
             require(payload.title.isNotBlank() && payload.timeOptions.isNotEmpty()) { "Enter a title and at least one time option." }
-            session.submit(payload, send = createPoll, isCurrent = ::isCurrentAccount) ?: return false
+            session.submit(payload, send = polls::createPoll, isCurrent = ::isCurrentAccount) ?: return false
             completed = true
             store.clearDraft()
             return true

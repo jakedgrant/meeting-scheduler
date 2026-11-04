@@ -2,11 +2,20 @@ package com.meetingscheduler.android.services
 
 import com.meetingscheduler.android.models.*
 
-/** The poll commands the detail screen runs. `PollService` implements it. */
-interface PollDetailPolls {
+/** The signed-in account that screen models fence their results to. `PollService` implements it. */
+interface PollAccount {
     val creationAccountId: String?
     /** Changes whenever the signed-in account or its session changes. */
     val creationAccountKey: String
+}
+
+/** The poll command the creation screen runs. `PollService` implements it. */
+interface PollCreationPolls : PollAccount {
+    suspend fun createPoll(request: PollCreationRequest): PollCreationResult
+}
+
+/** The poll commands the detail screen runs. `PollService` implements it. */
+interface PollDetailPolls : PollAccount {
     fun availabilitySession(pollId: String): AvailabilitySaveSession
     suspend fun loadPollDetail(pollId: String): PollDetail
     suspend fun joinPoll(pollId: String): PollParticipant

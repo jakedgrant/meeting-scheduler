@@ -42,7 +42,7 @@ class PollService(
     private val supabase: io.github.jan.supabase.SupabaseClient,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
-) : PollDetailPolls {
+) : PollDetailPolls, PollCreationPolls {
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
     var myPolls by mutableStateOf<List<Poll>>(emptyList())
@@ -257,7 +257,7 @@ class PollService(
     override val creationAccountId: String? get() = authService.pollUserId
     override val creationAccountKey: String get() = "${creationAccountId}:${authService.identityGeneration}"
 
-    suspend fun createPoll(request: PollCreationRequest): PollCreationResult = withSession {
+    override suspend fun createPoll(request: PollCreationRequest): PollCreationResult = withSession {
         selectPollAccount()
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
