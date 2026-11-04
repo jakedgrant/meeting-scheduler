@@ -15,26 +15,25 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
 import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
 
 @Composable
-fun CreatePollView(pollService: PollService, onDismiss: () -> Unit) {
-    key(pollService.creationAccountKey) { CreationForm(pollService, onDismiss) }
+fun CreatePollView(pollService: PollService, screens: PollScreenEnvironment, onDismiss: () -> Unit) {
+    key(pollService.creationAccountKey) { CreationForm(pollService, screens, onDismiss) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CreationForm(
     pollService: PollService,
+    screens: PollScreenEnvironment,
     onDismiss: () -> Unit
 ) {
-    val preferences = LocalContext.current.applicationContext.getSharedPreferences("poll_creation_v1", 0)
     val opened = remember { runCatching {
-        PollCreationModel(pollService, SharedPreferencesCreationStore(preferences, pollService.creationAccountId))
+        PollCreationModel(pollService, screens.creationStore(pollService.creationAccountId), screens.clock)
     } }
     val model = opened.getOrElse {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -279,7 +278,7 @@ private fun CreationForm(
     // Due date picker dialog
     if (showDueDatePicker) {
         val initialMillis = draft.dueDate?.atStartOfDayIn(TimeZone.UTC)?.toEpochMilliseconds()
-            ?: currentSystemDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+            ?: model.today().atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
         DatePickerDialog(
             onDismissRequest = { showDueDatePicker = false },

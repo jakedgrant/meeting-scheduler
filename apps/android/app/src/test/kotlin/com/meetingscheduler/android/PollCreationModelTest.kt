@@ -10,6 +10,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalTime
@@ -19,7 +20,9 @@ import org.junit.Test
 
 class PollCreationModelTest {
     private val stamp = Instant.parse("2026-11-04T00:00:00Z")
-    private val today = LocalDate(2026, 11, 4)
+    private val today = LocalDate(2030, 3, 1)
+    /** Already March 2 in UTC, still March 1 in Chicago. */
+    private val clock = object : Clock { override fun now() = Instant.parse("2030-03-02T03:00:00Z") }
     private val chicago = TimeZone.of("America/Chicago")
     private val result = PollCreationResult(
         Poll("poll", "account", "Planning", status = PollStatus.ACTIVE, createdAt = stamp, updatedAt = stamp, shareCode = "ABC123"),
@@ -41,9 +44,22 @@ class PollCreationModelTest {
     }
 
     private fun model(store: MemoryStore, key: () -> String = { "account:1" }, send: suspend (PollCreationRequest) -> PollCreationResult = { result }) =
-        PollCreationModel(FakePolls(key, send), store, today = { today }, zone = { chicago })
+        PollCreationModel(FakePolls(key, send), store, clock, zone = { chicago })
 
     private val option = TimeOption("one", LocalDate(2026, 11, 10), LocalTime(9, 0), LocalTime(10, 0))
+
+    @Test fun aNewDraftStartsOnTodayInTheDeviceZone() {
+        val store = MemoryStore()
+        val model = model(store)
+        assertEquals(today, model.today())
+        assertEquals(listOf(today), model.draft.timeOptions.map { it.date })
+        assertEquals(today, model.draft.rangeStartDate)
+        assertEquals(today, model.draft.rangeEndDate)
+        assertEquals(0, store.draftWrites)
+        model.edit { it.copy(timeOptions = emptyList()) }
+        model.addOption()
+        assertEquals(listOf(today), model.draft.timeOptions.map { it.date })
+    }
 
     @Test fun editsRestoreAndPersistTheDraft() {
         val store = MemoryStore(CreationFormDraft(title = "Restored", timeOptions = listOf(option)))
@@ -165,7 +181,7 @@ class PollCreationModelTest {
             override fun loadPending(): PollCreationRequest? = throw IllegalStateException("corrupt")
         }
         assertThrows(IllegalStateException::class.java) {
-            PollCreationModel(FakePolls({ "account:1" }) { result }, store)
+            PollCreationModel(FakePolls({ "account:1" }) { result }, store, clock)
         }
     }
 }

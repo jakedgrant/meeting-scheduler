@@ -8,11 +8,16 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollDetailCalendar
 import com.meetingscheduler.android.services.PollDetailPolls
 import kotlinx.coroutines.CancellationException
+import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
+import kotlin.time.Duration.Companion.hours
+
+/** How near the poll's response deadline is. */
+enum class DeadlineStatus { OPEN, CLOSING_SOON, PAST_DUE }
 
 data class ResponseSummary(
     val available: Int,
@@ -53,9 +58,11 @@ class PollDetailModel(
     val pollId: String,
     private val polls: PollDetailPolls,
     private val calendar: PollDetailCalendar,
+    private val clock: Clock,
 ) {
     companion object {
         const val MAX_COMMENT_LENGTH = 500
+        private val CLOSING_SOON = 24.hours
     }
 
     private val accountKey = polls.creationAccountKey
@@ -134,6 +141,19 @@ class PollDetailModel(
             val isAllDay = timeOptions.any { it.isAllDay && it.startTime == start && it.endTime == end }
             return FinalCalendarEvent(current.title, start, end, isAllDay, current.timezone, current.description, current.location)
         }
+
+    /**
+     * Past due from the deadline instant on, as on iOS and in the database, which refuses saves
+     * then. Closing soon within the 24 hours before it.
+     */
+    fun deadlineStatus(closesAt: Instant): DeadlineStatus {
+        val now = clock.now()
+        return when {
+            closesAt <= now -> DeadlineStatus.PAST_DUE
+            closesAt - now < CLOSING_SOON -> DeadlineStatus.CLOSING_SOON
+            else -> DeadlineStatus.OPEN
+        }
+    }
 
     fun isCurrentUser(participant: PollParticipant) = participant.userId == accountId
 

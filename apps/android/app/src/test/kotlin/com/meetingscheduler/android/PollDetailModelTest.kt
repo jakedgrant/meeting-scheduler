@@ -4,17 +4,23 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollDetailCalendar
 import com.meetingscheduler.android.services.PollDetailPolls
+import com.meetingscheduler.android.ui.DeadlineStatus
 import com.meetingscheduler.android.ui.PollDetailModel
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.seconds
 import org.junit.Assert.*
 import org.junit.Test
 
 class PollDetailModelTest {
     private val stamp = Instant.parse("2026-11-04T00:00:00Z")
+    private val now = Instant.parse("2026-11-05T12:00:00Z")
+    private val clock = object : Clock { override fun now() = this@PollDetailModelTest.now }
     private val poll = Poll("poll", "owner", "Planning", status = PollStatus.ACTIVE, timezone = "America/Chicago",
         createdAt = stamp, updatedAt = stamp)
     private val first = PollTimeOption("first", "poll", Instant.parse("2026-11-10T15:00:00Z"), Instant.parse("2026-11-10T16:00:00Z"), createdAt = stamp)
@@ -59,7 +65,7 @@ class PollDetailModelTest {
     @Test fun loadPublishesTheDetailAndSuggestsUnavailableOnlyForUnansweredBusyOptions() = runBlocking<Unit> {
         val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
         val calendar = FakeCalendar(CalendarCheck(busy = setOf("first", "second"), checkedSources = listOf(CalendarSource.GOOGLE_CALENDAR)))
-        val model = PollDetailModel("poll", polls, calendar)
+        val model = PollDetailModel("poll", polls, calendar, clock)
         model.load()
         assertFalse(model.isLoading)
         assertEquals(poll, model.poll)
@@ -76,7 +82,7 @@ class PollDetailModelTest {
         val reply = CompletableDeferred<PollDetail>()
         val polls = FakePolls({ reply.await() })
         val calendar = FakeCalendar()
-        val model = PollDetailModel("poll", polls, calendar)
+        val model = PollDetailModel("poll", polls, calendar, clock)
         val load = async(start = CoroutineStart.UNDISPATCHED) { model.load() }
         polls.generation = 2
         reply.complete(detail)
@@ -90,7 +96,7 @@ class PollDetailModelTest {
         var calls = 0
         val polls = FakePolls({ if (++calls == 1) slow.await() else detail.copy(poll = poll.copy(title = "Latest")) })
         polls.creationAccountId = "nobody"
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         val earlier = async(start = CoroutineStart.UNDISPATCHED) { model.load() }
         model.load()
         slow.complete(detail)
@@ -100,7 +106,7 @@ class PollDetailModelTest {
     }
 
     @Test fun aFailedLoadOffersARetry() = runBlocking<Unit> {
-        val model = PollDetailModel("poll", FakePolls({ throw IllegalStateException("incomplete") }), FakeCalendar())
+        val model = PollDetailModel("poll", FakePolls({ throw IllegalStateException("incomplete") }), FakeCalendar(), clock)
         model.load()
         assertNull(model.poll)
         assertFalse(model.isLoading)
@@ -109,7 +115,7 @@ class PollDetailModelTest {
 
     @Test fun saveSendsTheDraftAndPublishesTheServerResult() = runBlocking<Unit> {
         val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         model.setResponse("second", AvailabilityStatus.AVAILABLE)
         model.updateComment("  Works for me  ")
@@ -131,7 +137,7 @@ class PollDetailModelTest {
 
     @Test fun aVersionConflictWaitsForTheParticipantToChoose() = runBlocking<Unit> {
         val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         model.setResponse("second", AvailabilityStatus.AVAILABLE)
         polls.save = { throw AvailabilityVersionConflict() }
@@ -155,7 +161,7 @@ class PollDetailModelTest {
 
     @Test fun usingTheSavedVersionReplacesTheDraft() = runBlocking<Unit> {
         val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         model.setResponse("second", AvailabilityStatus.AVAILABLE)
         polls.save = { throw AvailabilityVersionConflict() }
@@ -171,7 +177,7 @@ class PollDetailModelTest {
 
     @Test fun aSaveThatFailsKeepsTheDraftForRetry() = runBlocking<Unit> {
         val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         model.setResponse("second", AvailabilityStatus.AVAILABLE)
         polls.save = { throw IllegalStateException("reply lost") }
@@ -183,7 +189,7 @@ class PollDetailModelTest {
 
     @Test fun aCommentOverTheLimitIsRefusedAndBlocksSaving() = runBlocking<Unit> {
         val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         model.updateComment("x".repeat(PollDetailModel.MAX_COMMENT_LENGTH + 1))
         assertEquals("Saved", model.localComment)
@@ -195,7 +201,7 @@ class PollDetailModelTest {
 
     @Test fun joiningAddsTheMembershipAndLoadsItsAvailability() = runBlocking<Unit> {
         val polls = FakePolls({ detail.copy(participants = listOf(other)) })
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         assertNull(model.myParticipant)
         polls.join = { member }
@@ -209,7 +215,7 @@ class PollDetailModelTest {
 
     @Test fun aFullPollSaysSo() = runBlocking<Unit> {
         val polls = FakePolls({ detail.copy(participants = listOf(other)) })
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         polls.join = { throw PollCapacityReached() }
         model.join()
@@ -220,7 +226,7 @@ class PollDetailModelTest {
     @Test fun aFinalizationAfterTheAccountChangesIsDropped() = runBlocking<Unit> {
         val owned = detail.copy(poll = poll.copy(creatorId = "account", status = PollStatus.CLOSED))
         val polls = FakePolls({ owned }).apply { availability = { savedSnapshot } }
-        val model = PollDetailModel("poll", polls, FakeCalendar())
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
         model.load()
         assertTrue(model.isCreator)
         polls.finalize = { polls.generation = 2; owned.poll.copy(selectedStartTime = first.startTime, selectedEndTime = first.endTime) }
@@ -235,7 +241,7 @@ class PollDetailModelTest {
             isAllDay = true, createdAt = stamp)
         val finalized = poll.copy(status = PollStatus.CLOSED, location = "Office",
             selectedStartTime = allDay.startTime, selectedEndTime = allDay.endTime)
-        val model = PollDetailModel("poll", FakePolls({ detail.copy(poll = finalized, timeOptions = listOf(allDay, first)) }), FakeCalendar())
+        val model = PollDetailModel("poll", FakePolls({ detail.copy(poll = finalized, timeOptions = listOf(allDay, first)) }), FakeCalendar(), clock)
         assertNull(model.finalEvent)
         model.load()
         val event = model.finalEvent!!
@@ -246,10 +252,19 @@ class PollDetailModelTest {
 
     @Test fun theFinalEventOfATimedOptionKeepsItsInterval() = runBlocking<Unit> {
         val finalized = poll.copy(status = PollStatus.CLOSED, selectedStartTime = first.startTime, selectedEndTime = first.endTime)
-        val model = PollDetailModel("poll", FakePolls({ detail.copy(poll = finalized) }), FakeCalendar())
+        val model = PollDetailModel("poll", FakePolls({ detail.copy(poll = finalized) }), FakeCalendar(), clock)
         model.load()
         val event = model.finalEvent!!
         assertFalse(event.isAllDay)
         assertEquals(first.startTime to first.endTime, event.insertBounds)
+    }
+
+    @Test fun theDeadlineIsClosingSoonWithinADayAndPastDueFromItsInstant() {
+        val model = PollDetailModel("poll", FakePolls({ detail }), FakeCalendar(), clock)
+        assertEquals(DeadlineStatus.OPEN, model.deadlineStatus(now + 24.hours))
+        assertEquals(DeadlineStatus.CLOSING_SOON, model.deadlineStatus(now + 24.hours - 1.seconds))
+        assertEquals(DeadlineStatus.CLOSING_SOON, model.deadlineStatus(now + 1.seconds))
+        assertEquals(DeadlineStatus.PAST_DUE, model.deadlineStatus(now))
+        assertEquals(DeadlineStatus.PAST_DUE, model.deadlineStatus(now - 1.seconds))
     }
 }

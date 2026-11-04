@@ -70,7 +70,7 @@ final class PollCreationTransportTests: XCTestCase {
         let poll = Poll(creatorId: account, title: "Server title", status: .active, isPremium: true, maxParticipants: 50, shareCode: "SERVER")
         return PollCreationResult(poll: poll, timeOptions: payload().timeOptions.map {
             PollTimeOption(pollId: poll.id, startTime: $0.startTime, endTime: $0.endTime, isAllDay: $0.isAllDay)
-        }, redeemedPassId: UUID(), entitlement: .eventPass, replayed: true)
+        }, redeemedPassId: UUID(), entitlement: PollCreationEntitlement.eventPass.rawValue, replayed: true)
     }
     private func data(_ result: PollCreationResult) throws -> Data {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
@@ -102,6 +102,15 @@ final class PollCreationTransportTests: XCTestCase {
         XCTAssertEqual(service.createdPolls.first?.maxParticipants, 50)
         XCTAssertEqual(try cache.fetchListedPolls().first?.title, "Server title")
         XCTAssertEqual(try cache.fetchTimeOptions(for: saved.poll.id).first?.id, saved.timeOptions.first?.id)
+    }
+
+    func testAnUnlistedEntitlementStillConfirmsTheCreation() async throws {
+        var reply = try XCTUnwrap(JSONSerialization.jsonObject(with: data(result())) as? [String: Any])
+        reply["entitlement"] = "enterprise_access"
+        let service = service(replies: [(200, try JSONSerialization.data(withJSONObject: reply))])
+        let created = try await service.createPoll(CreatePollRequest(payload: payload()))
+        XCTAssertEqual(created.entitlement, "enterprise_access")
+        XCTAssertEqual(service.createdPolls.map(\.id), [created.poll.id])
     }
 
     func testSqlErrorsAreActionableAndLeaveLocalPollsUntouched() async throws {

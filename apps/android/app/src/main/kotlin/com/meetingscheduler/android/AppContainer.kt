@@ -8,6 +8,8 @@ import com.meetingscheduler.android.services.PurchaseService
 import com.meetingscheduler.android.services.AUTH_REDIRECT_URL
 import com.meetingscheduler.android.services.AtomicSessionManager
 import com.meetingscheduler.android.services.SupabaseAuthGateway
+import com.meetingscheduler.android.ui.PollScreenEnvironment
+import com.meetingscheduler.android.ui.SharedPreferencesCreationStore
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.FlowType
@@ -19,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.datetime.Clock
 
 /**
  * Process-lifetime dependencies (F13). Owned by [MeetingSchedulerApplication], created once
@@ -63,6 +66,15 @@ class AppContainer(
     val pollService = PollService(authService, supabase)
 
     val calendarService = CalendarService(application, authService, applicationScope, supabase)
+
+    /** The one clock models read. The auth services still read the system clock directly. */
+    val clock: Clock = Clock.System
+
+    private val creationPreferences = application.getSharedPreferences("poll_creation_v1", 0)
+    val pollScreens = PollScreenEnvironment(
+        clock = clock,
+        creationStore = { accountId -> SharedPreferencesCreationStore(creationPreferences, accountId) },
+    )
 
     init {
         val recovery = application.getSharedPreferences("availability_recovery_v1", 0)

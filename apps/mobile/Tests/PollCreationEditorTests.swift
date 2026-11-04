@@ -24,7 +24,7 @@ final class PollCreationEditorTests: XCTestCase {
         let poll = Poll(creatorId: account, title: "Authoritative title", status: .active, isPremium: true, maxParticipants: 50, shareCode: "SERVER")
         return PollCreationResult(poll: poll, timeOptions: request.payload.timeOptions.map {
             PollTimeOption(pollId: poll.id, startTime: $0.startTime, endTime: $0.endTime, isAllDay: $0.isAllDay)
-        }, redeemedPassId: UUID(), entitlement: .eventPass, replayed: replayed)
+        }, redeemedPassId: UUID(), entitlement: PollCreationEntitlement.eventPass.rawValue, replayed: replayed)
     }
 
     func testInvalidOptionsNeverDispatchOrCreatePartialPoll() async {

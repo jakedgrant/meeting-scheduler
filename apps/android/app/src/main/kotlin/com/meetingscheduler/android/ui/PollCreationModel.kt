@@ -13,8 +13,12 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
-internal val currentSystemDate: LocalDate
-    get() = Instant.fromEpochMilliseconds(System.currentTimeMillis()).toLocalDateTime(TimeZone.currentSystemDefault()).date
+/**
+ * Only the serialized defaults below read it, so a stored draft or option that lacks a date
+ * still decodes. The model builds new drafts and options from its injected clock instead.
+ */
+private val currentSystemDate: LocalDate
+    get() = Clock.System.todayIn(TimeZone.currentSystemDefault())
 
 @Serializable
 data class TimeOption(
@@ -35,7 +39,13 @@ data class CreationFormDraft(
     val rangeEndDate: LocalDate = rangeStartDate,
     val rangeStartTime: LocalTime = LocalTime(9, 0), val rangeEndTime: LocalTime = LocalTime(10, 0),
     val useEventPass: Boolean = false,
-)
+) {
+    companion object {
+        /** An empty form whose first option and date range start on [today]. */
+        fun starting(today: LocalDate) =
+            CreationFormDraft(timeOptions = listOf(TimeOption(date = today)), rangeStartDate = today)
+    }
+}
 
 /** Where one account's creation draft and its unconfirmed request are kept. */
 interface PollCreationStore {
@@ -88,14 +98,14 @@ class SharedPreferencesCreationStore(
 class PollCreationModel(
     private val polls: PollCreationPolls,
     private val store: PollCreationStore,
-    private val today: () -> LocalDate = { currentSystemDate },
+    private val clock: Clock,
     private val zone: () -> TimeZone = { TimeZone.currentSystemDefault() },
 ) {
     private val createdForAccount = polls.creationAccountKey
     private val session = PollCreationSession(initial = store.loadPending(), persist = store::savePending)
     private var completed = false
 
-    var draft by mutableStateOf(store.loadDraft() ?: CreationFormDraft())
+    var draft by mutableStateOf(store.loadDraft() ?: CreationFormDraft.starting(today()))
         private set
     /** An earlier request whose outcome is unknown; it must be retried before editing. */
     var pending by mutableStateOf(session.pending)
@@ -106,6 +116,9 @@ class PollCreationModel(
         private set
 
     private fun isCurrentAccount() = polls.creationAccountKey == createdForAccount
+
+    /** Today's date in the device zone, which the poll records. */
+    fun today(): LocalDate = clock.todayIn(zone())
 
     /** Changes the draft and keeps it, until the poll is created. */
     fun edit(transform: (CreationFormDraft) -> CreationFormDraft) {

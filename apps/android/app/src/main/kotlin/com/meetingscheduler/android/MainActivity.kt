@@ -35,7 +35,8 @@ class MainActivity : ComponentActivity() {
                         authService = container.authService,
                         pollService = container.pollService,
                         calendarService = container.calendarService,
-                        purchaseService = container.purchaseService
+                        purchaseService = container.purchaseService,
+                        screens = container.pollScreens,
                     )
                 }
             }

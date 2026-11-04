@@ -22,7 +22,8 @@ fun MainTabView(
     authService: AuthService,
     pollService: PollService,
     calendarService: CalendarService,
-    purchaseService: PurchaseService?
+    purchaseService: PurchaseService?,
+    screens: PollScreenEnvironment,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
 
@@ -54,7 +55,8 @@ fun MainTabView(
                         authService = authService,
                         pollService = pollService,
                         calendarService = calendarService,
-                        purchaseService = purchaseService
+                        purchaseService = purchaseService,
+                        screens = screens,
                     )
                 }
                 1 -> {

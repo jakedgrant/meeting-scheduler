@@ -114,13 +114,16 @@ public struct PollCreationResult: Codable, Sendable {
     public let poll: Poll
     public let timeOptions: [PollTimeOption]
     public let redeemedPassId: UUID?
-    public let entitlement: PollCreationEntitlement
+    /// The tier the server says funded the poll. It stays a string because decoding a tier this
+    /// build doesn't list must not fail a creation the server committed: every replay would fail
+    /// the same way. Compare it with `PollCreationEntitlement` raw values.
+    public let entitlement: String
     public let replayed: Bool
     enum CodingKeys: String, CodingKey {
         case poll, timeOptions = "time_options", redeemedPassId = "redeemed_pass_id", entitlement, replayed
     }
     public init(poll: Poll, timeOptions: [PollTimeOption], redeemedPassId: UUID? = nil,
-                entitlement: PollCreationEntitlement = .free, replayed: Bool = false) {
+                entitlement: String = PollCreationEntitlement.free.rawValue, replayed: Bool = false) {
         self.poll = poll; self.timeOptions = timeOptions; self.redeemedPassId = redeemedPassId
         self.entitlement = entitlement; self.replayed = replayed
     }
