@@ -37,6 +37,14 @@ You can preview the production build with `npm run preview`.
 
 > To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
 
+## Database types
+
+`src/lib/database.types.ts` is generated from `supabase/migrations`, not from a hosted project. After adding a migration, run `npm run generate:database-types` at the repository root and commit the result. The script applies the migrations in PGlite, so it needs the root `npm ci` but no Docker or Supabase login. CI runs `npm run check:database-types` and fails if the file is out of date.
+
+The table row types in `src/lib/supabase.ts` are aliases of the generated rows, and `sessionRpc` in `src/lib/stores/polls.ts` accepts only generated function names and arguments. Functions that return `json` are typed as `Json`, so each caller still checks the fields it reads.
+
+Plan limits shown to users come from `packages/shared-config/entitlements.json` through `src/lib/entitlements.ts`. The server still sets each poll's limits.
+
 ## Authentication callbacks and session ownership
 
 The client keeps the existing Supabase storage key (`sb-<project-host-prefix>-auth-token`). It configures the SDK's public storage and lock interfaces explicitly. Local sign-out compares account plus JWT `session_id` under the same SDK lock, removes only that session, then uses `auth.admin.signOut(capturedJWT, 'local')` to revoke that original session outside the lock. A queued sign-out cannot select a newly installed account or fresh login to the same account. If remote revocation fails, the device remains signed out; server revocation was not confirmed.

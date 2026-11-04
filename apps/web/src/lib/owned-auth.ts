@@ -1,4 +1,5 @@
 import { AuthClient, createClient, navigatorLock, processLock, type Session, type SupportedStorage, type LockFunc } from '@supabase/supabase-js'
+import type { Database } from './database.types'
 
 export function memoryAuthStorage(): SupportedStorage {
   const values = new Map<string, string>()
@@ -37,7 +38,7 @@ export function createOwnedAuth(options: {
   const attemptKey = `${storageKey}:sign-in-attempt`
   const lock: LockFunc = options.lock ?? (typeof navigator !== 'undefined' && navigator.locks ? navigatorLock : processLock)
   const locked = <T>(operation: () => Promise<T>) => lock(`lock:${storageKey}`, -1, operation)
-  const client = createClient(options.url, options.key, { auth: {
+  const client = createClient<Database>(options.url, options.key, { auth: {
     storageKey, storage: options.storage, lock, persistSession: true,
     autoRefreshToken: options.autoRefresh ?? false, detectSessionInUrl: false, flowType: 'pkce'
   }, global: { fetch: options.fetch } })

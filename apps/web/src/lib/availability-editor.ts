@@ -1,7 +1,7 @@
 import { get, writable } from 'svelte/store'
 import type { AvailabilityStatus } from './supabase'
 
-export interface AvailabilityEntry {
+export type AvailabilityEntry = {
 	time_option_id: string
 	status: AvailabilityStatus
 	note: string | null

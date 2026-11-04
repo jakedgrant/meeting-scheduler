@@ -1,4 +1,5 @@
 import { writable, get } from 'svelte/store'
+import type { FunctionArgs, FunctionName, FunctionReturns } from '$lib/database.types'
 import { supabase, type Poll, type PollTimeOption, type PollParticipant, type AvailabilityResponse } from '$lib/supabase'
 import { user } from './auth'
 import { captureSession } from '$lib/session-scope'
@@ -101,7 +102,7 @@ function capabilityForPoll(pollId: string) {
   return capability ?? null
 }
 
-function sessionRpc(name: string, args?: Record<string, unknown> | CreationOperation, signal = captureSession().signal) {
+function sessionRpc<Name extends FunctionName>(name: Name, args: FunctionArgs<Name>, signal = captureSession().signal) {
   return supabase.rpc(name, args).abortSignal(signal)
 }
 
@@ -198,8 +199,9 @@ export async function loadMyPolls() {
   return loadParticipatedPolls()
 }
 
-// Load a poll by share code
-export async function loadPollByCode(code: string): Promise<Poll | null> {
+// Load a poll by share code. The lookup returns only the columns a joiner needs.
+type PollByCode = FunctionReturns<'get_poll_by_code'>[number]
+export async function loadPollByCode(code: string): Promise<PollByCode | null> {
   const identity = identityGeneration
   try {
     const { data, error } = await sessionRpc('get_poll_by_code', { code: code.toUpperCase() })
@@ -208,7 +210,7 @@ export async function loadPollByCode(code: string): Promise<Poll | null> {
     if (error) throw error
     if (!data || data.length === 0) return null
 
-    return data[0] as Poll
+    return data[0]
   } catch (err) {
     console.error('Failed to load poll by code')
     return null
@@ -253,7 +255,8 @@ async function loadGuestPoll(pollId: string, guest: GuestCapability, generation:
     }
     throw error
   }
-  const detail = data as GuestPollDetail
+  // json results carry no row type; the fields used are checked below.
+  const detail = data as unknown as GuestPollDetail | null
   if (!detail?.poll || detail.poll.id !== pollId) {
     dropGuestCapability(pollId, guest.token)
     return false
@@ -394,7 +397,8 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
   const { data, error } = await sessionRpc('create_poll', operation)
   if (identity !== identityGeneration || get(user)?.id !== currentUser.id) throw { code: 'ACCOUNT_CHANGED' }
   if (error) throw error
-  const result = data as CreationResult
+  // json results carry no row type; the fields used are checked below.
+  const result = data as unknown as CreationResult | null
   if (!result?.poll?.id || result.poll.creator_id !== currentUser.id
       || typeof result.poll.is_premium !== 'boolean' || !Number.isSafeInteger(result.poll.max_participants)
       || result.poll.max_participants < 1 || !Array.isArray(result.time_options)

@@ -5,6 +5,7 @@
 
 	import { createSessionWork } from '$lib/session-scope';
 	import { user } from '$lib/stores/auth';
+	import { proHasUnlimitedActivePolls, proParticipantLimit } from '$lib/entitlements';
 	const work = createSessionWork();
 	onDestroy(() => work.dispose());
 
@@ -119,8 +120,10 @@
 			<div class="features">
 				<h3>What you get:</h3>
 				<ul>
-					<li>Unlimited active polls</li>
-					<li>Up to 50 participants per poll</li>
+					{#if proHasUnlimitedActivePolls}
+						<li>Unlimited active polls</li>
+					{/if}
+					<li>Up to {proParticipantLimit} participants per poll</li>
 					<li>Calendar integrations</li>
 					<li>Priority support</li>
 				</ul>
