@@ -21,6 +21,10 @@ import {
 import type { AvailabilitySave, AvailabilitySnapshot } from '$lib/availability-editor'
 import type { CreationOperation, CreationResult } from '$lib/poll-creation'
 import { IncompleteReadError, checkedPage, readAllPages, type Page } from '$lib/paged-read'
+import {
+  isAvailabilityResponse, isAvailabilitySnapshot, isCreationResult, isGuestJoinResult, isGuestPollDetail,
+  isJoinResult, isPoll, isPollDetail, isSummaryRow, type PollDetail, type SummaryRow
+} from '$lib/rpc-results'
 
 // Poll stores
 export const polls = writable<Poll[]>([])
@@ -28,14 +32,8 @@ export const createdPolls = writable<Poll[]>([])
 export const joinedPolls = writable<Poll[]>([])
 
 // Database-computed list fields, keyed by poll id (list_poll_summaries).
-export interface PollSummary {
-  participant_count: number
-  time_option_count: number
-  earliest_start: string | null
-  latest_start: string | null
-}
-type SummaryRow = PollSummary & { poll: Poll; role: 'owner' | 'member' }
-export type PollListRole = 'owner' | 'member'
+export type PollSummary = Omit<SummaryRow, 'poll' | 'role'>
+export type PollListRole = SummaryRow['role']
 export interface PollListSection { total: number; nextCursor: string | null; loadingMore: boolean }
 const emptySection = (): PollListSection => ({ total: 0, nextCursor: null, loadingMore: false })
 export const pollSummaries = writable<Record<string, PollSummary>>({})
@@ -111,10 +109,8 @@ async function fetchSummaryPage(role: PollListRole, cursor: string | null, signa
     role_filter: role, page_size: POLL_LIST_PAGE_SIZE, page_cursor: cursor
   }, signal)
   if (error) throw error
-  const page = checkedPage<SummaryRow>(data)
-  if (page.items.some(item => !item?.poll?.id || item.role !== role || !Number.isSafeInteger(item.participant_count))) {
-    throw new IncompleteReadError()
-  }
+  const page = checkedPage(data, isSummaryRow)
+  if (page.items.some(item => item.role !== role)) throw new IncompleteReadError()
   return page
 }
 
@@ -217,14 +213,6 @@ export async function loadPollByCode(code: string): Promise<PollByCode | null> {
   }
 }
 
-interface GuestPollDetail {
-  participant_id: string
-  poll: Poll
-  time_options: PollTimeOption[]
-  participants: PollParticipant[]
-  responses: AvailabilityResponse[]
-}
-
 function dropGuestCapability(pollId: string, expectedToken: string) {
   // A late denial must never revoke a capability acquired by a later join.
   const currentToken = guestCapabilities.get(pollId)?.token ?? pendingGuestTokens.get(pollId)
@@ -243,7 +231,7 @@ function dropGuestCapability(pollId: string, expectedToken: string) {
 // Signed-out guests cannot read participant rows; they load the poll through
 // their capability. Returns false when the caller should use the normal path.
 async function loadGuestPoll(pollId: string, guest: GuestCapability, generation: number): Promise<boolean> {
-  const { data, error } = await sessionRpc('get_guest_poll_detail', {
+  const { data: detail, error } = await sessionRpc('get_guest_poll_detail', {
     participant_uuid: guest.participantId,
     guest_token: guest.token
   }, detailAbort.signal)
@@ -255,9 +243,14 @@ async function loadGuestPoll(pollId: string, guest: GuestCapability, generation:
     }
     throw error
   }
-  // json results carry no row type; the fields used are checked below.
-  const detail = data as unknown as GuestPollDetail | null
-  if (!detail?.poll || detail.poll.id !== pollId) {
+  // No detail, or another poll's, means this capability no longer opens the poll.
+  // A detail that fails its check is an incomplete read and keeps the capability.
+  if (detail === null) {
+    dropGuestCapability(pollId, guest.token)
+    return false
+  }
+  if (!isGuestPollDetail(detail) || detail.participant_id !== guest.participantId) throw new IncompleteReadError()
+  if (detail.poll.id !== pollId) {
     dropGuestCapability(pollId, guest.token)
     return false
   }
@@ -361,31 +354,22 @@ async function refreshPoll(pollId: string, generation: number) {
   }
 }
 
-interface PollDetail {
-  poll: Poll
-  time_options: PollTimeOption[]
-  participants: PollParticipant[]
-  time_option_count: number
-  participant_count: number
-}
-
 function checkedDetail(data: unknown, pollId: string): PollDetail {
-  const detail = data as PollDetail
-  if (!detail?.poll || detail.poll.id !== pollId
-      || !Array.isArray(detail.time_options) || detail.time_options.length !== detail.time_option_count
-      || !Array.isArray(detail.participants) || detail.participants.length !== detail.participant_count) {
+  if (!isPollDetail(data) || data.poll.id !== pollId
+      || data.time_options.length !== data.time_option_count
+      || data.participants.length !== data.participant_count) {
     throw new IncompleteReadError()
   }
-  return detail
+  return data
 }
 
 function readPollResponses(pollId: string, signal: AbortSignal) {
-  return readAllPages<AvailabilityResponse>(async cursor => {
+  return readAllPages(async cursor => {
     const { data, error } = await sessionRpc('list_poll_responses', {
       poll_uuid: pollId, page_size: RESPONSE_PAGE_SIZE, page_cursor: cursor
     }, signal)
     if (error) throw error
-    return checkedPage<AvailabilityResponse>(data)
+    return checkedPage(data, isAvailabilityResponse)
   }, response => `${response.participant_id}:${response.time_option_id}`)
 }
 
@@ -394,16 +378,12 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
   const currentUser = get(user)
   if (!currentUser) throw { code: '42501' }
   const identity = identityGeneration
-  const { data, error } = await sessionRpc('create_poll', operation)
+  const { data: result, error } = await sessionRpc('create_poll', operation)
   if (identity !== identityGeneration || get(user)?.id !== currentUser.id) throw { code: 'ACCOUNT_CHANGED' }
   if (error) throw error
-  // json results carry no row type; the fields used are checked below.
-  const result = data as unknown as CreationResult | null
-  if (!result?.poll?.id || result.poll.creator_id !== currentUser.id
-      || typeof result.poll.is_premium !== 'boolean' || !Number.isSafeInteger(result.poll.max_participants)
-      || result.poll.max_participants < 1 || !Array.isArray(result.time_options)
+  if (!isCreationResult(result) || result.poll.creator_id !== currentUser.id || result.poll.max_participants < 1
       || result.time_options.length !== operation.payload.time_options.length
-      || result.time_options.some(option => !option.id || option.poll_id !== result.poll.id)) {
+      || result.time_options.some(option => option.poll_id !== result.poll.id)) {
     throw new Error('Creation result could not be confirmed')
   }
   // Apply returned caps and premium state, never a local entitlement estimate.
@@ -457,8 +437,10 @@ export async function setSelectedFinalDate(pollId: string, timeOptionId: string)
   })
   if (identity !== identityGeneration || generation !== loadGeneration) return
   if (error) throw error
+  // Finalizing again is allowed, so an unconfirmed result can be retried.
+  if (!isPoll(data) || data.id !== pollId) throw new Error('The final time could not be confirmed. Please retry.')
   detailRevision++
-  if (get(currentPoll)?.id === pollId) currentPoll.set(data as Poll)
+  if (get(currentPoll)?.id === pollId) currentPoll.set(data)
 }
 
 // Keep the token before sending a join: a lost reply must not create another guest.
@@ -470,7 +452,7 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
   savePendingGuestToken(browserStorage(), pollId, token)
   const identity = identityGeneration
   const generation = loadGeneration
-  const { data, error } = await sessionRpc('join_poll_as_guest', {
+  const { data: result, error } = await sessionRpc('join_poll_as_guest', {
     poll_uuid: pollId, display_name: name ?? '', contact_email: email ?? null, guest_token: token
   })
   if (error) {
@@ -479,11 +461,11 @@ async function joinPollAsGuest(pollId: string, name?: string, email?: string): P
     }
     throw error
   }
-  const result = data as { participant: PollParticipant; guest_token: string }
-  const capability = { participantId: result?.participant?.id, token: result?.guest_token }
-  if (!isValidCapability(capability) || capability.token !== token || result.participant.poll_id !== pollId) {
+  if (!isGuestJoinResult(result) || result.guest_token !== token || result.participant.poll_id !== pollId
+      || !isValidCapability({ participantId: result.participant.id, token })) {
     throw new Error('The guest join could not be confirmed. Please retry.')
   }
+  const capability = { participantId: result.participant.id, token }
   const currentToken = guestCapabilities.get(pollId)?.token ?? pendingGuestTokens.get(pollId)
   if (currentToken !== token) return result.participant
   guestCapabilities.set(pollId, capability)
@@ -502,7 +484,11 @@ export async function joinPoll(pollId: string, name?: string, email?: string): P
     if (!get(user)) return await joinPollAsGuest(pollId, name, email)
     const { data, error } = await sessionRpc('join_poll', { poll_uuid: pollId })
     if (error) throw error
-    return (data as { participant: PollParticipant }).participant
+    // Membership is unique, so retrying an unconfirmed join cannot add a second one.
+    if (!isJoinResult(data) || data.participant.poll_id !== pollId) {
+      throw new Error('The join could not be confirmed. Please retry.')
+    }
+    return data.participant
   } catch (error) {
     if ((error as { code?: string })?.code === 'P0003') {
       throw new Error('This poll has reached its participant limit. Ask the organizer to free a place, then retry joining.')
@@ -537,12 +523,10 @@ export async function loadAvailability(pollId: string, participantId: string): P
 }
 
 function checkedSnapshot(data: unknown, pollId: string, participantId: string): AvailabilitySnapshot {
-  const snapshot = data as AvailabilitySnapshot
-  if (!snapshot || snapshot.poll_id !== pollId || snapshot.participant_id !== participantId
-      || !Number.isSafeInteger(snapshot.version) || !Array.isArray(snapshot.responses)) {
+  if (!isAvailabilitySnapshot(data) || data.poll_id !== pollId || data.participant_id !== participantId) {
     throw new Error('The saved responses could not be confirmed. Please retry.')
   }
-  return snapshot
+  return data
 }
 
 function applyAvailability(snapshot: AvailabilitySnapshot) {

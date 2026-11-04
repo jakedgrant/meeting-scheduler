@@ -22,6 +22,7 @@
     "test:dates:db": "node --test tests/date-time-database.test.mjs",
     "test:reads:db": "node --test tests/read-contracts.test.mjs",
     "test:web:reads": "node --test tests/web-paged-reads.test.mjs",
+    "test:web:results": "node --test tests/web-rpc-results.test.mjs",
     "test:diagnostics": "node --test tests/diagnostics-guard.test.mjs"
   },
   "dependencies": {

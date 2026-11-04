@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { pollRow, timeOptionRow } from './helpers/web-rows.mjs';
 
 const requireWeb = createRequire(new URL('../apps/web/package.json', import.meta.url));
 const { build } = requireWeb('esbuild');
@@ -13,8 +14,8 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const lib = join(root, 'apps/web/src/lib');
 const member = '11111111-1111-4111-8111-111111111111';
 const other = '22222222-2222-4222-8222-222222222222';
-const poll = { id: '33333333-3333-4333-8333-333333333333', creator_id: member, title: 'Authoritative title', status: 'active', timezone: 'UTC', is_premium: true, max_participants: 50, share_code: 'SERVER' };
-const option = { id: '44444444-4444-4444-8444-444444444444', poll_id: poll.id, start_time: '2026-11-01T12:00:00Z', end_time: '2026-11-01T13:00:00Z', is_all_day: false };
+const poll = pollRow({ id: '33333333-3333-4333-8333-333333333333', creator_id: member, title: 'Authoritative title', is_premium: true, max_participants: 50, share_code: 'SERVER' });
+const option = timeOptionRow({ id: '44444444-4444-4444-8444-444444444444', poll_id: poll.id });
 const result = { poll, time_options: [option], redeemed_pass_id: null, entitlement: 'pro_access', replayed: false };
 const disk = () => {
   const values = new Map();
