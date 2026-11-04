@@ -20,10 +20,6 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
-import java.util.*
-
-private val currentSystemTime: Instant
-    get() = Instant.fromEpochMilliseconds(System.currentTimeMillis())
 
 @Composable
 fun CreatePollView(pollService: PollService, onDismiss: () -> Unit) {
@@ -287,7 +283,7 @@ private fun CreationForm(
     // Due date picker dialog
     if (showDueDatePicker) {
         val initialMillis = draft.dueDate?.atStartOfDayIn(TimeZone.UTC)?.toEpochMilliseconds()
-            ?: currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+            ?: currentSystemDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
         DatePickerDialog(
             onDismissRequest = { showDueDatePicker = false },
