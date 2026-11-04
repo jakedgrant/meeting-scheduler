@@ -17,9 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import com.meetingscheduler.android.models.*
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.*
@@ -27,26 +24,6 @@ import java.util.*
 
 private val currentSystemTime: Instant
     get() = Instant.fromEpochMilliseconds(System.currentTimeMillis())
-
-@Serializable
-data class TimeOption(
-    val id: String = UUID.randomUUID().toString(),
-    var date: LocalDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date,
-    var startTime: LocalTime = LocalTime(9, 0),
-    var endTime: LocalTime = LocalTime(10, 0)
-)
-
-@Serializable
-private data class CreationFormDraft(
-    val title: String = "", val description: String = "", val location: String = "",
-    val hasDueDate: Boolean = false, val dueDate: LocalDate? = null,
-    val isAllDay: Boolean = false, val useDateRange: Boolean = false,
-    val timeOptions: List<TimeOption> = listOf(TimeOption()),
-    val rangeStartDate: LocalDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date,
-    val rangeEndDate: LocalDate = rangeStartDate,
-    val rangeStartTime: LocalTime = LocalTime(9, 0), val rangeEndTime: LocalTime = LocalTime(10, 0),
-    val useEventPass: Boolean = false,
-)
 
 @Composable
 fun CreatePollView(pollService: PollService, onDismiss: () -> Unit) {
@@ -59,53 +36,24 @@ private fun CreationForm(
     pollService: PollService,
     onDismiss: () -> Unit
 ) {
-    val accountId = pollService.creationAccountId
-    val accountKey = pollService.creationAccountKey
     val preferences = LocalContext.current.applicationContext.getSharedPreferences("poll_creation_v1", 0)
-    val json = remember { Json { ignoreUnknownKeys = true; encodeDefaults = true } }
-    val draftKey = "draft:$accountId"
-    val pendingKey = "pending:$accountId"
-    val restored = remember { runCatching {
-        Pair(preferences.getString(draftKey, null)?.let { json.decodeFromString<CreationFormDraft>(it) } ?: CreationFormDraft(),
-            preferences.getString(pendingKey, null)?.let { json.decodeFromString<PollCreationRequest>(it) })
+    val opened = remember { runCatching {
+        PollCreationModel(
+            store = SharedPreferencesCreationStore(preferences, pollService.creationAccountId),
+            accountKey = { pollService.creationAccountKey },
+            createPoll = pollService::createPoll,
+        )
     } }
-    if (restored.isFailure) {
+    val model = opened.getOrElse {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Your saved creation could not be read. Check your poll list before starting another poll.")
             TextButton(onClick = onDismiss) { Text("Close") }
         }
         return
     }
-    val storedDraft = restored.getOrThrow().first
-    val editor = remember {
-        PollCreationSession(
-            initial = restored.getOrThrow().second,
-            persist = { request ->
-                val edit = preferences.edit()
-                if (request == null) edit.remove(pendingKey) else edit.putString(pendingKey, json.encodeToString(request))
-                if (!edit.commit()) throw CreationStorageFailure()
-            },
-        )
-    }
-    var completed by remember { mutableStateOf(false) }
-    var pending by remember { mutableStateOf(editor.pending) }
-    var useEventPass by remember { mutableStateOf(storedDraft.useEventPass) }
-    var title by remember { mutableStateOf(storedDraft.title) }
-    var description by remember { mutableStateOf(storedDraft.description) }
-    var location by remember { mutableStateOf(storedDraft.location) }
-    var hasDueDate by remember { mutableStateOf(storedDraft.hasDueDate) }
-    var dueDate by remember { mutableStateOf<LocalDate?>(storedDraft.dueDate) }
-    var isAllDay by remember { mutableStateOf(storedDraft.isAllDay) }
-    var useDateRange by remember { mutableStateOf(storedDraft.useDateRange) }
-    var timeOptions by remember { mutableStateOf(storedDraft.timeOptions) }
-    var isLoading by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-
-    // Date range fields
-    var rangeStartDate by remember { mutableStateOf(storedDraft.rangeStartDate) }
-    var rangeEndDate by remember { mutableStateOf(storedDraft.rangeEndDate) }
-    var rangeStartTime by remember { mutableStateOf(storedDraft.rangeStartTime) }
-    var rangeEndTime by remember { mutableStateOf(storedDraft.rangeEndTime) }
+    val draft = model.draft
+    val isLoading = model.isSubmitting
+    val timeOptions = draft.timeOptions
 
     // Picker dialog state for time options
     var showDatePicker by remember { mutableStateOf(false) }
@@ -124,58 +72,16 @@ private fun CreationForm(
 
     val scope = rememberCoroutineScope()
 
-    val formDraft = CreationFormDraft(title, description, location, hasDueDate, dueDate, isAllDay, useDateRange,
-        timeOptions, rangeStartDate, rangeEndDate, rangeStartTime, rangeEndTime, useEventPass)
-    SideEffect {
-        if (accountId != null && !isLoading && !completed) preferences.edit().putString(draftKey, json.encodeToString(formDraft)).apply()
-    }
-
     fun submitCreation() {
-        scope.launch {
-            isLoading = true
-            errorMessage = null
-            try {
-                // Picker values are wall times in the device zone, which the poll records.
-                val zone = TimeZone.currentSystemDefault()
-                val payload = editor.pending?.payload ?: PollCreationPayload(
-                    title = title,
-                    description = description.ifBlank { null },
-                    location = location.ifBlank { null },
-                    timezone = zone.id,
-                    closesAt = if (hasDueDate) dueDate?.let { PollDates.deadline(it, zone) } else null,
-                    timeOptions = timeOptions.map { option ->
-                        if (isAllDay) PollDates.allDayOption(option.date, zone)
-                        else PollDates.timedOption(option.date, option.startTime, option.endTime, zone)
-                    },
-                    useEventPass = useEventPass,
-                )
-                require(payload.title.isNotBlank() && payload.timeOptions.isNotEmpty()) { "Enter a title and at least one time option." }
-                val result = editor.submit(payload, send = pollService::createPoll,
-                    isCurrent = { pollService.creationAccountKey == accountKey })
-                if (result != null) {
-                    completed = true
-                    preferences.edit().remove(draftKey).commit()
-                    onDismiss()
-                }
-            } catch (error: Exception) {
-                if (error is kotlinx.coroutines.CancellationException) throw error
-                if (pollService.creationAccountKey == accountKey) {
-                    errorMessage = if (error is CreationRejected || error is IllegalArgumentException || error is CreationStorageFailure) error.message
-                        else "Creation could not be confirmed. Your draft is saved. Retry to recover the original poll."
-                }
-            } finally {
-                pending = editor.pending
-                isLoading = false
-            }
-        }
+        scope.launch { if (model.submit()) onDismiss() }
     }
 
-    if (pending != null) {
+    model.pending?.let { pending ->
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Confirm your saved creation", style = MaterialTheme.typography.headlineSmall)
-            Text(pending!!.payload.title)
+            Text(pending.payload.title)
             Text("The previous request may have succeeded. Retry this saved operation before editing or creating another poll.")
-            errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            model.errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = { submitCreation() }, enabled = !isLoading) { Text(if (isLoading) "Checking…" else "Retry saved creation") }
             TextButton(onClick = onDismiss, enabled = !isLoading) { Text("Close") }
         }
@@ -195,11 +101,7 @@ private fun CreationForm(
                     datePickerState.selectedDateMillis?.let { millis ->
                         val newDate = Instant.fromEpochMilliseconds(millis)
                             .toLocalDateTime(TimeZone.UTC).date
-                        timeOptions = timeOptions.mapIndexed { index, opt ->
-                            if (index == editingOptionIndex) {
-                                opt.copy(date = newDate)
-                            } else opt
-                        }
+                        model.updateOption(editingOptionIndex) { it.copy(date = newDate) }
                     }
                     showDatePicker = false
                 }) {
@@ -230,11 +132,7 @@ private fun CreationForm(
             confirmButton = {
                 TextButton(onClick = {
                     val newTime = LocalTime(timePickerState.hour, timePickerState.minute)
-                    timeOptions = timeOptions.mapIndexed { index, opt ->
-                        if (index == editingOptionIndex) {
-                            opt.copy(startTime = newTime)
-                        } else opt
-                    }
+                    model.updateOption(editingOptionIndex) { it.copy(startTime = newTime) }
                     showStartTimePicker = false
                 }) {
                     Text("OK")
@@ -262,11 +160,7 @@ private fun CreationForm(
             confirmButton = {
                 TextButton(onClick = {
                     val newTime = LocalTime(timePickerState.hour, timePickerState.minute)
-                    timeOptions = timeOptions.mapIndexed { index, opt ->
-                        if (index == editingOptionIndex) {
-                            opt.copy(endTime = newTime)
-                        } else opt
-                    }
+                    model.updateOption(editingOptionIndex) { it.copy(endTime = newTime) }
                     showEndTimePicker = false
                 }) {
                     Text("OK")
@@ -283,15 +177,15 @@ private fun CreationForm(
     // Date range start date picker
     if (showRangeStartDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = rangeStartDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+            initialSelectedDateMillis = draft.rangeStartDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
         )
         DatePickerDialog(
             onDismissRequest = { showRangeStartDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
-                        rangeStartDate = Instant.fromEpochMilliseconds(millis)
-                            .toLocalDateTime(TimeZone.UTC).date
+                        val date = Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.UTC).date
+                        model.edit { it.copy(rangeStartDate = date) }
                     }
                     showRangeStartDatePicker = false
                 }) {
@@ -311,15 +205,15 @@ private fun CreationForm(
     // Date range end date picker
     if (showRangeEndDatePicker) {
         val datePickerState = rememberDatePickerState(
-            initialSelectedDateMillis = rangeEndDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
+            initialSelectedDateMillis = draft.rangeEndDate.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
         )
         DatePickerDialog(
             onDismissRequest = { showRangeEndDatePicker = false },
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
-                        rangeEndDate = Instant.fromEpochMilliseconds(millis)
-                            .toLocalDateTime(TimeZone.UTC).date
+                        val date = Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.UTC).date
+                        model.edit { it.copy(rangeEndDate = date) }
                     }
                     showRangeEndDatePicker = false
                 }) {
@@ -339,8 +233,8 @@ private fun CreationForm(
     // Date range start time picker
     if (showRangeStartTimePicker) {
         val timePickerState = rememberTimePickerState(
-            initialHour = rangeStartTime.hour,
-            initialMinute = rangeStartTime.minute
+            initialHour = draft.rangeStartTime.hour,
+            initialMinute = draft.rangeStartTime.minute
         )
         AlertDialog(
             onDismissRequest = { showRangeStartTimePicker = false },
@@ -348,7 +242,8 @@ private fun CreationForm(
             text = { TimePicker(state = timePickerState) },
             confirmButton = {
                 TextButton(onClick = {
-                    rangeStartTime = LocalTime(timePickerState.hour, timePickerState.minute)
+                    val time = LocalTime(timePickerState.hour, timePickerState.minute)
+                    model.edit { it.copy(rangeStartTime = time) }
                     showRangeStartTimePicker = false
                 }) {
                     Text("OK")
@@ -365,8 +260,8 @@ private fun CreationForm(
     // Date range end time picker
     if (showRangeEndTimePicker) {
         val timePickerState = rememberTimePickerState(
-            initialHour = rangeEndTime.hour,
-            initialMinute = rangeEndTime.minute
+            initialHour = draft.rangeEndTime.hour,
+            initialMinute = draft.rangeEndTime.minute
         )
         AlertDialog(
             onDismissRequest = { showRangeEndTimePicker = false },
@@ -374,7 +269,8 @@ private fun CreationForm(
             text = { TimePicker(state = timePickerState) },
             confirmButton = {
                 TextButton(onClick = {
-                    rangeEndTime = LocalTime(timePickerState.hour, timePickerState.minute)
+                    val time = LocalTime(timePickerState.hour, timePickerState.minute)
+                    model.edit { it.copy(rangeEndTime = time) }
                     showRangeEndTimePicker = false
                 }) {
                     Text("OK")
@@ -390,7 +286,7 @@ private fun CreationForm(
 
     // Due date picker dialog
     if (showDueDatePicker) {
-        val initialMillis = dueDate?.atStartOfDayIn(TimeZone.UTC)?.toEpochMilliseconds()
+        val initialMillis = draft.dueDate?.atStartOfDayIn(TimeZone.UTC)?.toEpochMilliseconds()
             ?: currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date.atStartOfDayIn(TimeZone.UTC).toEpochMilliseconds()
         val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
         DatePickerDialog(
@@ -398,8 +294,8 @@ private fun CreationForm(
             confirmButton = {
                 TextButton(onClick = {
                     datePickerState.selectedDateMillis?.let { millis ->
-                        dueDate = Instant.fromEpochMilliseconds(millis)
-                            .toLocalDateTime(TimeZone.UTC).date
+                        val date = Instant.fromEpochMilliseconds(millis).toLocalDateTime(TimeZone.UTC).date
+                        model.edit { it.copy(dueDate = date) }
                     }
                     showDueDatePicker = false
                 }) {
@@ -445,8 +341,8 @@ private fun CreationForm(
 
             item {
                 OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
+                    value = draft.title,
+                    onValueChange = { value -> model.edit { it.copy(title = value) } },
                     label = { Text("Title") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading
@@ -455,8 +351,8 @@ private fun CreationForm(
 
             item {
                 OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
+                    value = draft.description,
+                    onValueChange = { value -> model.edit { it.copy(description = value) } },
                     label = { Text("Description (optional)") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading,
@@ -467,8 +363,8 @@ private fun CreationForm(
 
             item {
                 OutlinedTextField(
-                    value = location,
-                    onValueChange = { location = it },
+                    value = draft.location,
+                    onValueChange = { value -> model.edit { it.copy(location = value) } },
                     label = { Text("Location (optional)") },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !isLoading
@@ -483,19 +379,14 @@ private fun CreationForm(
                 ) {
                     Text("Set response deadline")
                     Switch(
-                        checked = hasDueDate,
-                        onCheckedChange = {
-                            hasDueDate = it
-                            if (it && dueDate == null) {
-                                dueDate = currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date
-                            }
-                        },
+                        checked = draft.hasDueDate,
+                        onCheckedChange = model::setHasDueDate,
                         enabled = !isLoading
                     )
                 }
             }
 
-            if (hasDueDate) {
+            if (draft.hasDueDate) {
                 item {
                     Row(
                         modifier = Modifier
@@ -504,7 +395,7 @@ private fun CreationForm(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Due Date: ${dueDate ?: ""}")
+                        Text("Due Date: ${draft.dueDate ?: ""}")
                         Icon(Icons.Default.Edit, "Edit due date")
                     }
                 }
@@ -518,8 +409,8 @@ private fun CreationForm(
                 ) {
                     Text("All-day events")
                     Switch(
-                        checked = isAllDay,
-                        onCheckedChange = { isAllDay = it },
+                        checked = draft.isAllDay,
+                        onCheckedChange = { value -> model.edit { it.copy(isAllDay = value) } },
                         enabled = !isLoading
                     )
                 }
@@ -531,7 +422,7 @@ private fun CreationForm(
                 Text("Time Options", style = MaterialTheme.typography.titleMedium)
             }
 
-            if (!isAllDay) {
+            if (!draft.isAllDay) {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -540,14 +431,14 @@ private fun CreationForm(
                     ) {
                         Text("Use date range selector")
                         Switch(
-                            checked = useDateRange,
-                            onCheckedChange = { useDateRange = it },
+                            checked = draft.useDateRange,
+                            onCheckedChange = { value -> model.edit { it.copy(useDateRange = value) } },
                             enabled = !isLoading
                         )
                     }
                 }
 
-                if (useDateRange) {
+                if (draft.useDateRange) {
                     item {
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -568,7 +459,7 @@ private fun CreationForm(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Start Date: ${rangeStartDate}")
+                                    Text("Start Date: ${draft.rangeStartDate}")
                                     Icon(
                                         Icons.Default.Edit,
                                         contentDescription = "Edit start date",
@@ -584,7 +475,7 @@ private fun CreationForm(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("End Date: ${rangeEndDate}")
+                                    Text("End Date: ${draft.rangeEndDate}")
                                     Icon(
                                         Icons.Default.Edit,
                                         contentDescription = "Edit end date",
@@ -600,7 +491,7 @@ private fun CreationForm(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Start Time: ${rangeStartTime}")
+                                    Text("Start Time: ${draft.rangeStartTime}")
                                     Icon(
                                         Icons.Default.Edit,
                                         contentDescription = "Edit start time",
@@ -616,7 +507,7 @@ private fun CreationForm(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("End Time: ${rangeEndTime}")
+                                    Text("End Time: ${draft.rangeEndTime}")
                                     Icon(
                                         Icons.Default.Edit,
                                         contentDescription = "Edit end time",
@@ -626,25 +517,7 @@ private fun CreationForm(
                                 }
 
                                 Button(
-                                    onClick = {
-                                        if (rangeStartDate > rangeEndDate) {
-                                            errorMessage = "Start date must be before or equal to end date"
-                                            return@Button
-                                        }
-
-                                        var currentDate = rangeStartDate
-                                        while (currentDate <= rangeEndDate) {
-                                            timeOptions = timeOptions + TimeOption(
-                                                date = currentDate,
-                                                startTime = rangeStartTime,
-                                                endTime = rangeEndTime
-                                            )
-                                            currentDate = currentDate.plus(1, DateTimeUnit.DAY)
-                                        }
-
-                                        timeOptions = timeOptions.sortedWith(compareBy({ it.date }, { it.startTime }))
-                                        errorMessage = null
-                                    },
+                                    onClick = model::addRangeOptions,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Icon(Icons.Default.Add, null)
@@ -674,7 +547,7 @@ private fun CreationForm(
                             if (timeOptions.size > 1) {
                                 IconButton(
                                     onClick = {
-                                        timeOptions = timeOptions.filterIndexed { i, _ -> i != index }
+                                        model.removeOption(index)
                                     }
                                 ) {
                                     Icon(Icons.Default.Delete, "Delete")
@@ -701,7 +574,7 @@ private fun CreationForm(
                             )
                         }
 
-                        if (!isAllDay) {
+                        if (!draft.isAllDay) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -746,18 +619,7 @@ private fun CreationForm(
 
             item {
                 Button(
-                    onClick = {
-                        val lastOption = timeOptions.lastOrNull()
-                        val newDate = lastOption?.date?.plus(1, DateTimeUnit.DAY)
-                            ?: currentSystemTime.toLocalDateTime(TimeZone.currentSystemDefault()).date
-                        val newStartTime = lastOption?.startTime ?: LocalTime(9, 0)
-                        val newEndTime = lastOption?.endTime ?: LocalTime(10, 0)
-                        timeOptions = timeOptions + TimeOption(
-                            date = newDate,
-                            startTime = newStartTime,
-                            endTime = newEndTime
-                        )
-                    },
+                    onClick = model::addOption,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Add, null)
@@ -767,7 +629,7 @@ private fun CreationForm(
             }
 
             // Error Section
-            errorMessage?.let { error ->
+            model.errorMessage?.let { error ->
                 item {
                     Card(
                         colors = CardDefaults.cardColors(
@@ -785,7 +647,7 @@ private fun CreationForm(
 
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = useEventPass, onCheckedChange = { useEventPass = it }, enabled = !isLoading)
+                    Checkbox(checked = draft.useEventPass, onCheckedChange = { value -> model.edit { it.copy(useEventPass = value) } }, enabled = !isLoading)
                     Text("Use an event pass for this poll")
                 }
                 Text("Uses your oldest eligible pass for a premium poll and keeps your free slot. An active subscription takes priority and keeps your pass.",
@@ -800,7 +662,7 @@ private fun CreationForm(
                         submitCreation()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = title.isNotBlank() && !isLoading
+                    enabled = draft.title.isNotBlank() && !isLoading
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(

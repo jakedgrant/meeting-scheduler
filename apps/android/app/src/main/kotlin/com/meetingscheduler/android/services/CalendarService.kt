@@ -60,10 +60,10 @@ class CalendarService(
     private val writeDevicePreference: (suspend (String, Boolean) -> Unit)? = null,
     private val readPermission: (() -> Boolean)? = null,
     private val readDeviceConflicts: (suspend (List<PollTimeOption>, String) -> Set<String>)? = null,
-) {
+) : PollDetailCalendar {
     private val json = Json { ignoreUnknownKeys = true }
     private var connectionGeneration = 0
-    var calendarError by mutableStateOf<String?>(null)
+    override var calendarError by mutableStateOf<String?>(null)
         private set
     var googleCalendarAccountEmail by mutableStateOf<String?>(null)
         private set
@@ -175,7 +175,7 @@ class CalendarService(
         return response.bodyAsText()
     }
 
-    suspend fun refreshGoogleCalendarConnection() {
+    override suspend fun refreshGoogleCalendarConnection() {
         if (googleCalendarLoading) return
         val userId = authService.currentUser?.id ?: run { resetGoogleCalendarState(); return }
         val session = authService.identityGeneration
@@ -246,7 +246,7 @@ class CalendarService(
      * Google uses one bounded backend call; no provider tokens reach Android. A source that
      * cannot be checked leaves its options unchecked rather than conflict-free.
      */
-    suspend fun checkPollConflicts(options: List<PollTimeOption>, pollTimeZone: String): CalendarCheck {
+    override suspend fun checkPollConflicts(options: List<PollTimeOption>, pollTimeZone: String): CalendarCheck {
         if (options.isEmpty()) return CalendarCheck.NONE
         val owner = captureOwner() ?: return CalendarCheck.NONE
         val sources = mutableListOf<Pair<CalendarSource, Set<String>?>>()

@@ -64,7 +64,6 @@ fun PollNavHost(
             val pollId = backStackEntry.arguments?.getString("pollId") ?: return@composable
             PollDetailView(
                 pollId = pollId,
-                authService = authService,
                 pollService = pollService,
                 calendarService = calendarService,
                 onNavigateToResponses = { timeOptionId ->
