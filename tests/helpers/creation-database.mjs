@@ -1,3 +1,6 @@
+// scripts/generate-database-types.mjs also uses this bootstrap, and decides
+// which functions the web may call from the grants below. Keep the roles and
+// default privileges matching hosted Supabase.
 import { readdir, readFile } from 'node:fs/promises';
 export async function bootstrapCreationDatabase(db, beforeMigration = async () => {}) {
   await db.exec(`

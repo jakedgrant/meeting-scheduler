@@ -1,8 +1,9 @@
 import { get, writable } from 'svelte/store'
 import type { Poll, PollTimeOption } from './supabase'
+import type { CreationEntitlement } from './entitlements'
 import { allDayInterval, currentZone, DateTimeError, deadlineFor, isCalendarDate, timedInterval } from './date-time'
 
-export interface CreationPayload {
+export type CreationPayload = {
 	title: string
 	description: string | null
 	location: string | null
@@ -16,7 +17,7 @@ export interface CreationResult {
 	poll: Poll
 	time_options: PollTimeOption[]
 	redeemed_pass_id: string | null
-	entitlement: 'free' | 'pro_access' | 'team_access' | 'event_pass'
+	entitlement: CreationEntitlement
 	replayed: boolean
 }
 

@@ -1,5 +1,6 @@
 import { Purchases, type CustomerInfo, type Package } from '@revenuecat/purchases-js'
 import { browser } from '$app/environment'
+import { PRO_ENTITLEMENT, TEAM_ENTITLEMENT, type PaidEntitlement } from './entitlements'
 
 const revenueCatWebKey = import.meta.env.VITE_REVENUECAT_WEB_KEY
 
@@ -76,10 +77,10 @@ export async function purchasePackage(pkg: Package): Promise<CustomerInfo | null
   if (!browser || !revenueCatWebKey) return null
   return identity.run(async client => (await client.purchase({ rcPackage: pkg })).customerInfo, null)
 }
-export function hasEntitlement(customerInfo: CustomerInfo | null, entitlementId: string): boolean {
+export function hasEntitlement(customerInfo: CustomerInfo | null, entitlementId: PaidEntitlement): boolean {
   return !!customerInfo && entitlementId in customerInfo.entitlements.active
 }
 export function hasProAccess(customerInfo: CustomerInfo | null): boolean {
-  return hasEntitlement(customerInfo, 'pro_access') || hasEntitlement(customerInfo, 'team_access')
+  return hasEntitlement(customerInfo, PRO_ENTITLEMENT) || hasEntitlement(customerInfo, TEAM_ENTITLEMENT)
 }
-export function hasTeamAccess(customerInfo: CustomerInfo | null): boolean { return hasEntitlement(customerInfo, 'team_access') }
+export function hasTeamAccess(customerInfo: CustomerInfo | null): boolean { return hasEntitlement(customerInfo, TEAM_ENTITLEMENT) }
