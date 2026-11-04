@@ -2,6 +2,24 @@
 
 Updated November 4, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F23 Android clock, iOS creation entitlement and READMEs, November 4
+
+Branch `claude/next-remedy-tranche-6` started from fetched main `e7fe756`, which contains merged #85. It takes the items the section below left open, an injected clock for Android's deadline banner and the root and Android README architecture sections, and the move it suggested of the creation-draft store into `AppContainer`. It also takes the iOS risk the #83 section recorded: decoding the creation result's entitlement into an enum.
+
+`AppContainer` now has the one `Clock` the two screen models read, and builds a `PollScreenEnvironment` that holds it and a factory that builds each account's `SharedPreferencesCreationStore`, with the same `poll_creation_v1` file and keys. `MainActivity` passes it through `ContentView`, `MainTabView` and `PollNavHost`. `CreatePollView` no longer opens the preferences itself. `PollDetailModel` takes the clock as a required argument and reports `deadlineStatus(closesAt)`, which the deadline banner now reads instead of `System.currentTimeMillis()`. `PollCreationModel` takes the clock in place of its `today` lambda, so turning on the deadline, adding an option and the due-date picker use `model.today()`. A new draft starts from `CreationFormDraft.starting(today)` instead of defaults that read the wall clock. Those defaults stay, so a stored draft that lacks a date still decodes as before.
+
+One Android behavior changed: the deadline instant itself now shows as past due, as on iOS and in the database, which refuses saves from that instant. Before, Android showed it as closing soon.
+
+iOS `PollCreationResult.entitlement` is now a `String`, as on the web and Android, so a tier this build doesn't list no longer fails a creation the server committed. Nothing read the field as an enum, and the JSON is unchanged.
+
+The root README no longer says the clients are built with Skip. It now describes the backend-owned rules, the shared fixtures, generated web types, each client's composition root and the screen models, adds the Team participant limit and event passes, and describes the webhook and billing worker as `docs/billing-webhooks.md` does. The Android README's architecture section describes `AppContainer`, the screen models and `PollScreenEnvironment`. Its next steps drop the finished views, navigation, calendar checking and unit tests, and replace "Add integration tests" with running the instrumented tests on a device in CI.
+
+Tests: `PollDetailModelTest` has a deadline boundary test, and `PollCreationModelTest` checks that a new draft starts on today in the device zone with a clock already on the next day in UTC; both classes now pass fixed clocks. `PollCreationTransportTests` decodes a creation result with an unlisted tier and checks that the poll is recorded once. In scratch copies, taking today in UTC, starting a new draft from the wall-clock defaults, reading the system clock for the deadline and changing the deadline boundary each made a test fail.
+
+Local results: the iOS package suite ran on an iPhone 17 simulator with Xcode 27.1: 180 tests, 179 passed. `PollReadTransportTests.testAccountSwitchBetweenPagesStopsFurtherReadsAndCacheWrites` timed out waiting for its first page request during the full run and passed twice on its own; this change doesn't touch it. The doc comment on `entitlement` was reworded after that run. No JDK that Gradle 8.11 supports and no Android SDK is installed, so the Android build and JVM suite didn't run locally and the views weren't compiled. The two Android models, the domain models they use and their 26 tests compiled and passed with the cached Kotlin 2.2.20 compiler against kotlinx-datetime 0.7.1, with `kotlinx.datetime.Clock` replaced by `kotlin.time.Clock` in the scratch copies because 0.7 removed it; the app uses kotlinx-datetime 0.5.0. Android CI on the PR is the first full build. The apps weren't launched.
+
+With this, the F23 items the review names are done on all three clients, except that Android's auth services still read the system clock instead of the injected one.
+
 ## F23 Android screen models, November 4
 
 Branch `claude/next-remedy-tranche-5` started from fetched main `98af520`, which contains merged #84. It takes the last item the section below left open: the save and calendar workflows in Android's `PollDetailView` and `CreatePollView`.
