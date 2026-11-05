@@ -190,7 +190,7 @@ class AuthSdkTransportTest {
         return AuthService(scope, null, object : AuthGateway by gateway {
             override suspend fun loadProfile(userId: String, credential: String) = Profile(userId, "$userId@example.test",
                 createdAt = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z"), updatedAt = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z"))
-        })
+        }, kotlin.time.Clock.System)
     }
 
     @Test(timeout = 15000) fun originatingUriMustMatchLatestIntentBeforeRealSdkTransportAcrossAccountBoundaries() = runBlocking {
@@ -432,7 +432,7 @@ class AuthSdkTransportTest {
             override suspend fun importSession(session: UserSession, isCurrent: () -> Boolean) {}
         }
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val auth = AuthService(scope, null, gateway)
+        val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         events.emit(SessionStatus.Authenticated(session("A")))
         val calendar = CalendarService(null, auth, scope, supabase = client)
         client.auth.importSession(session("B"), autoRefresh = false)

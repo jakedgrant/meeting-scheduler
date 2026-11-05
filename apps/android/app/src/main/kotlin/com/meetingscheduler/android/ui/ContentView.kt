@@ -18,7 +18,8 @@ fun ContentView(
     authService: AuthService,
     pollService: PollService,
     calendarService: CalendarService,
-    purchaseService: PurchaseService?
+    purchaseService: PurchaseService?,
+    screens: PollScreenEnvironment,
 ) {
     when {
         authService.isLoading -> LoadingView()
@@ -27,7 +28,8 @@ fun ContentView(
                 authService = authService,
                 pollService = pollService,
                 calendarService = calendarService,
-                purchaseService = purchaseService
+                purchaseService = purchaseService,
+                screens = screens,
             )
         }
         else -> AuthView(authService)

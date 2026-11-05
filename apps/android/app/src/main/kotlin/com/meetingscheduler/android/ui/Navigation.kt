@@ -31,7 +31,8 @@ fun PollNavHost(
     authService: AuthService,
     pollService: PollService,
     calendarService: CalendarService,
-    purchaseService: PurchaseService?
+    purchaseService: PurchaseService?,
+    screens: PollScreenEnvironment,
 ) {
     NavHost(navController = navController, startDestination = Screen.PollList.route) {
         composable(Screen.PollList.route) {
@@ -53,6 +54,7 @@ fun PollNavHost(
         composable(Screen.CreatePoll.route) {
             CreatePollView(
                 pollService = pollService,
+                screens = screens,
                 onDismiss = { navController.popBackStack() }
             )
         }
@@ -66,6 +68,7 @@ fun PollNavHost(
                 pollId = pollId,
                 pollService = pollService,
                 calendarService = calendarService,
+                clock = screens.clock,
                 onNavigateToResponses = { timeOptionId ->
                     navController.navigate(Screen.TimeOptionResponses.createRoute(pollId, timeOptionId))
                 },

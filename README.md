@@ -5,8 +5,10 @@ A multiplatform meeting scheduling service (similar to Doodle/When2meet) that al
 ## Platforms
 
 - **Web**: SvelteKit with TypeScript
-- **iOS**: Swift with SwiftUI (via Skip.tools)
-- **Android**: Kotlin (transpiled from Swift via Skip.tools)
+- **iOS**: Swift and SwiftUI, as a Swift package with an Xcode app wrapper
+- **Android**: Kotlin and Jetpack Compose
+
+The three clients are written separately and share no code. They share contracts instead.
 
 ## Architecture
 
@@ -14,6 +16,22 @@ A multiplatform meeting scheduling service (similar to Doodle/When2meet) that al
 
 - **Supabase**: Auth, PostgreSQL database, Edge Functions, Realtime
 - **RevenueCat**: Billing for iOS, Android, and Web (via Stripe)
+
+The database owns the product rules. Poll creation, joining, availability saves and finalization are SQL functions that check the caller, the poll's state and, where one applies, the plan limit, so a client can't grant itself more than its plan allows. The clients use the plan limits only to describe plans.
+
+What the clients share:
+
+- `packages/shared-config/entitlements.json` lists each tier's limits. The database tests check the creation command against it, the web reads its limits from it, and the iOS and Android tests check their copies against it.
+- `packages/shared-config/date-time-fixtures.json` holds the date and time cases the database and each client's tests check; see [the date/time contract](docs/date-time-contract.md).
+- `npm run generate:database-types` at the repository root generates `apps/web/src/lib/database.types.ts` from the migrations. The web checks each `json` function result in `rpc-results.ts` before using it.
+
+Each client builds its services in one place and passes them to its screens:
+
+- **iOS**: `AppServices` builds the Supabase transport, one SwiftData persistence provider, the clock and the auth, poll, calendar and purchase services.
+- **Android**: `AppContainer` builds the Supabase client, the services, the clock and the factory for each account's creation-draft store once per process.
+- **Web**: `apps/web/src/lib/supabase.ts` builds the one client; the stores in `apps/web/src/lib/stores` hold session-scoped state.
+
+The poll detail and creation screens keep their workflows in models (`PollDetailModel` and `PollCreationModel` on iOS and Android, the stores and editors on the web), so tests run them with fakes. [The architecture review](docs/architecture-review-2026-10-21.md) and [its progress notes](docs/architecture-remediation-progress.md) record how this came about.
 
 ## Project Structure
 
@@ -79,16 +97,19 @@ meeting-scheduler/
 |------|---------|--------|----------|
 | Free | $0 | $0 | 1 active poll, 10 participants/poll |
 | Pro | $4.99 | $49.99 | Unlimited polls, calendar sync, 50 participants |
-| Team | $9.99 | $99.99 | Everything + team workspace, analytics |
+| Team | $9.99 | $99.99 | Everything + team workspace, analytics, 100 participants |
+| Event pass | — | — | One-time purchase for free accounts: one poll with 50 participants, outside the free poll limit |
 
 ## RevenueCat Integration
 
-Subscription events are processed via the `/functions/revenuecat-webhook` Edge Function, which syncs subscription status to the `subscriptions` table in Supabase.
+The `revenuecat-webhook` Edge Function verifies and queues each RevenueCat event. The scheduled `billing-worker` reads the customer's current purchases from RevenueCat and updates the `subscriptions` table and event passes in one transaction. See [billing webhooks](docs/billing-webhooks.md).
 
 ### Entitlements
 
 - `pro_access`: Pro tier features
 - `team_access`: Team tier features (includes Pro)
+
+Event passes are one-time products, not entitlements. The billing worker records each pass bought under a product ID in `REVENUECAT_EVENT_PASS_PRODUCT_IDS` as a row in `public.event_passes` (see [billing webhooks](docs/billing-webhooks.md)). An account without a subscription can spend one pass when it creates a poll. That poll gets Pro's participant limit and doesn't count toward the free account's active poll.
 
 ## Development
 

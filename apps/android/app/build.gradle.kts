@@ -211,7 +211,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
 
     // Kotlinx DateTime
-    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.5.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.7.1")
 
     // RevenueCat
     implementation("com.revenuecat.purchases:purchases:9.1.0")

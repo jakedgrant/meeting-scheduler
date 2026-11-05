@@ -4,12 +4,10 @@ This is the Android port of the Meeting Scheduler iOS app, translated from Swift
 
 ## Architecture
 
-The app follows the same architecture as the iOS version:
-
-- **Screen state**: Composables call services directly; moving screen state into ViewModels is a planned follow-up (see docs/android-lifetimes.md)
+- **Composition root**: `AppContainer`, created by `MeetingSchedulerApplication`, builds the Supabase client, the auth, poll, calendar and purchase services, the clock that auth and the screen models read, and the factory for each account's creation-draft store once per process. Services that need a context or a long-lived scope get the Application context or the application coroutine scope, never an Activity (see docs/android-lifetimes.md). `MainActivity` passes them down to the screens.
+- **Screen models**: `PollDetailModel` and `PollCreationModel` in `ui` hold the detail and creation workflows. They reach the services through the interfaces in `services/PollScreenDependencies.kt` and take the clock (and, for creation, the draft store) as constructor arguments, so their unit tests pass fakes. The screens get those values from `PollScreenEnvironment`. Each screen builds a new model when the signed-in account or its session changes. The other screens still call the services directly.
 - **Jetpack Compose**: Modern declarative UI framework (equivalent to SwiftUI)
 - **Kotlin Coroutines**: Asynchronous programming (equivalent to Swift async/await)
-- **Services**: One instance per process for auth, polls, calendar, and purchases, created by `AppContainer` in `MeetingSchedulerApplication` with the Application context and an application coroutine scope (see docs/android-lifetimes.md)
 
 ## Project Structure
 
@@ -29,6 +27,7 @@ app/src/main/
 │   ├── services/                      # Business logic services
 │   │   ├── AuthService.kt             # Authentication
 │   │   ├── PollService.kt             # Poll operations
+│   │   ├── PollScreenDependencies.kt  # What the screen models need from the services
 │   │   ├── CalendarService.kt         # Calendar integration
 │   │   └── PurchaseService.kt         # RevenueCat billing
 │   │
@@ -37,6 +36,9 @@ app/src/main/
 │       ├── MainTabView.kt             # Tab navigation
 │       ├── AuthView.kt                # Authentication screen
 │       ├── PollListView.kt            # Polls listing
+│       ├── PollDetailView.kt          # Poll detail, with PollDetailModel.kt
+│       ├── CreatePollView.kt          # Poll creation, with PollCreationModel.kt
+│       ├── PollScreenEnvironment.kt   # Clock and draft store from AppContainer
 │       ├── SettingsView.kt            # Settings & profile
 │       └── theme/                     # Material Design theme
 │
@@ -164,14 +166,10 @@ const val REVENUE_CAT_API_KEY = "your-api-key"
 
 ## Next Steps
 
-1. Implement remaining views (CreatePollView, PollDetailView, etc.)
-2. Add navigation between screens
-3. Implement full calendar conflict checking
-4. Add unit tests
-5. Add integration tests
-6. Optimize performance
-7. Add analytics
-8. Submit to Google Play Store
+1. Run the instrumented tests on a device in CI
+2. Optimize performance
+3. Add analytics
+4. Submit to Google Play Store
 
 ## License
 

@@ -30,6 +30,7 @@ import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
+import kotlin.time.Clock
 import java.util.*
 
 // Extension function to convert kotlinx.datetime.Instant to java.time.Instant
@@ -43,11 +44,12 @@ fun PollDetailView(
     pollId: String,
     pollService: PollService,
     calendarService: CalendarService,
+    clock: Clock,
     onNavigateToResponses: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
     val accountKey = pollService.creationAccountKey
-    val opened = remember(pollId, accountKey) { runCatching { PollDetailModel(pollId, pollService, calendarService) } }
+    val opened = remember(pollId, accountKey) { runCatching { PollDetailModel(pollId, pollService, calendarService, clock) } }
     val model = opened.getOrElse {
         Column(Modifier.padding(24.dp)) {
             Text("Your saved response retry could not be read. Check your saved responses before editing.")
@@ -178,9 +180,9 @@ fun PollDetailView(
                                     }
                                 }
                                 poll?.closesAt?.let { closesAt ->
-                                    val currentTime = Instant.fromEpochMilliseconds(System.currentTimeMillis())
-                                    val isPastDue = closesAt < currentTime
-                                    val isClosingSoon = !isPastDue && (closesAt.toEpochMilliseconds() - currentTime.toEpochMilliseconds()) < 24 * 60 * 60 * 1000
+                                    val deadline = model.deadlineStatus(closesAt)
+                                    val isPastDue = deadline == DeadlineStatus.PAST_DUE
+                                    val isClosingSoon = deadline == DeadlineStatus.CLOSING_SOON
 
                                     val dateFormatter = SimpleDateFormat("MMM dd, yyyy", Locale.getDefault())
                                     val formattedDate = dateFormatter.format(Date(closesAt.toEpochMilliseconds()))

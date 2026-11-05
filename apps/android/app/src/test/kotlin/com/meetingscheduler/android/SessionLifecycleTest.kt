@@ -58,7 +58,7 @@ class SessionLifecycleTest {
                 override suspend fun login(userId: String) { calls += userId; if (userId == "A") billingGate.await() }
                 override suspend fun logout() { calls += null }
             }
-            val auth = AuthService(scope, billing, gateway)
+            val auth = AuthService(scope, billing, gateway, kotlin.time.Clock.System)
             gateway.user("A")
             gateway.user("B")
             assertEquals("B", auth.currentUser!!.id)
@@ -75,9 +75,21 @@ class SessionLifecycleTest {
         }
     }
 
+    @Test(timeout = 15000) fun theInjectedClockDecidesWhetherASessionHasExpired() = runBlocking {
+        // The SDK dates a decoded session from the system clock: this one expires in an hour.
+        for ((ahead, accepted) in listOf(kotlin.time.Duration.ZERO to true, kotlin.time.Duration.parse("2h") to false)) {
+            val scope = createApplicationScope(Dispatchers.Unconfined)
+            val now = kotlin.time.Clock.System.now() + ahead
+            val gateway = Gateway(); val auth = AuthService(scope, null, gateway, object : kotlin.time.Clock { override fun now() = now })
+            gateway.user("A")
+            assertEquals("$ahead", if (accepted) "A" else null, auth.currentUser?.id)
+            scope.cancel()
+        }
+    }
+
     @Test(timeout = 15000) fun logoutReturningAHasANewGenerationAndDisposalStopsObservation() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         var resets = 0; val remove = auth.onBoundary { resets++ }
         gateway.user("A"); val original = auth.identityGeneration
         gateway.user(null); assertNull(auth.profile)
@@ -90,7 +102,7 @@ class SessionLifecycleTest {
 
     @Test(timeout = 15000) fun expiredRestorationAndOfflineExpiryCannotClearNewAccount() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         gateway.status.emit(SessionStatus.RefreshFailure(io.github.jan.supabase.auth.status.RefreshFailureCause.NetworkError(IllegalStateException("offline expired restoration"))))
         assertFalse(auth.isLoading); assertFalse(auth.isAuthenticated)
         gateway.status.emit(SessionStatus.Authenticated(session("A", -1)))
@@ -110,7 +122,7 @@ class SessionLifecycleTest {
     @Test(timeout = 15000) fun delayedNativeGoogleDoesNotInstallInReplacementAccount() = runBlocking {
         for (fails in listOf(false, true)) {
             val scope = createApplicationScope(Dispatchers.Unconfined)
-            val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+            val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             val ready = CompletableDeferred<Unit>()
             gateway.native = { ready.await(); if (fails) error("old native failure"); session("A") }
             val old = async { runCatching { auth.signInWithGoogle("id-token", "nonce") } }
@@ -138,7 +150,7 @@ class SessionLifecycleTest {
     @Test(timeout = 15000) fun calendarLateSuccessFailureAndOldCleanupAreSessionFenced() = runBlocking {
         for (fails in listOf(false, true)) {
             val scope = createApplicationScope(Dispatchers.Unconfined)
-            val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+            val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             val old = CompletableDeferred<Unit>(); var calls = 0
             val calendar = CalendarService(null, auth, scope, unusedSupabaseClient(), connectionTransport = { _, _ ->
                 val call = ++calls
@@ -167,7 +179,7 @@ class SessionLifecycleTest {
             override suspend fun restore(): CustomerInfo = error("unused")
         }
         val purchases = PurchaseService(null, scope, provider)
-        val gateway = Gateway(); val auth = AuthService(scope, purchases, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, purchases, gateway, kotlin.time.Clock.System)
         gateway.user("A"); assertTrue(purchases.hasProAccess); assertFalse(purchases.hasTeamAccess)
         gateway.user(null); assertFalse(purchases.hasProAccess); gateway.user("B")
         assertEquals("B", auth.currentUser!!.id)
@@ -249,7 +261,7 @@ class SessionLifecycleTest {
                 if (oldA) withContext(NonCancellable) { gate.await(); if (fails) error("previous A failed") }
                 profile(id).copy(displayName = if (oldA) "Old A profile" else "Current $id profile")
             }
-            val auth = AuthService(scope, null, gateway)
+            val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             gateway.user("A"); gateway.user(null); gateway.user("A")
             assertEquals("Current A profile", auth.profile!!.displayName)
             gate.complete(Unit)
@@ -261,7 +273,7 @@ class SessionLifecycleTest {
     @Test(timeout = 15000) fun oldDevicePreferenceReadsCannotEnableANewAccountsCalendarOrOverwriteItsError() = runBlocking {
         for (fails in listOf(false, true)) {
             val scope = createApplicationScope(Dispatchers.Unconfined)
-            val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+            val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             val old = CompletableDeferred<Unit>()
             val calendar = CalendarService(null, auth, scope, unusedSupabaseClient(),
                 connectionTransport = { _, _ -> """{"connected":false,"accountEmail":null,"requiresReconnect":false,"revocationPending":false}""" },
@@ -280,7 +292,7 @@ class SessionLifecycleTest {
 
     @Test(timeout = 15000) fun newerBrowserAttemptPreventsOldNativeGoogleFromInstallingInSameSignedOutSession() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         gateway.user(null)
         val reply = CompletableDeferred<Unit>()
         gateway.native = { reply.await(); session("A") }
@@ -292,7 +304,7 @@ class SessionLifecycleTest {
 
     @Test(timeout = 15000) fun oldBrowserFailureCannotDeleteANewerOtpAttempt() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         gateway.user(null)
         val reply = CompletableDeferred<Unit>()
         gateway.browser = { reply.await(); error("browser cancelled") }
@@ -309,7 +321,7 @@ class SessionLifecycleTest {
             val ready = CompletableDeferred<Unit>(); gateway.initialize = { ready.await() }
             var browser = 0; var magic = 0
             gateway.browser = { browser++ }; gateway.magic = { magic++ }
-            val auth = AuthService(scope, null, gateway)
+            val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             val old = async { runCatching { auth.signInWithMagicLink("old@example.test") } }; yield()
             val current = async { runCatching { auth.signInWithGoogleBrowser() } }; yield()
             gateway.user(restored); ready.complete(Unit)
@@ -323,7 +335,7 @@ class SessionLifecycleTest {
 
     @Test(timeout = 15000) fun credentialManagerAttemptIsSupersededBeforeNativeSdkCallAndSignoutCancelsPendingLink() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         gateway.user(null); var nativeCalls = 0
         gateway.native = { nativeCalls++; session("A") }
         val credentialManagerAttempt = auth.beginNativeSignIn()
@@ -337,7 +349,7 @@ class SessionLifecycleTest {
 
     @Test(timeout = 15000) fun creationRetryReturnsOriginalPollAfterAccountChangesWithoutAnotherPass() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val gateway = Gateway(); val auth = AuthService(scope, null, gateway)
+        val gateway = Gateway(); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
         val disk = mutableMapOf<String, PollCreationRequest?>()
         val stamp = kotlinx.datetime.Instant.parse("2026-10-23T00:00:00Z")
         val payload = PollCreationPayload("A draft", timezone = "UTC", useEventPass = true,
