@@ -3,6 +3,7 @@
     "generate:database-types": "node scripts/generate-database-types.mjs",
     "check:database-types": "node scripts/generate-database-types.mjs --check",
     "test:database": "node scripts/test-database.mjs",
+    "test:web": "node scripts/test-web.mjs",
     "test:rpc:db": "node --test tests/rpc-authorization.test.mjs",
     "test:participants:db": "node --test tests/participant-access.test.mjs",
     "test:membership:db": "node --test tests/membership-integrity.test.mjs",

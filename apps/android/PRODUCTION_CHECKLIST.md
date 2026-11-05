@@ -528,12 +528,12 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
 **iOS Equivalent:** XCTest
 
 **Create Unit Tests:**
-- [ ] Create test file: `app/src/test/kotlin/com/meetingscheduler/android/ExampleUnitTest.kt`
+- [x] Unit tests live in `app/src/test/kotlin/com/meetingscheduler/android/`
 - [ ] Test service logic (AuthService, PollService, etc.)
 - [ ] Run tests: `./gradlew test`
 
 **Create UI Tests:**
-- [ ] Create test file: `app/src/androidTest/kotlin/com/meetingscheduler/android/ExampleInstrumentedTest.kt`
+- [x] Instrumented tests live in `app/src/androidTest/kotlin/com/meetingscheduler/android/`
 - [ ] Use Espresso for UI testing
 - [ ] Run tests: `./gradlew connectedAndroidTest`
 

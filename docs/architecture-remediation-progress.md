@@ -2,6 +2,22 @@
 
 Updated November 4, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F24 release checks, November 4
+
+Branch `claude/next-remedy-tranche-7` started from fetched main `6b31902`, which contains merged #86. With F23 done, it takes F24, the last finding still marked partial with code work. Most of F24's gates already existed: the web, database, billing, calendar, Android and iOS package workflows run on pull requests from clean checkouts with locked dependencies. This tranche removes the tests that asserted nothing, closes a gap that let a web suite go unrun, and lists the checks the owner can make required in the new [release checks](release-checks.md) page.
+
+The iOS wrapper's `MeetingSchedulerTests` and `MeetingSchedulerUITests` targets held only Xcode templates, so they're gone from the project and scheme. The new package suite `AppWrapperConfigurationTests` reads the wrapper's `Info.plist` and entitlements and checks the three things the package depends on: the URL scheme that auth callbacks use, the calendar usage description, and Sign in with Apple. Its calendar test caught the defect the F23 November 3 section left open: `CalendarService` asks for full access with `requestFullAccessToEvents()`, but the plist had only `NSCalendarsUsageDescription`, which iOS 17 and later don't read for that request. The key is now `NSCalendarsFullAccessUsageDescription`, with the same text. The deployment target is iOS 26, so nothing reads the old key.
+
+Android's `ExampleUnitTest.kt` and `ExampleInstrumentedTest.kt` held an arithmetic check, empty test bodies and a package-name check that would fail on the `.debug` application ID. Both are deleted. `COMPLETED_SETUP.md` and `PRODUCTION_CHECKLIST.md` now point at the real tests.
+
+The web workflow listed its seven test files by name, so a new web suite would never have run. `npm run test:web` now runs every `tests/web-*.test.mjs` file, as `npm run test:database` already did for the database suites; both use `scripts/node-test-suites.mjs`. The web suites now run one file at a time, as the database suites do.
+
+Tests: in a scratch edit, putting back `NSCalendarsUsageDescription` made "Describes full calendar access" fail.
+
+Local results: the iOS package suite on an iPhone 17 simulator with Xcode 27.1: **180 tests**, all passed, including the 3 new ones. The wrapper built for the iOS simulator with `CODE_SIGNING_ALLOWED=NO`, and neither build changed a tracked file. `npm run test:web`: **175 tests** passed, the same count as the old list. `npm run test:database`: **169 tests** passed. No JDK that Gradle supports is installed, so the Android build didn't run locally; the change there only deletes two test files nothing references. The app wasn't launched.
+
+Still open in F24: the owner has to configure the required checks; the Android and iOS jobs can't be required while their workflows filter on paths; the instrumented tests are compiled but not run; no app launch or UI test runs; and no advisory scan runs. [Release checks](release-checks.md) records each.
+
 ## F23 Android clock, iOS creation entitlement and READMEs, November 4
 
 Branch `claude/next-remedy-tranche-6` started from fetched main `e7fe756`, which contains merged #85. It takes the items the section below left open, an injected clock for Android's deadline banner and the root and Android README architecture sections, and the move it suggested of the creation-draft store into `AppContainer`. It also takes the iOS risk the #83 section recorded: decoding the creation result's entitlement into an enum.
