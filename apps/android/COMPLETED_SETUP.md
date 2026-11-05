@@ -124,23 +124,7 @@ Used in: PollListView, SettingsView
 
 ### Testing Framework
 
-#### ✅ Unit Test Template
-**Location:** `app/src/test/.../ExampleUnitTest.kt`
-
-**Includes:**
-- Basic test example
-- Model test structure
-- Service test structure
-- TODO comments for guidance
-
-#### ✅ Instrumented Test Template
-**Location:** `app/src/androidTest/.../ExampleInstrumentedTest.kt`
-
-**Includes:**
-- Compose UI test examples
-- Navigation test examples
-- Test rule setup
-- TODO comments for guidance
+The template unit and instrumented test files were removed on November 4, 2026 because they asserted nothing. The JVM tests in `app/src/test/kotlin/com/meetingscheduler/android/` cover the auth callbacks, session lifecycle, screen models, reads, creation, saves and dates, and `SessionActivityTest` in `app/src/androidTest/` covers Activity routing. CI runs the JVM tests and compiles the instrumented ones; see [release checks](../../docs/release-checks.md).
 
 ### Security & Best Practices
 

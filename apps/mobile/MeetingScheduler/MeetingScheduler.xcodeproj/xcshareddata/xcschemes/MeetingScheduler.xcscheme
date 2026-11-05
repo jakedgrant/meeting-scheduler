@@ -30,28 +30,6 @@
       shouldUseLaunchSchemeArgsEnv = "YES"
       shouldAutocreateTestPlan = "YES">
       <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "2331F3B82F05C7C900916532"
-               BuildableName = "MeetingSchedulerTests.xctest"
-               BlueprintName = "MeetingSchedulerTests"
-               ReferencedContainer = "container:MeetingScheduler.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "2331F3C22F05C7C900916532"
-               BuildableName = "MeetingSchedulerUITests.xctest"
-               BlueprintName = "MeetingSchedulerUITests"
-               ReferencedContainer = "container:MeetingScheduler.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

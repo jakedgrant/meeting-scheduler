@@ -18,9 +18,7 @@ apps/mobile/
     │   ├── project.xcworkspace/contents.xcworkspacedata
     │   ├── project.xcworkspace/xcshareddata/swiftpm/Package.resolved
     │   └── xcshareddata/xcschemes/MeetingScheduler.xcscheme
-    ├── MeetingScheduler/    # @main entry point, Info.plist, entitlements, assets, app icon
-    ├── MeetingSchedulerTests/
-    └── MeetingSchedulerUITests/
+    └── MeetingScheduler/    # @main entry point, Info.plist, entitlements, assets, app icon
 ```
 
 The wrapper is thin. `MeetingSchedulerApp.swift` imports the `MeetingSchedulerApp` and `Shared` products from the package at `apps/mobile`. The project references the package with an `XCLocalSwiftPackageReference` whose `relativePath` is `../../mobile`, resolved from the `.xcodeproj`'s parent directory (`apps/mobile/MeetingScheduler`), so it points at `apps/mobile`. The project's targets use file-system-synchronized groups, so new files dropped into `MeetingScheduler/` join the app target without editing `project.pbxproj`.
@@ -79,9 +77,6 @@ xcodebuild \
   -onlyUsePackageVersionsFromResolvedFile \
   CODE_SIGNING_ALLOWED=NO build
 
-# Compiles the unit and UI test bundles without running them
-xcodebuild … same flags … build-for-testing
-
 # Release configuration for a device, unsigned
 xcodebuild … -configuration Release -destination 'generic/platform=iOS' \
   -derivedDataPath "$D/DerivedData-release" … CODE_SIGNING_ALLOWED=NO build
@@ -97,10 +92,10 @@ Toolchain: Xcode 27.1 (27A9269), Apple Swift 6.4, macOS 27. The disposable clone
 | Debug `build-for-testing`, same destination | `** TEST BUILD SUCCEEDED **` |
 | Release `build`, `generic/platform=iOS` | `** BUILD SUCCEEDED **` (56 s), with the same single AppIntents warning. |
 
-The test bundles were compiled but not run, because running them needs a simulator reservation. The UI test targets are still Xcode templates (see F24).
+The test bundles were compiled but not run, because running them needs a simulator reservation. On November 4, 2026, the wrapper's unit and UI test targets, which held only Xcode templates, were removed (F24). The package's `AppWrapperConfigurationTests` checks the wrapper's `Info.plist` and entitlements, and the package tests run in CI; see [release checks](release-checks.md).
 
 ## Follow-ups
 
-- **F24 CI:** add a macOS job that runs the Debug simulator build and `build-for-testing` above on pull requests that touch `apps/mobile/**`, using the same flags. Cache `SourcePackages` keyed on the project's `Package.resolved`. Running tests requires a simulator runtime on the runner. This change adds no CI job.
+- **F24 CI:** done. The iOS package regressions workflow runs the package tests on a new simulator and builds the wrapper with these flags; see [release checks](release-checks.md).
 - **Stale local copy:** after this change merges, the untracked wrapper directory in an existing checkout conflicts with the incoming tracked files. Move it aside before pulling (for example, `mv apps/mobile/MeetingScheduler ~/MeetingScheduler.local-backup`), pull, compare against the backup (`diff -r -x xcuserdata -x .DS_Store`), and then delete the backup. Per-user `xcuserdata` can be copied back if wanted, since it stays ignored.
 - Other changes inside `apps/mobile/MeetingScheduler` should wait for this change to merge (integration rule for F25).
