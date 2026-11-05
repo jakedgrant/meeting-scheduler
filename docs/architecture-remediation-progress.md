@@ -1,6 +1,6 @@
 # Architecture remediation progress
 
-Updated November 4, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
+Updated November 5, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
 ## F24 release checks, November 4
 
@@ -15,6 +15,8 @@ The web workflow listed its seven test files by name, so a new web suite would n
 Tests: in a scratch edit, putting back `NSCalendarsUsageDescription` made "Describes full calendar access" fail.
 
 Local results: the iOS package suite on an iPhone 17 simulator with Xcode 27.1: **180 tests**, all passed, including the 3 new ones. The wrapper built for the iOS simulator with `CODE_SIGNING_ALLOWED=NO`, and neither build changed a tracked file. `npm run test:web`: **175 tests** passed, the same count as the old list. `npm run test:database`: **169 tests** passed. No JDK that Gradle supports is installed, so the Android build didn't run locally; the change there only deletes two test files nothing references. The app wasn't launched.
+
+PR #87 merged as `a6c3776` with all ten checks passing, including Android and iOS.
 
 Still open in F24: the owner has to configure the required checks; the Android and iOS jobs can't be required while their workflows filter on paths; the instrumented tests are compiled but not run; no app launch or UI test runs; and no advisory scan runs. [Release checks](release-checks.md) records each.
 
@@ -318,8 +320,8 @@ Merging code does not change hosted state. The following are prelaunch checks or
 | F03 (merged) | Inventory any dashboard-created `poll_participants` policies, which the migration doesn't drop; extra permissive policies still combine with OR. Keep `private` and `poll_private` unexposed and check live grants, including custom roles (the identity trigger recognizes API callers by role name). Run the PostgREST and Realtime smoke checks. If a deployed development/beta environment contained real guest data, review its prior grants and exposure separately; no public exposure is asserted. Old `access_token` values become inert, so no rotation is needed | [Participant access](participant-access.md) |
 | F04 (merged) | Run the read-only duplicate inspection and keep its output. Apply F03 then F04 (each takes a brief table lock). Compare the `private.participant_merge_audit` counts with the inspection output and verify the unique index. Confirm the only live INSERT policies are F04's. Ship the command clients with the schema; retire redundant direct insert paths when their remaining development callers are removed | [Membership integrity](membership-integrity.md) |
 | F25 (merged) | The local wrapper transition was completed October 24 with a full backup and byte comparison before the main fast-forward. Preserve differing local files in any other checkout before pulling. The new iOS package CI verifies locked dependencies; wrapper/application CI remains separate F24 work. A cold runner needs github.com access for SwiftPM | [iOS checkout](ios-checkout.md) |
-| F17/F27 (PR pending) | Apply `20261102152851` before deploying the calendar functions. Set up the listed alerts and choose a log retention period. Measure check latency and quota use from the new log lines, and decide on caching from those results | [Integration diagnostics](integration-diagnostics.md#alerts-and-retention) |
-| F21 (open PR) | Apply `20261025021513` after `20261023224522`. Inspect existing `is_all_day` rows; legacy 23:59 ends remain valid and display by start date. Release the web/native clients with the schema so new all-day options use exclusive ends | [Date/time contract](date-time-contract.md) |
+| F17/F27 (merged) | Apply `20261102152851` before deploying the calendar functions. Set up the listed alerts and choose a log retention period. Measure check latency and quota use from the new log lines, and decide on caching from those results | [Integration diagnostics](integration-diagnostics.md#alerts-and-retention) |
+| F21 (merged) | Apply `20261025021513` after `20261023224522`. Inspect existing `is_all_day` rows; legacy 23:59 ends remain valid and display by start date. Release the web/native clients with the schema so new all-day options use exclusive ends | [Date/time contract](date-time-contract.md) |
 | F26 (merged) | CI already verifies signing behavior with a throwaway key. Before distribution, configure the intended keystore, passwords, alias, and certificate SHA-256 through the secret store; confirm the upload/app-signing key and register its SHA-1 with the Google OAuth client; supply `google-services.json` from a secret | [Android release signing](android-release-signing.md) |
 
 ## Coordinator follow-ups
@@ -337,7 +339,7 @@ Merging code does not change hosted state. The following are prelaunch checks or
 - [x] Accept final F10 integration in #69. Backend, web, Android and iOS are integrated; independent review found no remaining blockers among the seven review gaps. The [October 23 evidence index](architecture-remediation-evidence-2026-10-23/README.md) records checks, source identities, merge dependencies and prelaunch limits.
 - [x] Complete deterministic F12 lifecycle integration on web, iOS and Android, F14 Android callbacks and F22 production regressions. Combined source `7ec897a` is independently reviewed; publication/final CI are tracked above. Live auth/provider transitions remain separate owner checks.
 - [x] F13 deterministic Activity lifecycle checks now run with the F12/F14 continuation: two instrumentation tests plus process-cold/warm routing on a fresh offline API 36 emulator. Devices were stopped/deleted after the reservation. Real provider sign-in remains an owner check; the original optional reservation was not reused.
-- [ ] F21: publish the draft PR, record exact-head CI and get owner confirmation of the due-date and skipped-time behavior. Then start F16 coverage on the recorded all-day bounds.
+- [x] F21: published and merged in #73, with the end-of-day due date and rejected skipped times. F16 coverage followed in #77.
 - [x] Publish the independently reviewed F12/F14/F22 [PR #72](https://github.com/jakedgrant/meeting-scheduler/pull/72). Exact-head CI results are recorded in its description and checks. Keep F21/F16 dates/calendar and F19 → F18 → F20 bounded reads/realtime queued; broader F24 launch checks remain. F05/F09 is merged, with hosted validation separate.
 
 ## Progress log
