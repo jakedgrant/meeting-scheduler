@@ -1,6 +1,6 @@
 package com.meetingscheduler.android.ui
 
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 /**
  * What the poll screens take from `AppContainer` besides the services: the clock their models

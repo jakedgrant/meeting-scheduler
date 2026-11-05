@@ -10,6 +10,7 @@ import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
 import kotlinx.serialization.Serializable
+import kotlin.time.Clock
 import java.util.UUID
 
 @Serializable
@@ -33,6 +34,8 @@ class AuthCallbackRouter(
     private val exchange: suspend (String) -> UserSession,
     private val install: suspend (UserSession) -> Unit,
     private val reportError: (String) -> Unit,
+    /** Dates each sign-in attempt and decides when its 15-minute link expires. */
+    private val clock: Clock,
     private val attempts: AuthAttemptStore = MemoryAuthAttemptStore(),
 ) {
     private val delivered = linkedSetOf<String>()
@@ -46,7 +49,7 @@ class AuthCallbackRouter(
     fun cancelFlow() { revision++; attempts.write(null) }
     fun beginFlow(ready: Boolean = true): String {
         revision++
-        val value = PendingAuthAttempt(sessionKey(), process, System.currentTimeMillis(), ready = ready)
+        val value = PendingAuthAttempt(sessionKey(), process, nowMillis(), ready = ready)
         attempts.write(value)
         return value.id
     }
@@ -61,9 +64,10 @@ class AuthCallbackRouter(
             attempts.write(pending.copy(ownerKey = sessionKey(), process = process, ready = true))
         } else if (!initial || pending.ownerKey != sessionKey()) attempts.write(null)
     }
+    private fun nowMillis() = clock.now().toEpochMilliseconds()
     private fun ownsAttempt(key: String, attemptId: String?): Boolean {
         val pending = attempts.read() ?: return false
-        return !disposed && pending.ready && pending.id == attemptId && pending.ownerKey == key && pending.process == process && System.currentTimeMillis() - pending.createdAt in 0..900_000
+        return !disposed && pending.ready && pending.id == attemptId && pending.ownerKey == key && pending.process == process && nowMillis() - pending.createdAt in 0..900_000
     }
     fun dispose() { disposed = true; revision++; tasks.toList().forEach { it.cancel() }; tasks.clear() }
 
@@ -106,13 +110,13 @@ class AuthCallbackRouter(
             try {
                 awaitReady()
                 if (disposed) return@launch
-                while (attempts.read()?.let { it.id == attemptId && !it.ready && System.currentTimeMillis() - it.createdAt < 900_000 } == true) {
+                while (attempts.read()?.let { it.id == attemptId && !it.ready && nowMillis() - it.createdAt < 900_000 } == true) {
                     kotlinx.coroutines.delay(10)
                 }
                 if (coldAttempt && ownsAttempt(sessionKey(), attemptId)) receivedKey = sessionKey()
                 if (sessionKey() != receivedKey) return@launch
                 val currentAttempt = attempts.read()
-                if (currentAttempt != null && currentAttempt.id == attemptId && currentAttempt.ownerKey == receivedKey && System.currentTimeMillis() - currentAttempt.createdAt !in 0..900_000) {
+                if (currentAttempt != null && currentAttempt.id == attemptId && currentAttempt.ownerKey == receivedKey && nowMillis() - currentAttempt.createdAt !in 0..900_000) {
                     attempts.write(null)
                     reportError("Your sign-in link expired. Request a new sign-in link.")
                     return@launch

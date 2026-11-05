@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.async
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlin.time.Clock
 
 class NativeSignInAttempt internal constructor(val revision: Long, val accountId: String?, val generation: Long)
 
@@ -30,6 +31,8 @@ class AuthService(
     private val scope: CoroutineScope,
     private val billingIdentity: BillingIdentity?,
     private val gateway: AuthGateway,
+    /** Decides when a session has expired and when a sign-in link has. */
+    private val clock: Clock,
     private val attempts: AuthAttemptStore = MemoryAuthAttemptStore(),
 ) : PollSessionIdentity {
     override var identityGeneration by mutableStateOf(0L)
@@ -83,6 +86,7 @@ class AuthService(
             gateway.importSession(session) { isCurrent(id, generation) && revision == authAttemptRevision }
         },
         reportError = { callbackError = it },
+        clock = clock,
         attempts = attempts,
     )
 
@@ -112,7 +116,7 @@ class AuthService(
                     is io.github.jan.supabase.auth.status.SessionStatus.RefreshFailure -> {
                         // Offline refresh retains a nonexpired session. An expired
                         // credential must stop exposing account-owned screens.
-                        if (currentSession == null || currentSession?.expiresAt?.let { it <= kotlin.time.Clock.System.now() } == true) acceptSession(null)
+                        if (currentSession == null || currentSession?.expiresAt?.let { it <= clock.now() } == true) acceptSession(null)
                     }
                     else -> Unit
                 }
@@ -121,7 +125,7 @@ class AuthService(
     }
 
     private fun acceptSession(incoming: UserSession?) {
-        val session = incoming?.takeIf { it.expiresAt > kotlin.time.Clock.System.now() && authSessionIdentity(it) !in signedOutSessions }
+        val session = incoming?.takeIf { it.expiresAt > clock.now() && authSessionIdentity(it) !in signedOutSessions }
         expiryJob?.cancel()
         val initial = !initialized
         initialized = true
@@ -133,7 +137,7 @@ class AuthService(
             val id = session.user?.id
             val token = session.accessToken
             expiryJob = scope.launch {
-                val remaining = (session.expiresAt - kotlin.time.Clock.System.now()).inWholeMilliseconds
+                val remaining = (session.expiresAt - clock.now()).inWholeMilliseconds
                 kotlinx.coroutines.delay(remaining.coerceAtLeast(0))
                 if (currentUser?.id == id && currentSession?.accessToken == token) acceptSession(null)
             }

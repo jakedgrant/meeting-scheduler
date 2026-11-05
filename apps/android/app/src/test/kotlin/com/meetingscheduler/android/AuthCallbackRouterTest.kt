@@ -6,15 +6,34 @@ import kotlinx.coroutines.*
 import kotlinx.serialization.json.Json
 import org.junit.Assert.*
 import org.junit.Test
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Instant
 
 class AuthCallbackRouterTest {
     private fun session(id: String = "A") = Json.decodeFromString<UserSession>("""{"access_token":"access-$id","refresh_token":"refresh-$id","expires_in":3600,"token_type":"bearer","user":{"id":"$id","aud":"authenticated"}}""")
     private fun link(id: String, query: String) = "${authRedirectUrl(id)}&$query"
+    private class StepClock(var time: Instant) : Clock { override fun now() = time }
+
+    @Test(timeout = 15000) fun aSignInLinkWorksForFifteenMinutesByTheInjectedClock() = runBlocking {
+        for ((elapsed, expires) in listOf(15.minutes to false, 15.minutes + 1.milliseconds to true, (-1).milliseconds to true)) {
+            val scope = createApplicationScope(Dispatchers.Unconfined); val clock = StepClock(Instant.parse("2026-11-04T12:00:00Z"))
+            var exchanges = 0; val errors = mutableListOf<String>()
+            val router = AuthCallbackRouter(scope, { "null:0" }, {}, { exchanges++; session() }, {}, { errors += it }, clock)
+            val callback = link(router.beginFlow(), "code=one")
+            clock.time += elapsed
+            assertTrue(router.route(callback))
+            assertEquals("$elapsed", if (expires) 0 else 1, exchanges)
+            assertEquals("$elapsed", if (expires) listOf("Your sign-in link expired. Request a new sign-in link.") else emptyList<String>(), errors)
+            scope.cancel()
+        }
+    }
 
     @Test(timeout = 15000) fun coldCallbackWaitsForInitializationAndWarmDuplicateDoesNotExchangeTwice() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined)
         val ready = CompletableDeferred<Unit>(); var exchanges = 0; var installed = 0
-        val router = AuthCallbackRouter(scope, { "null:0" }, { ready.await() }, { exchanges++; session() }, { installed++ }, { fail(it) })
+        val router = AuthCallbackRouter(scope, { "null:0" }, { ready.await() }, { exchanges++; session() }, { installed++ }, { fail(it) }, kotlin.time.Clock.System)
         val callback = link(router.beginFlow(), "code=one")
         assertTrue(router.route(callback)); assertEquals(0, exchanges)
         ready.complete(Unit); assertEquals(1, exchanges); assertEquals(1, installed)
@@ -24,7 +43,7 @@ class AuthCallbackRouterTest {
 
     @Test(timeout = 15000) fun exactRoutesRejectCalendarImplicitTokensMalformedAndDuplicateParameters() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined); var exchanges = 0; var errors = 0
-        val router = AuthCallbackRouter(scope, { "null:0" }, {}, { exchanges++; session() }, {}, { errors++ })
+        val router = AuthCallbackRouter(scope, { "null:0" }, {}, { exchanges++; session() }, {}, { errors++ }, kotlin.time.Clock.System)
         val id = router.beginFlow()
         for (url in listOf("meetingscheduler://calendar/callback?code=a", "meetingscheduler://auth/other?code=a", "meetingscheduler://auth/callback/extra?code=a", "https://auth/callback?code=a", "meetingscheduler://auth:443/callback?code=a", "meetingscheduler://auth/callback#access_token=fake", "meetingscheduler://auth/callback?code=%XX")) assertFalse(url, router.route(url))
         for (query in listOf("", "code=", "code=a&code=b", "error=access_denied")) assertTrue(router.route(link(id, query)))
@@ -36,7 +55,7 @@ class AuthCallbackRouterTest {
         for (replacement in listOf("B:2", "A:3")) for (fails in listOf(false, true)) {
             val scope = createApplicationScope(Dispatchers.Unconfined); var key = "A:1"; var installs = 0; var errors = 0
             val gate = CompletableDeferred<Unit>()
-            val router = AuthCallbackRouter(scope, { key }, {}, { gate.await(); if (fails) error("expired code"); session() }, { installs++ }, { errors++ })
+            val router = AuthCallbackRouter(scope, { key }, {}, { gate.await(); if (fails) error("expired code"); session() }, { installs++ }, { errors++ }, kotlin.time.Clock.System)
             router.route(link(router.beginFlow(), "code=old")); key = replacement; gate.complete(Unit)
             assertEquals(0, installs); assertEquals(0, errors); scope.cancel()
         }
@@ -45,7 +64,7 @@ class AuthCallbackRouterTest {
     @Test(timeout = 15000) fun initializationReplacementCannotBeOverwrittenAndScopeDisposalCancelsExchange() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined); var key = "null:0"; var exchanges = 0
         val ready = CompletableDeferred<Unit>()
-        val router = AuthCallbackRouter(scope, { key }, { ready.await() }, { exchanges++; session() }, {}, {})
+        val router = AuthCallbackRouter(scope, { key }, { ready.await() }, { exchanges++; session() }, {}, {}, kotlin.time.Clock.System)
         val callback = link(router.beginFlow(), "code=old")
         router.route(callback); key = "B:1"; ready.complete(Unit); assertEquals(0, exchanges)
         scope.cancel(); router.route(callback); assertEquals(0, exchanges)
@@ -54,7 +73,7 @@ class AuthCallbackRouterTest {
     @Test(timeout = 15000) fun initiatedCallbackDeliveredOnlyAfterBOrReturningAIsRejectedBeforeExchange() = runBlocking {
         for (next in listOf("B:2", "A:3")) {
             val scope = createApplicationScope(Dispatchers.Unconfined); var key = "A:1"; var exchanges = 0
-            val router = AuthCallbackRouter(scope, { key }, {}, { exchanges++; session() }, { fail("stale install") }, { fail("stale error") })
+            val router = AuthCallbackRouter(scope, { key }, {}, { exchanges++; session() }, { fail("stale install") }, { fail("stale error") }, kotlin.time.Clock.System)
             val callback = link(router.beginFlow(), "code=still-valid-old-code")
             key = next; router.observeBoundary(initial = false); router.route(callback)
             assertEquals(0, exchanges); scope.cancel()
@@ -64,10 +83,10 @@ class AuthCallbackRouterTest {
     @Test(timeout = 15000) fun persistedColdAttemptRebindsOnlyToMatchingInitialRestoredIdentity() = runBlocking {
         for (restored in listOf("A:1", "B:1")) {
             val scope = createApplicationScope(Dispatchers.Unconfined); val store = MemoryAuthAttemptStore()
-            val old = AuthCallbackRouter(scope, { "A:9" }, {}, { session() }, {}, {}, store)
+            val old = AuthCallbackRouter(scope, { "A:9" }, {}, { session() }, {}, {}, kotlin.time.Clock.System, store)
             val callback = link(old.beginFlow(), "code=cold"); old.dispose()
             var key = "null:0"; var installed = 0; val ready = CompletableDeferred<Unit>()
-            val router = AuthCallbackRouter(scope, { key }, { ready.await() }, { session() }, { installed++ }, {}, store)
+            val router = AuthCallbackRouter(scope, { key }, { ready.await() }, { session() }, { installed++ }, {}, kotlin.time.Clock.System, store)
             router.route(callback); key = restored; router.observeBoundary(initial = true); ready.complete(Unit)
             assertEquals(if (restored == "A:1") 1 else 0, installed); assertNull(store.read()); scope.cancel()
         }
@@ -75,14 +94,14 @@ class AuthCallbackRouterTest {
 
     @Test(timeout = 15000) fun newerAttemptInTheSameSessionFencesOlderExchangeSuccess() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined); val gate = CompletableDeferred<Unit>(); var installed = 0
-        val router = AuthCallbackRouter(scope, { "null:1" }, {}, { gate.await(); session() }, { installed++ }, {})
+        val router = AuthCallbackRouter(scope, { "null:1" }, {}, { gate.await(); session() }, { installed++ }, {}, kotlin.time.Clock.System)
         router.route(link(router.beginFlow(), "code=first")); router.beginFlow(); gate.complete(Unit)
         assertEquals(0, installed); scope.cancel()
     }
 
     @Test(timeout = 15000) fun providerErrorFragmentRequiresTheOriginatingQueryAndCannotInstallTokens() = runBlocking {
         val scope = createApplicationScope(Dispatchers.Unconfined); var errors = 0
-        val router = AuthCallbackRouter(scope, { "null:1" }, {}, { fail("No exchange"); session() }, { fail("No import") }, { errors++ })
+        val router = AuthCallbackRouter(scope, { "null:1" }, {}, { fail("No exchange"); session() }, { fail("No import") }, { errors++ }, kotlin.time.Clock.System)
         val old = router.beginFlow(); val current = router.beginFlow()
         assertTrue(router.route(authRedirectUrl(old) + "#error=access_denied")); assertEquals(0, errors)
         assertFalse(router.route(authRedirectUrl(current) + "#access_token=fake"))
@@ -94,7 +113,7 @@ class AuthCallbackRouterTest {
     @Test(timeout = 15000) fun oldUriReceivedAfterANewAttemptCannotExchangeReportOrConsumeAndNewLinkStillWorks() = runBlocking {
         for (replacement in listOf("B:2", "A:3", "null:2")) {
             val scope = createApplicationScope(Dispatchers.Unconfined); var key = "A:1"; val exchanges = mutableListOf<String>(); val installed = mutableListOf<String>(); val errors = mutableListOf<String>()
-            val router = AuthCallbackRouter(scope, { key }, {}, { exchanges += it; check(it == "current"); session("B") }, { installed += it.user!!.id }, { errors += it })
+            val router = AuthCallbackRouter(scope, { key }, {}, { exchanges += it; check(it == "current"); session("B") }, { installed += it.user!!.id }, { errors += it }, kotlin.time.Clock.System)
             val old = router.beginFlow(); key = replacement; router.observeBoundary(initial = false)
             val current = router.beginFlow()
             for (url in listOf(link(old, "code=old"), link(old, "error=access_denied"), link(old, "code=a&code=b"), "$AUTH_REDIRECT_URL?code=old", "$AUTH_REDIRECT_URL?attempt=$old&attempt=$current&code=old", "$AUTH_REDIRECT_URL?attempt=invalid&code=old")) assertTrue(router.route(url))

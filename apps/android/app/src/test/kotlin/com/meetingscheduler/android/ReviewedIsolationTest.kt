@@ -90,7 +90,7 @@ class ReviewedIsolationTest {
             })
             val dispatcher = HeldDispatcher()
             val gateway = SupabaseAuthGateway(shared, dispatcher, revocationClient = { revoker })
-            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = AuthService(scope, null, gateway)
+            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             gateway.importSession(old)
             withTimeout(1000) { while (auth.currentSession?.accessToken != old.accessToken) yield() }
             dispatcher.held = true
@@ -126,7 +126,7 @@ class ReviewedIsolationTest {
                 override suspend fun close() { remote.close(); closed.complete(Unit) }
             }
             val dispatcher = HeldDispatcher(); val gateway = SupabaseAuthGateway(shared, dispatcher, revocationClient = { revoker })
-            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = AuthService(scope, null, gateway)
+            val scope = createApplicationScope(Dispatchers.Unconfined); val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System)
             gateway.importSession(old); withTimeout(1000) { while (!auth.isAuthenticated) yield() }
             dispatcher.held = true
             val caller = launch(start = CoroutineStart.UNDISPATCHED) { auth.signOut() }
@@ -196,7 +196,7 @@ class ReviewedIsolationTest {
         val events = MutableSharedFlow<SessionStatus>()
         val gateway = SupabaseAuthGateway(shared, Dispatchers.Unconfined)
         val scope = createApplicationScope(Dispatchers.Unconfined)
-        val auth = AuthService(scope, null, object : AuthGateway by gateway { override val status = events })
+        val auth = AuthService(scope, null, object : AuthGateway by gateway { override val status = events }, kotlin.time.Clock.System)
         events.emit(SessionStatus.Authenticated(session("A", "A-session")))
         val update = async(start = CoroutineStart.UNDISPATCHED) { auth.updateProfile("updated-A", null, "UTC") }
         update.await(); withTimeout(1000) { while (calls != 2) yield() }
@@ -218,7 +218,7 @@ class ReviewedIsolationTest {
             })
             shared.auth.setSessionStatus(SessionStatus.NotAuthenticated())
             val scope = createApplicationScope(Dispatchers.Unconfined); val gateway = SupabaseAuthGateway(shared, Dispatchers.Unconfined)
-            val auth = AuthService(scope, null, gateway); gateway.importSession(old); started.await()
+            val auth = AuthService(scope, null, gateway, kotlin.time.Clock.System); gateway.importSession(old); started.await()
             val generation = auth.identityGeneration; val oldAttempt = auth.callbackRouter.beginFlow()
             gateway.importSession(fresh)
             withTimeout(1000) { while (auth.currentSession?.accessToken != fresh.accessToken || auth.profile?.displayName != "fresh-A") yield() }
@@ -242,7 +242,7 @@ class ReviewedIsolationTest {
             val oldClient = client(MockEngine { respond(profileBody("A"), headers = headersOf(HttpHeaders.ContentType, "application/json")) }, persistence)
             oldClient.auth.setSessionStatus(SessionStatus.NotAuthenticated())
             val oldScope = createApplicationScope(Dispatchers.Unconfined); val oldGateway = SupabaseAuthGateway(oldClient, Dispatchers.Unconfined)
-            val oldAuth = AuthService(oldScope, null, oldGateway, attempts)
+            val oldAuth = AuthService(oldScope, null, oldGateway, kotlin.time.Clock.System, attempts)
             oldGateway.importSession(session("A", "original"))
             withTimeout(1000) { while (oldAuth.currentUser?.id != "A") yield() }
             val id = oldAuth.callbackRouter.beginFlow()
@@ -256,7 +256,7 @@ class ReviewedIsolationTest {
                 } else respond(profileBody("A"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
             }, persistence, restore = true)
             val scope = createApplicationScope(Dispatchers.Unconfined)
-            val auth = AuthService(scope, null, SupabaseAuthGateway(restarted, Dispatchers.Unconfined), attempts)
+            val auth = AuthService(scope, null, SupabaseAuthGateway(restarted, Dispatchers.Unconfined), kotlin.time.Clock.System, attempts)
             withTimeout(1000) { while (auth.isLoading) yield() }
             auth.handleDeepLink(authRedirectUrl(id) + "&code=cold")
             if (sameLineage) withTimeout(1000) { while (restarted.auth.currentSessionOrNull()?.accessToken != jwt("A", "callback-result")) yield() }
@@ -282,7 +282,7 @@ class ReviewedIsolationTest {
             val auth = AuthService(scope, null, object : AuthGateway by gateway {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId, "current-$userId")
-            })
+            }, kotlin.time.Clock.System)
             events.emit(SessionStatus.Authenticated(session("A", "original")))
             val polls = PollService(auth, supabase = shared)
             val pending = async { runCatching {
@@ -316,7 +316,7 @@ class ReviewedIsolationTest {
             val auth = AuthService(scope, null, object : AuthGateway by gateway {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
-            })
+            }, kotlin.time.Clock.System)
             val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, supabase = shared, readDeviceConflicts = { _, _ -> emptySet() })
             auth.onBoundary { calendar.resetSession() }; events.emit(SessionStatus.Authenticated(session("A", "original")))
             val old = async { calendar.checkPollConflicts(listOf(PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)), "UTC") }
@@ -348,7 +348,7 @@ class ReviewedIsolationTest {
             val auth = AuthService(scope, null, object : AuthGateway by gateway {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
-            })
+            }, kotlin.time.Clock.System)
             val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, supabase = shared,
                 readDeviceConflicts = { _, zone -> assertEquals("Pacific/Auckland", zone); if (deviceFails) error("permission revoked"); setOf("device-busy") })
             auth.onBoundary { calendar.resetSession() }; events.emit(SessionStatus.Authenticated(session("A", "original")))
@@ -383,7 +383,7 @@ class ReviewedIsolationTest {
             val auth = AuthService(scope, null, object : AuthGateway by gateway {
                 override val status = events
                 override suspend fun loadProfile(userId: String, credential: String) = profile(userId)
-            })
+            }, kotlin.time.Clock.System)
             val gate = CompletableDeferred<Unit>(); val started = CompletableDeferred<Unit>()
             val calendar = CalendarService(null, auth, scope, connectionTransport = { _, _ -> "{\"connected\":true,\"accountEmail\":\"current@example.test\",\"requiresReconnect\":false,\"revocationPending\":false}" }, readDevicePreference = { true }, readPermission = { true }, supabase = shared,
                 readDeviceConflicts = { _, _ -> started.complete(Unit); gate.await(); if (fails) error("old device failure"); setOf("old-conflict") })

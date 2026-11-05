@@ -28,9 +28,9 @@ import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
+import kotlin.time.Clock
 import java.util.*
 
 // Extension function to convert kotlinx.datetime.Instant to java.time.Instant

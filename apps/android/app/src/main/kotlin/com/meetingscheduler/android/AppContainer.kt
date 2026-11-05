@@ -21,7 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.datetime.Clock
+import kotlin.time.Clock
 
 /**
  * Process-lifetime dependencies (F13). Owned by [MeetingSchedulerApplication], created once
@@ -44,12 +44,16 @@ class AppContainer(
         null
     }
 
+    /** The one clock the services and screen models read. */
+    val clock: Clock = Clock.System
+
     /** Internal so instrumented tests can drive the SDK session the services observe. */
     internal val supabase = createAppSupabaseClient()
 
     private val authAttemptPreferences = application.getSharedPreferences("auth_attempt_v1", 0)
     val authService = AuthService(applicationScope, billingIdentity = purchaseService,
         gateway = SupabaseAuthGateway(supabase),
+        clock = clock,
         attempts = object : com.meetingscheduler.android.services.AuthAttemptStore {
             override fun read(): com.meetingscheduler.android.services.PendingAuthAttempt? =
                 authAttemptPreferences.getString("pending", null)?.let {
@@ -66,9 +70,6 @@ class AppContainer(
     val pollService = PollService(authService, supabase)
 
     val calendarService = CalendarService(application, authService, applicationScope, supabase)
-
-    /** The one clock models read. The auth services still read the system clock directly. */
-    val clock: Clock = Clock.System
 
     private val creationPreferences = application.getSharedPreferences("poll_creation_v1", 0)
     val pollScreens = PollScreenEnvironment(

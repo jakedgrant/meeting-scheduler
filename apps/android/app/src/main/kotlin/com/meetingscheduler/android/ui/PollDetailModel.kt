@@ -8,12 +8,12 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollDetailCalendar
 import com.meetingscheduler.android.services.PollDetailPolls
 import kotlinx.coroutines.CancellationException
-import kotlinx.datetime.Clock
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.plus
+import kotlin.time.Clock
 import kotlin.time.Duration.Companion.hours
 
 /** How near the poll's response deadline is. */

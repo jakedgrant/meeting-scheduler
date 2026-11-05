@@ -12,6 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
+import kotlin.time.Clock
 
 /**
  * Only the serialized defaults below read it, so a stored draft or option that lacks a date
