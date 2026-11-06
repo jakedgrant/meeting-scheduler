@@ -2,6 +2,20 @@
 
 Updated November 5, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F19/F20 guest reads, November 5
+
+Branch `claude/next-remedy-tranche-8` started from fetched main `b14f801`, which contains merged #87 and the #88 status corrections. It takes the guest half of F19 and F20: guests still loaded a poll through `get_guest_poll_detail`, which returns every response in one value, so their reads had no size bound and they were left off the refresh schedule. F13's `ViewModel` ownership is the other open code item; it is Android-only, and Gradle 8.11 can't run on the JDK 25/26 installed here, so it waits for its own tranche.
+
+Migration `20261105214548_guest_bounded_reads` adds `get_poll_detail_as_guest` and `list_poll_responses_as_guest`. They return what `get_poll_detail` and `list_poll_responses` return, authorized by the guest capability instead of a session; `get_poll_detail_as_guest` adds `participant_id`. The member functions' bodies moved into two private builders that both sets call, so the size limits, cursors, totals and errors can't drift apart. No API role can execute the builders. The member functions keep their signatures, grants and output. `get_guest_poll_detail` stays for web builds released before the migration.
+
+The web store reads guests through the same `readDetail` and `readPollResponses` helpers as members, so guest detail is checked against its counts and responses are traversed to the first page's total. Guests now join the 30-second bounded refresh. A capability denied during a refresh drops the capability and stops the schedule, keeping the poll on screen with the notice and join prompt, as a denied save already did. A schedule whose capability was dropped or replaced elsewhere stops without sending it again. See [guest reads](read-contracts.md#guest-reads).
+
+Tests: `npm run test:reads:db` adds a guest case covering grants, equality with the member detail and pages, a 1,200-row traversal, invalid sizes and cursors, wrong, foreign and missing capabilities, and reads after the poll closes. `npm run test:web:reads` adds a guest traversal, a closure arriving on the next refresh, a rejoin that stops the old schedule, and a revoked capability. The guest availability and result-check suites now use the new RPCs.
+
+Local results: `npm run test:database` **170 tests** and `npm run test:web` **176 tests** passed; `npm run check:database-types` matches the migrations; the web type check reports 0 errors and the 5 existing warnings. No simulator, emulator or server was used.
+
+Still open in F19: retiring `get_guest_poll_detail`, `get_user_participated_polls` and `get_poll_with_summary` once no shipped client calls them, and measuring query plans and payloads on representative hosted data. F20's hosted multi-client check remains.
+
 ## F24 release checks, November 4
 
 Branch `claude/next-remedy-tranche-7` started from fetched main `6b31902`, which contains merged #86. With F23 done, it takes F24, the last finding still marked partial with code work. Most of F24's gates already existed: the web, database, billing, calendar, Android and iOS package workflows run on pull requests from clean checkouts with locked dependencies. This tranche removes the tests that asserted nothing, closes a gap that let a web suite go unrun, and lists the checks the owner can make required in the new [release checks](release-checks.md) page.
@@ -322,6 +336,7 @@ Merging code does not change hosted state. The following are prelaunch checks or
 | F25 (merged) | The local wrapper transition was completed October 24 with a full backup and byte comparison before the main fast-forward. Preserve differing local files in any other checkout before pulling. The new iOS package CI verifies locked dependencies; wrapper/application CI remains separate F24 work. A cold runner needs github.com access for SwiftPM | [iOS checkout](ios-checkout.md) |
 | F17/F27 (merged) | Apply `20261102152851` before deploying the calendar functions. Set up the listed alerts and choose a log retention period. Measure check latency and quota use from the new log lines, and decide on caching from those results | [Integration diagnostics](integration-diagnostics.md#alerts-and-retention) |
 | F21 (merged) | Apply `20261025021513` after `20261023224522`. Inspect existing `is_all_day` rows; legacy 23:59 ends remain valid and display by start date. Release the web/native clients with the schema so new all-day options use exclusive ends | [Date/time contract](date-time-contract.md) |
+| F19/F20 guest reads | Apply `20261105214548` after `20261025062518`, before deploying the web build that calls `get_poll_detail_as_guest`. It only adds and replaces functions, so it takes no table lock. Keep `get_guest_poll_detail` until no deployed web build calls it | [Guest reads](read-contracts.md#guest-reads) |
 | F26 (merged) | CI already verifies signing behavior with a throwaway key. Before distribution, configure the intended keystore, passwords, alias, and certificate SHA-256 through the secret store; confirm the upload/app-signing key and register its SHA-1 with the Google OAuth client; supply `google-services.json` from a secret | [Android release signing](android-release-signing.md) |
 
 ## Coordinator follow-ups

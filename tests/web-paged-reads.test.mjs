@@ -224,6 +224,77 @@ test('detail shows responses only after complete traversal beyond the row cap', 
   assert.equal(state.calls.at(-1).name, 'get_poll_detail', 'no response pages are read for a rejected detail');
 });
 
+test('a guest reads the same bounded pages through its capability and refreshes on the same schedule', async t => {
+  const { actual, state } = await fixture(t);
+  actual.user.set(null);
+  const poll = { ...pollRow(1), id: pollId };
+  const participants = Array.from({ length: 40 }, (_, index) => webRows.participantRow({ id: id('66666666-6666-4666-8666-', index), poll_id: pollId, anonymous_name: 'Guest', profiles: null }));
+  const options = Array.from({ length: 30 }, (_, index) => webRows.timeOptionRow({ id: id('77777777-7777-4777-8777-', index), poll_id: pollId }));
+  const rows = Array.from({ length: 1200 }, (_, index) => responseRow(index));
+  const guestId = participants[0].id;
+  let shownPoll = poll;
+  let revoked = false;
+  state.handler = (name, args) => {
+    if (name === 'join_poll_as_guest') return { data: { participant: participants[0], guest_token: args.guest_token, created: true }, error: null };
+    assert.equal(args.participant_uuid, guestId);
+    assert.match(args.guest_token, /^[0-9a-f]{64}$/);
+    if (revoked) return { data: null, error: { code: '42501', message: 'Guest access denied' } };
+    if (name === 'get_poll_detail_as_guest') return { data: { participant_id: guestId, poll: shownPoll, time_options: options, participants, time_option_count: 30, participant_count: 40 }, error: null };
+    if (name === 'get_availability') return { data: { poll_id: pollId, participant_id: guestId, version: 1, comment: null, responses: [] }, error: null };
+    assert.equal(name, 'list_poll_responses_as_guest');
+    assert.equal(args.page_size, 1000);
+    const start = args.page_cursor ? Number(args.page_cursor) : 0;
+    const next = start + 1000 < rows.length ? String(start + 1000) : null;
+    return { data: page(rows.slice(start, start + 1000), next, args.page_cursor ? null : rows.length), error: null };
+  };
+  await actual.joinPoll(pollId, 'Guest');
+  state.calls.length = 0;
+  await actual.loadPoll(pollId);
+  assert.equal(actual.get(actual.currentGuest).participantId, guestId);
+  assert.equal(actual.get(actual.currentPollParticipants).length, 40);
+  // The guest's own 30 rows come from its saved snapshot, which is empty here.
+  assert.equal(actual.get(actual.currentPollResponses).length, 1170);
+  assert.equal(actual.get(actual.currentAvailability).participant_id, guestId);
+  const reads = ['get_poll_detail_as_guest', 'list_poll_responses_as_guest', 'list_poll_responses_as_guest', 'get_availability'];
+  assert.deepEqual(state.calls.map(call => call.name), reads);
+  assert.deepEqual(state.calls.slice(1, 3).map(call => call.args.page_cursor), [null, '1000']);
+  assert.ok(state.calls.every(call => call.signal), 'every read is cancellable');
+
+  // Closure reaches the guest on the next scheduled refresh, through the same reads.
+  shownPoll = { ...poll, status: 'closed' };
+  state.calls.length = 0;
+  await state.clock.advance(30_000);
+  assert.equal(actual.get(actual.currentPoll).status, 'closed');
+  assert.deepEqual(state.calls.map(call => call.name), reads);
+
+  // A capability denied elsewhere and replaced by a rejoin is never sent again,
+  // and its schedule cannot raise the access-lost notice over the new one.
+  const first = actual.get(actual.currentGuest).token;
+  revoked = true;
+  await assert.rejects(actual.loadAvailability(pollId, guestId));
+  assert.match(actual.get(actual.guestNotice), /Join again/);
+  revoked = false;
+  await actual.joinPoll(pollId, 'Guest');
+  const second = actual.get(actual.currentGuest).token;
+  assert.notEqual(second, first);
+  assert.equal(actual.get(actual.guestNotice), null);
+  state.calls.length = 0;
+  await state.clock.advance(30_000);
+  assert.deepEqual(state.calls, [], 'the old schedule stops without reading');
+  assert.equal(state.clock.timers.size, 0);
+  assert.equal(actual.get(actual.guestNotice), null);
+
+  // A capability revoked during a refresh keeps the poll and its join prompt, as a denied save does.
+  await actual.loadPoll(pollId);
+  assert.ok(state.calls.filter(call => call.args.guest_token).every(call => call.args.guest_token === second));
+  revoked = true;
+  await state.clock.advance(30_000);
+  assert.equal(actual.get(actual.currentPoll).id, pollId);
+  assert.equal(actual.get(actual.currentGuest), null);
+  assert.match(actual.get(actual.guestNotice), /Join again/);
+  assert.equal(state.clock.timers.size, 0);
+});
+
 test('refresh clock coalesces focus/reconnect, pauses hidden/offline, and disposes during a pending read', async t => {
   const { actual, state: { clock } } = await fixture(t);
   const pending = deferred();

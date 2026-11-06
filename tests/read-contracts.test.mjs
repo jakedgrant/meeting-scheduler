@@ -1,6 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { bootstrapCreationDatabase } from './helpers/creation-database.mjs';
 
@@ -201,6 +201,64 @@ test('F19 paged summaries, bounded detail and complete response traversal', asyn
     await db.exec('ALTER TABLE public.availability_responses ENABLE TRIGGER responses_10_check_write');
     assert.equal((await responses(owner, busy, 1)).total_count, 1200);
     assert.equal((await responses(owner, foreign, 1)).total_count, 0);
+  });
+
+  await t.test('guests read the member detail and response pages through their capability', async () => {
+    const anon = action => as(null, action, 'anon');
+    const joinGuest = async pollId => {
+      const token = randomBytes(32).toString('hex');
+      const joined = await anon(() => scalar('SELECT public.join_poll_as_guest($1,$2,NULL,$3) AS result', [pollId, 'Paging guest', token]));
+      return { id: joined.participant.id, token };
+    };
+    const guestDetail = (guest, caller = anon) => caller(() => scalar('SELECT public.get_poll_detail_as_guest($1,$2) AS result', [guest.id, guest.token]));
+    const guestResponses = (guest, size = 500, cursor = null) => anon(() => scalar(
+      'SELECT public.list_poll_responses_as_guest($1,$2,$3,$4) AS result', [guest.id, guest.token, size, cursor]));
+
+    for (const fn of ['get_poll_detail_as_guest(uuid,text)', 'list_poll_responses_as_guest(uuid,text,integer,text)']) {
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        assert.equal(await scalar(`SELECT has_function_privilege($1,$2,'EXECUTE') AS result`, [role, `public.${fn}`]), true, `${role} ${fn}`);
+      }
+    }
+    // The builders do no authorization, so no API role may call them directly.
+    for (const fn of ['bounded_poll_detail(uuid)', 'poll_response_page(uuid,integer,text)', 'guest_poll(uuid,text)']) {
+      for (const role of ['anon', 'authenticated', 'service_role']) {
+        assert.equal(await scalar(`SELECT has_function_privilege($1,$2,'EXECUTE') AS result`, [role, `poll_private.${fn}`]), false, `${role} ${fn}`);
+      }
+    }
+
+    const guest = await joinGuest(busy);
+    const value = await guestDetail(guest);
+    assert.deepEqual(value, { ...await detail(owner, busy), participant_id: guest.id });
+    assert.equal(value.participant_count, 41);
+    assert.ok(value.participants.every(p => p.anonymous_email === null && p.access_token === p.id));
+    assert.deepEqual(await guestDetail(guest, action => as(unrelated, action)), value, 'a signed-in browser may hold a guest capability');
+
+    const guestPages = await traverse(cursor => guestResponses(guest, 500, cursor));
+    const memberPages = await traverse(cursor => responses(owner, busy, 500, cursor));
+    assert.equal(guestPages.pages, 3);
+    assert.equal(guestPages.first.total_count, 1200);
+    assert.deepEqual(guestPages.items, memberPages.items);
+    assert.equal((await guestResponses(guest, 500, guestPages.first.next_cursor)).total_count, null);
+
+    for (const size of [0, 1001, null]) await assert.rejects(guestResponses(guest, size), code('22023'), String(size));
+    const summaryCursor = (await summaries(owner, { size: 1 })).next_cursor;
+    await assert.rejects(guestResponses(guest, 10, summaryCursor), code('22023'));
+
+    // A wrong or foreign capability, a member row and a missing participant are all denied alike.
+    const elsewhere = await joinGuest(joined[0]);
+    const memberRow = (await db.query('SELECT id FROM public.poll_participants WHERE poll_id=$1 AND user_id=$2', [joined[0], owner])).rows[0].id;
+    for (const denied of [{ ...guest, token: elsewhere.token }, { id: elsewhere.id, token: guest.token },
+      { id: memberRow, token: guest.token }, { id: randomUUID(), token: guest.token }, { ...guest, token: '' }]) {
+      await assert.rejects(guestDetail(denied), code('42501'));
+      await assert.rejects(guestResponses(denied), code('42501'));
+    }
+    assert.equal((await guestDetail(elsewhere)).poll.id, joined[0], 'each capability opens only its own poll');
+
+    // Like get_guest_poll_detail, a closed poll stays readable to its guests.
+    await db.query("UPDATE public.polls SET status='closed' WHERE id=$1", [busy]);
+    assert.equal((await guestDetail(guest)).poll.status, 'closed');
+    assert.equal((await guestResponses(guest, 1)).total_count, 1200);
+    await db.query("UPDATE public.polls SET status='active' WHERE id=$1", [busy]);
   });
 
   await t.test('detail beyond the supported legacy size fails explicitly', async () => {

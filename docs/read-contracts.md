@@ -8,9 +8,9 @@ Three RPCs replace those reads for signed-in members. Each one has a hard size b
 
 ## Access
 
-Only `authenticated` and `service_role` can execute the public invoker wrappers. The private definers in `poll_private` use an empty `search_path` and take identity from `auth.uid()`. The list includes polls the caller created, plus other users' polls where the caller has an authenticated participant row, which is the same rule the legacy RPC used. Detail and response pages require `poll_private.can_read_poll`. A missing poll and an inaccessible poll both return `42501` with the same message.
+Only `authenticated` and `service_role` can execute these three public invoker wrappers; the [guest reads](#guest-reads) are also open to `anon`. The private definers in `poll_private` use an empty `search_path` and take identity from `auth.uid()`. The list includes polls the caller created, plus other users' polls where the caller has an authenticated participant row, which is the same rule the legacy RPC used. Detail and response pages require `poll_private.can_read_poll`. A missing poll and an inaccessible poll both return `42501` with the same message.
 
-Guests keep using `get_guest_poll_detail` through their capability. Its shape has not changed (see [remaining work](#remaining-work)).
+Guests read the same detail and response pages through their capability; see [guest reads](#guest-reads).
 
 ## Poll summaries
 
@@ -72,6 +72,19 @@ list_poll_responses(poll_uuid uuid, page_size int = 500, page_cursor text = null
 
 `total_count` is present on the first page (no cursor) and null on later pages. Recounting on every page would repeat work proportional to the poll's responses.
 
+## Guest reads
+
+Migration: [`20261105214548_guest_bounded_reads.sql`](../supabase/migrations/20261105214548_guest_bounded_reads.sql).
+
+```
+get_poll_detail_as_guest(participant_uuid uuid, guest_token text) -> jsonb
+list_poll_responses_as_guest(participant_uuid uuid, guest_token text, page_size int = 500, page_cursor text = null) -> jsonb
+```
+
+`get_poll_detail_as_guest` returns `get_poll_detail`'s value plus `participant_id`, and `list_poll_responses_as_guest` returns `list_poll_responses` pages, cursors and first-page total. Member and guest functions call the same private builders, so the size limits, ordering, cross-poll exclusion and `22023`/`54000` errors are identical. Only authorization differs: the capability must verify for a guest row, and the poll is the one that row belongs to. A wrong or rotated token, a member's participant id, and a missing participant all fail with `42501` `Guest access denied`. Like the legacy guest detail, a guest can read its poll in any state. `anon`, `authenticated` and `service_role` can execute both; a signed-in browser may still hold a guest capability.
+
+`get_guest_poll_detail`, which returns every response in one value, stays for web builds released before this migration. Retire it with `get_user_participated_polls` once no shipped client calls it.
+
 ## Cursors and the completeness rule
 
 Cursors are opaque, versioned strings. `p1:` cursors encode integer microseconds plus the poll id. `r1:` cursors encode the participant and option ids. A cursor from one RPC is rejected by the other. Malformed cursors, unknown roles and out-of-range page sizes fail with `22023`; there is no fallback to a default page.
@@ -93,7 +106,7 @@ Clients must therefore:
 
 | Client | Status |
 | --- | --- |
-| Web | Adopted. The list asks for the first page of each section (two requests regardless of history size) and appends pages with **Load more**; it no longer makes two table requests per poll. Detail uses `get_poll_detail` plus full response traversal, and background detail refreshes use the same traversal. Failed or incomplete list reads and background detail refreshes show an error with a retry action. See `apps/web/src/lib/paged-read.ts` and `tests/web-paged-reads.test.mjs`. |
+| Web | Adopted for members and guests. The list asks for the first page of each section (two requests regardless of history size) and appends pages with **Load more**; it no longer makes two table requests per poll. Detail uses `get_poll_detail` (guests: `get_poll_detail_as_guest`) plus full response traversal, and background detail refreshes use the same traversal. Failed or incomplete list reads and background detail refreshes show an error with a retry action. See `apps/web/src/lib/paged-read.ts` and `tests/web-paged-reads.test.mjs`. |
 | iOS | Adopted in the native continuation. The list reads one combined summary page (50 polls), exposes the current total and **Load more**, and uses summary counts/ranges directly. Filters apply to loaded polls. Both detail and response screens consume validated `get_poll_detail` metadata and traverse response pages before caching or displaying them. |
 | Android | Adopted in the native continuation. One combined summary page populates both list sections, with the total and **Load more**. No per-poll enrichment runs. Detail and response screens use `get_poll_detail` and validated response traversal. |
 
@@ -105,20 +118,19 @@ On iOS a partial list replaces only cached list membership. It does not delete u
 
 ## Web live updates (F20)
 
-Signed-in detail pages use bounded refetching instead of Postgres Changes subscriptions. There is no channel listening to other polls' response activity. Each refresh calls `get_poll_detail`, follows all `list_poll_responses` pages, and reads `get_availability` for the caller's participant if present. The page publishes the refresh after all reads validate. Each response traversal retains the completeness rules above; the reads do not constitute a database snapshot.
+Detail pages use bounded refetching instead of Postgres Changes subscriptions. There is no channel listening to other polls' response activity. Each refresh calls `get_poll_detail`, follows all `list_poll_responses` pages, and reads `get_availability` for the caller's participant if present. A guest makes the same three reads with `get_poll_detail_as_guest`, `list_poll_responses_as_guest` and its capability. The page publishes the refresh after all reads validate. Each response traversal retains the completeness rules above; the reads do not constitute a database snapshot.
 
 The next refresh starts 30 seconds after the previous one completes. Hidden/offline pages suspend scheduled work; focus, online and visible transitions request a refresh after 250 ms. Bursts share one scheduled request, and events during a read request one follow-up. Only one refresh traversal runs at a time per detail owner. Disposal, account change and explicit reload stop the old schedule and abort its reads; generation checks also discard late replies when a transport ignores cancellation.
 
-For a member whose responses fit one page, a refresh makes three RPC calls; creators without a participant make two. More responses require one call per additional 1,000 rows, bounded by `readAllPages`' 100-page ceiling. Maximum supported options/participants remain those above. This bounds request frequency and traversal size; representative hosted latency/payload measurements remain outstanding. Closure and final-time changes appear on the next successful refresh, so this is delayed synchronization rather than push delivery.
+For a member or guest whose responses fit one page, a refresh makes three RPC calls; creators without a participant make two. More responses require one call per additional 1,000 rows, bounded by `readAllPages`' 100-page ceiling. Maximum supported options/participants remain those above. This bounds request frequency and traversal size; representative hosted latency/payload measurements remain outstanding. Closure and final-time changes appear on the next successful refresh, so this is delayed synchronization rather than push delivery.
 
-The existing availability editor accepts a refreshed snapshot only when clean. A dirty draft keeps its content and original expected version, so a concurrent remote save must still go through the explicit conflict/reload flow. Refresh failures keep the last complete state and show an out-of-date notice with a retry action. Manual retries use the same coalesced refresh path; another failure keeps the notice, data and reconnect recovery. Response controls remain disabled until a successful read. A `42501` access denial clears visible detail and stops the schedule. Local save, status and finalization mutations invalidate older background reads so they cannot replace the command result. Background reads publish time options only when their JSON contents change, avoiding repeated calendar checks for unchanged options.
-
-Guests retain load/after-save refreshes. Their unpaged detail RPC is not put on a timer. Retiring guest nested responses and measuring their replacement remain F19 follow-ups.
+The existing availability editor accepts a refreshed snapshot only when clean. A dirty draft keeps its content and original expected version, so a concurrent remote save must still go through the explicit conflict/reload flow. Refresh failures keep the last complete state and show an out-of-date notice with a retry action. Manual retries use the same coalesced refresh path; another failure keeps the notice, data and reconnect recovery. Response controls remain disabled until a successful read. A `42501` access denial clears visible detail and stops the schedule. A denied guest capability instead stops the schedule and drops the capability, keeping the poll on screen with the notice and join prompt, as a denied guest save does. A guest schedule whose capability was dropped or replaced elsewhere stops without sending it again; rejoining reloads the poll and starts a new schedule. Local save, status and finalization mutations invalidate older background reads so they cannot replace the command result. Background reads publish time options only when their JSON contents change, avoiding repeated calendar checks for unchanged options.
 
 ## Verification
 
 - `npm run test:reads:db` (also part of `npm run test:database`): migration replay with a legacy null `created_at`, grants, full traversal at several page sizes up to 100, including polls that share a microsecond timestamp, role filters, a poll created mid-traversal, 1,200 responses across pages of 400 and 500, cross-poll exclusion, invalid cursors and sizes, unrelated and missing callers, and the oversized-detail failure.
-- `npm run test:web:reads`: the bundled web store, list screen and refresh scheduler against a mocked transport and deterministic clock. F20 adds cadence, visibility/offline, focus/reconnect coalescing, full response traversal, dirty/clean editors, conflict versions, failures/recovery, local mutation races, access loss, and route/account/disposal cases. It checks request counts, load-more and its fencing across account changes, error display, 1,200-row response traversal, and rejection of mismatched totals or counts.
+- `npm run test:reads:db` also covers guest reads: grants, equality with the member detail and pages, 1,200-row traversal, invalid sizes and cursors, wrong, foreign and missing capabilities, and reads after the poll closes. The private builders are not executable by any API role.
+- `npm run test:web:reads`: the bundled web store, list screen and refresh scheduler against a mocked transport and deterministic clock. F20 adds cadence, visibility/offline, focus/reconnect coalescing, full response traversal, dirty/clean editors, conflict versions, failures/recovery, local mutation races, access loss, and route/account/disposal cases. A guest test traverses 1,200 rows through the guest RPCs, receives a closure on the next refresh, stops an old schedule after a rejoin without sending the replaced token or raising the notice, and keeps the poll and join prompt when its capability is revoked. It checks request counts, load-more and its fencing across account changes, error display, 1,200-row response traversal, and rejection of mismatched totals or counts.
 
 Query plans and payload sizes have not been measured against representative hosted data. Do that before setting operating limits tighter or looser than the ones above.
 
@@ -126,7 +138,10 @@ Query plans and payload sizes have not been measured against representative host
 
 Apply the migration with the other ordered migrations. `ALTER COLUMN created_at SET NOT NULL` scans `polls` under a brief exclusive lock, and the new index build blocks writes to `polls` while it runs. Both are short for an unreleased app. Ship web and native clients with or after the migration, because it calls the new RPCs directly.
 
+Apply `20261105214548_guest_bounded_reads.sql` before deploying the web build that calls the guest RPCs. It only creates and replaces functions.
+
 ## Remaining work
 
-- Guest detail still returns all of a poll's responses in one value. A guest response-page variant would need its own capability check.
-- Hosted multi-client validation of the F20 cadence, reconnect and draft-conflict behavior remains a release check. Member background refreshes use the F19 RPCs; no participant table reload remains.
+- Retire `get_guest_poll_detail`, `get_user_participated_polls` and `get_poll_with_summary` once no shipped client calls them.
+- Measure query plans and payload sizes against representative hosted data.
+- Hosted multi-client validation of the F20 cadence, reconnect and draft-conflict behavior remains a release check. Member and guest background refreshes use the F19 RPCs; no participant table reload remains.

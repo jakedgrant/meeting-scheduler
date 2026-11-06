@@ -48,7 +48,8 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
       }
       if (name === 'join_poll_as_guest') return { data: { participant: state.participant, guest_token: args.guest_token, created: true }, error: null };
       if (name === 'join_poll') return { data: { participant: state.participant, created: false }, error: null };
-      if (name === 'get_guest_poll_detail') return { data: { participant_id: participantId, poll, time_options: [option], participants: [state.participant], responses: [] }, error: null };
+      if (name === 'get_poll_detail_as_guest') return { data: { participant_id: participantId, poll, time_options: [option], participants: [state.participant], time_option_count: 1, participant_count: 1 }, error: null };
+      if (name === 'list_poll_responses_as_guest') return { data: { items: [], has_more: false, next_cursor: null, total_count: 0 }, error: null };
       if (name === 'get_availability') return { data: state.version, error: null };
       if (name === 'get_poll_detail') return { data: { poll, time_options: [option], participants: [state.participant], time_option_count: 1, participant_count: 1 }, error: null };
       if (name === 'list_poll_responses') return { data: { items: [], has_more: false, next_cursor: null, total_count: 0 }, error: null };
@@ -114,7 +115,7 @@ test('guest join -> immediate reload and navigation retain per-poll capability w
   actual.cleanupPollRealtime();
   await actual.loadPoll(pollId);
   assert.deepEqual(actual.get(actual.currentGuest), capability);
-  assert.equal(state.calls.filter(call => call.name === 'get_guest_poll_detail').length, 2);
+  assert.equal(state.calls.filter(call => call.name === 'get_poll_detail_as_guest').length, 2);
   await actual.joinPoll(otherPollId, 'Another guest').catch(() => {});
   assert.notEqual(state.calls.filter(call => call.name === 'join_poll_as_guest')[1].args.guest_token, capability.token);
 });
@@ -300,9 +301,13 @@ test('a guest detail that fails its check keeps the capability; one for another 
   const { actual, state } = await fixture(t);
   await actual.joinPoll(pollId, 'Guest');
   const capability = actual.get(actual.currentGuest);
-  const detail = { participant_id: participantId, poll, time_options: [option], participants: [state.participant], responses: [] };
-  for (const malformed of [{ ...detail, responses: [{ id: 'response', status: 'available' }] }, { ...detail, participant_id: memberId }, { ...detail, poll: { ...poll, max_participants: '10' } }]) {
-    state.handler = name => name === 'get_guest_poll_detail' ? { data: malformed, error: null } : undefined;
+  const detail = { participant_id: participantId, poll, time_options: [option], participants: [state.participant], time_option_count: 1, participant_count: 1 };
+  const malformedDetails = [{ ...detail, participant_count: 2 }, { ...detail, participant_id: memberId }, { ...detail, poll: { ...poll, max_participants: '10' } }];
+  const malformedPages = [{ items: [{ id: 'response', status: 'available' }], has_more: false, next_cursor: null, total_count: 1 },
+    { items: [], has_more: false, next_cursor: null, total_count: 1 }];
+  const malformed = [...malformedDetails.map(data => ['get_poll_detail_as_guest', data]), ...malformedPages.map(data => ['list_poll_responses_as_guest', data])];
+  for (const [rpc, data] of malformed) {
+    state.handler = name => name === rpc ? { data, error: null } : undefined;
     await actual.loadPoll(pollId);
     assert.equal(actual.get(actual.currentPoll), null);
     assert.equal(actual.get(actual.guestNotice), null);
@@ -310,7 +315,7 @@ test('a guest detail that fails its check keeps the capability; one for another 
   state.handler = undefined;
   await actual.loadPoll(pollId);
   assert.deepEqual(actual.get(actual.currentGuest), capability);
-  state.handler = name => name === 'get_guest_poll_detail' ? { data: { ...detail, poll: { ...poll, id: otherPollId } }, error: null } : undefined;
+  state.handler = name => name === 'get_poll_detail_as_guest' ? { data: { ...detail, poll: { ...poll, id: otherPollId } }, error: null } : undefined;
   await actual.loadPoll(pollId);
   assert.equal(actual.get(actual.currentGuest), null);
   assert.match(actual.get(actual.guestNotice), /Join again/);
@@ -453,7 +458,7 @@ for (const boundary of ['destroy', 'route', 'account']) {
     assert.equal(reloads, 0);
     assert.equal(actual.get(actual.currentGuest), null);
     assert.equal(actual.get(actual.currentAvailability), null);
-    assert.equal(state.calls.some(call => call.name === 'get_guest_poll_detail'), false);
+    assert.equal(state.calls.some(call => call.name === 'get_poll_detail_as_guest'), false);
     assert.equal(actual.get(actual.currentPoll)?.id ?? null, boundary === 'route' ? otherPollId : null);
   });
 }
@@ -474,7 +479,7 @@ for (const command of ['get_availability', 'save_availability']) {
       .catch(error => error);
     actual.cleanupPollRealtime();
     // A current detail request detects rotation, then the user joins again.
-    state.handler = name => name === 'get_guest_poll_detail' ? { error: { code: '42501', message: 'Guest access denied' } } : undefined;
+    state.handler = name => name === 'get_poll_detail_as_guest' ? { error: { code: '42501', message: 'Guest access denied' } } : undefined;
     await actual.loadPoll(pollId);
     state.handler = undefined;
     await actual.joinPoll(pollId, 'Guest again');
@@ -502,7 +507,7 @@ test('late successful join cannot replace a capability acquired after revocation
     : undefined;
   const oldJoin = actual.joinPoll(pollId, 'Retry guest');
   actual.cleanupPollRealtime();
-  state.handler = name => name === 'get_guest_poll_detail' ? { error: { code: '42501', message: 'Guest access denied' } } : undefined;
+  state.handler = name => name === 'get_poll_detail_as_guest' ? { error: { code: '42501', message: 'Guest access denied' } } : undefined;
   await actual.loadPoll(pollId);
   state.handler = undefined;
   await actual.joinPoll(pollId, 'Guest again');
