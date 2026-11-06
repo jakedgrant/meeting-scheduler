@@ -190,8 +190,8 @@ test('F06/F10 response invariants, transactional saves and finalization on Postg
       });
     }
     await asRole('anon', null, async () => {
-      const detail = await scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [guest.participant.id, hex('a')]);
-      assert.equal(detail.responses.length, 1);
+      const page = await scalar('SELECT public.list_poll_responses_as_guest($1,$2) AS result', [guest.participant.id, hex('a')]);
+      assert.equal(page.items.length, 1);
     });
   });
 
@@ -343,8 +343,8 @@ test('F06/F10 response invariants, transactional saves and finalization on Postg
         [otherGuest.participant.id, hex('b'), polls.open.id], [id, 'A'.repeat(64), polls.open.id]]) {
         await assert.rejects(save(pollId, [r(o1, 'maybe')], null, { participant, token }), denied('Guest access denied'));
       }
-      const detail = await scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [id, hex('a')]);
-      assert.ok(detail.responses.some(x => x.participant_id === id && x.note === 'Guest note'));
+      const page = await scalar('SELECT public.list_poll_responses_as_guest($1,$2) AS result', [id, hex('a')]);
+      assert.ok(page.items.some(x => x.participant_id === id && x.note === 'Guest note'));
     });
     // A signed-in device holding the capability may also use it.
     await asRole('authenticated', unrelated, async () => {

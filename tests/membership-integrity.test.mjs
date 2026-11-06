@@ -172,7 +172,9 @@ test('F04 membership reconciliation, uniqueness, idempotent joins and claims on 
     assert.equal(await scalar(`SELECT count(*)::int AS result FROM (SELECT 1 FROM public.poll_participants
       WHERE user_id IS NOT NULL GROUP BY poll_id, user_id HAVING count(*) > 1) d`), 0);
     await asRole('authenticated', member, async () => {
-      const joined = (await scalar('SELECT public.get_user_participated_polls() AS result')).joined_polls.map(p => p.id);
+      const page = await scalar("SELECT public.list_poll_summaries('member') AS result");
+      assert.equal(page.has_more, false);
+      const joined = page.items.map(item => item.poll.id);
       assert.deepEqual(joined.sort(), [polls.active.id, polls.closed.id].sort());
     });
     await assert.rejects(db.query('INSERT INTO public.poll_participants(poll_id,user_id) VALUES ($1,$2)',
