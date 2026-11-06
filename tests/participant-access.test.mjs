@@ -168,12 +168,12 @@ test('F03 participant access, guest capabilities and identity protection on Post
       FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
       WHERE (n.nspname='poll_private' AND p.proname IN ('protect_participant_identity','store_participant_contact',
         'can_view_participants','new_guest_token','guest_token_hash','verified_guest_participant','lock_guest_participant',
-        'join_poll_as_guest','get_guest_participant','get_guest_poll_detail','update_guest_participant','rotate_guest_token'))
-        OR (n.nspname='public' AND p.proname IN ('join_poll_as_guest','get_guest_participant','get_guest_poll_detail',
+        'join_poll_as_guest','get_guest_participant','update_guest_participant','rotate_guest_token'))
+        OR (n.nspname='public' AND p.proname IN ('join_poll_as_guest','get_guest_participant',
         'update_guest_participant','rotate_guest_token'))
       ORDER BY 1,2`)).rows;
-    assert.equal(helpers.length, 17);
-    const guestCommands = ['join_poll_as_guest', 'get_guest_participant', 'get_guest_poll_detail',
+    assert.equal(helpers.length, 15);
+    const guestCommands = ['join_poll_as_guest', 'get_guest_participant',
       'update_guest_participant', 'rotate_guest_token'];
     const anonCallable = new Set(guestCommands);
     const authCallable = new Set([...guestCommands, 'can_view_participants']);
@@ -203,9 +203,9 @@ test('F03 participant access, guest capabilities and identity protection on Post
             [memberships[status].id])).rows, [], status);
         }
         assert.deepEqual((await db.query('SELECT id FROM public.poll_participants WHERE id=$1', [legacyGuest.id])).rows, []);
-        // The existing summary RPC remains owner/member only.
+        // The bounded detail RPC remains owner/member only.
         if (role === 'authenticated') {
-          await assert.rejects(scalar('SELECT public.get_poll_with_summary($1) AS result', [polls.closed.id]), deny);
+          await assert.rejects(scalar('SELECT public.get_poll_detail($1) AS result', [polls.closed.id]), deny);
         }
       });
     }
@@ -217,8 +217,8 @@ test('F03 participant access, guest capabilities and identity protection on Post
         assert.ok((await visible(polls[status].id)).some(row => row.id === memberships[status].id), status);
       }
       assert.ok((await visible(polls.closed.id)).some(row => row.id === legacyGuest.id));
-      const summary = await scalar('SELECT public.get_poll_with_summary($1) AS result', [polls.closed.id]);
-      assert.ok(summary.participants.some(p => p.display_name === 'Legacy guest'));
+      const detail = await scalar('SELECT public.get_poll_detail($1) AS result', [polls.closed.id]);
+      assert.ok(detail.participants.some(p => p.anonymous_name === 'Legacy guest'));
     });
     await asRole('authenticated', member, async () => {
       for (const status of ['draft', 'active', 'closed', 'archived']) {
@@ -231,7 +231,7 @@ test('F03 participant access, guest capabilities and identity protection on Post
     });
   });
 
-  await t.test('no caller can read guest emails or capabilities from rows, embeds, or summaries', async () => {
+  await t.test('no caller can read guest emails or capabilities from rows, embeds, or poll detail', async () => {
     for (const [role, userId] of callers) {
       await asRole(role, userId, async () => {
         const payload = JSON.stringify(await visible());
@@ -242,7 +242,7 @@ test('F03 participant access, guest capabilities and identity protection on Post
       });
     }
     await asRole('authenticated', owner, async () => {
-      const payload = JSON.stringify(await scalar('SELECT public.get_poll_with_summary($1) AS result', [polls.active.id]));
+      const payload = JSON.stringify(await scalar('SELECT public.get_poll_detail($1) AS result', [polls.active.id]));
       assert.ok(payload.includes('Active guest'));
       assert.equal(payload.includes(guestToken), false);
       assert.equal(payload.includes('guest@example.test'), false);
@@ -337,7 +337,8 @@ test('F03 participant access, guest capabilities and identity protection on Post
     try {
       for (const [role, userId] of [['anon', null], ['authenticated', unrelated]]) {
         await asRole(role, userId, async () => {
-          const detail = await scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [guest.id, guestToken]);
+          const detail = await scalar('SELECT public.get_poll_detail_as_guest($1,$2) AS result', [guest.id, guestToken]);
+          const page = await scalar('SELECT public.list_poll_responses_as_guest($1,$2) AS result', [guest.id, guestToken]);
           assert.equal(detail.participant_id, guest.id);
           assert.equal(detail.poll.id, polls.active.id);
           assert.equal(detail.time_options.length, 1);
@@ -347,15 +348,18 @@ test('F03 participant access, guest capabilities and identity protection on Post
           const memberRow = detail.participants.find(p => p.id === memberships.active.id);
           assert.deepEqual(memberRow.profiles, { display_name: 'Member' });
           assert.equal(detail.participants.find(p => p.id === guest.id).profiles, null);
-          assert.deepEqual(detail.responses.map(r => r.id), before.rows.map(r => r.id));
-          const payload = JSON.stringify(detail);
+          assert.deepEqual(page.items.map(r => r.id), before.rows.map(r => r.id));
+          const payload = JSON.stringify({ detail, page });
           for (const secret of [guestToken, second.guest_token, 'guest@example.test', legacyEmail]) {
             assert.equal(payload.includes(secret), false, secret);
           }
           for (const token of [second.guest_token, '0'.repeat(64), null]) {
-            await assert.rejects(scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [guest.id, token]), guestDenied);
+            await assert.rejects(scalar('SELECT public.get_poll_detail_as_guest($1,$2) AS result', [guest.id, token]), guestDenied);
+            await assert.rejects(scalar('SELECT public.list_poll_responses_as_guest($1,$2) AS result', [guest.id, token]), guestDenied);
           }
-          await assert.rejects(scalar('SELECT public.get_guest_poll_detail($1,$2) AS result',
+          await assert.rejects(scalar('SELECT public.get_poll_detail_as_guest($1,$2) AS result',
+            [legacyGuest.id, legacyToken]), guestDenied);
+          await assert.rejects(scalar('SELECT public.list_poll_responses_as_guest($1,$2) AS result',
             [legacyGuest.id, legacyToken]), guestDenied);
         });
       }

@@ -254,7 +254,7 @@ test('F19 paged summaries, bounded detail and complete response traversal', asyn
     }
     assert.equal((await guestDetail(elsewhere)).poll.id, joined[0], 'each capability opens only its own poll');
 
-    // Like get_guest_poll_detail, a closed poll stays readable to its guests.
+    // A closed poll stays readable to its guests.
     await db.query("UPDATE public.polls SET status='closed' WHERE id=$1", [busy]);
     assert.equal((await guestDetail(guest)).poll.status, 'closed');
     assert.equal((await guestResponses(guest, 1)).total_count, 1200);

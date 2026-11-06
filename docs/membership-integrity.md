@@ -31,7 +31,7 @@ The migration locks `poll_participants` and `availability_responses` against con
 5. Duplicate rows are deleted; their private credentials cascade (the audit keeps a copy).
 6. `poll_participants_one_membership_per_user` is created: a unique index on `(poll_id, user_id) WHERE user_id IS NOT NULL`.
 
-Guests have no account identity to merge on, so guest rows with the same name stay distinct. `get_user_participated_polls` already used `EXISTS` after F02, so its joined list did not repeat polls; the index now also keeps participant lists and counts correct.
+Guests have no account identity to merge on, so guest rows with the same name stay distinct. `get_user_participated_polls` (since retired) already used `EXISTS` after F02, so its joined list did not repeat polls; the index now also keeps participant lists and counts correct.
 
 **Pre-deployment inspection** (read-only, for the project owner):
 
