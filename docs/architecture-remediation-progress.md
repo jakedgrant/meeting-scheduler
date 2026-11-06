@@ -2,6 +2,22 @@
 
 Updated November 5, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F19 legacy read retirement, November 5
+
+Branch `claude/next-remedy-tranche-11` stacks on `claude/next-remedy-tranche-10` (draft #91, F24 launch runs), which stacks on `claude/next-remedy-tranche-9` (draft #90, F13 view models), so the PR targets tranche 10's branch and should merge after #91 and #90. It closes the code half of the F19 item left open by tranche 8: retiring `get_guest_poll_detail`, `get_user_participated_polls` and `get_poll_with_summary`.
+
+No shipped source calls them. `git grep` over `apps/web`, the iOS wrapper and package (`apps/mobile`), Android, `packages` and `scripts` finds the names only in the generated `apps/web/src/lib/database.types.ts`; no RPC name is built from strings. Web calls `list_poll_summaries`, `get_poll_detail`, `list_poll_responses` and the guest variants; iOS and Android call the member functions. A store release made before those clients cannot be ruled out from source, which is why the migration has a rollout precondition.
+
+Migration `20261106051325_retire_legacy_read_rpcs` drops `public.get_guest_poll_detail(uuid, text)`, `poll_private.get_guest_poll_detail(uuid, text)`, `public.get_user_participated_polls(uuid)` and `public.get_poll_with_summary(uuid)`. It uses `DROP FUNCTION` without `CASCADE`, so an unexpected dependent makes it fail. Nothing depended on them: no other function, view or policy references the names, and the grants went with the functions. The private builders from `20261105214548` (`bounded_poll_detail`, `poll_response_page`, `guest_poll`) stay because the replacements call them. The generated web types lose the three entries.
+
+**Rollout precondition:** apply it only after every deployed web build calls `get_poll_detail_as_guest` (tranche 8, #89) and no released native build calls the old functions. See [retired functions](read-contracts.md#retired-functions) and the hosted rollout table below.
+
+Tests: the cases that exercised the old functions now run against the replacements. `rpc-authorization.test.mjs` checks signed-out, unrelated, missing-poll and revoked-member denial, same-poll response filtering and the hostile search path through `get_poll_detail`, `list_poll_responses` and `list_poll_summaries`; `participant-access`, `account-deletion`, `membership-integrity` and `response-commands` read guests through the guest RPCs. A new rpc-authorization case asserts that the three functions exist in neither `public` nor `poll_private` and that `anon`, `authenticated` and `service_role` get `42883` calling each, while the replacements and builders remain.
+
+Local results: `npm run test:database` **171 tests** passed, `npm run test:web` **176 tests** passed, `npm run check:database-types` matches the migrations after regeneration, and the web type check reports 0 errors and the 5 existing warnings. These ran in PGlite and Node only; no hosted project, simulator or emulator was used.
+
+Still open in F19: applying the migration to hosted projects in the order above, and measuring query plans and payloads on representative hosted data. F20's hosted multi-client check remains.
+
 ## F24 launch runs and advisory scanning, November 5
 
 Branch `claude/next-remedy-tranche-10` stacks on `claude/next-remedy-tranche-9` (draft #90, F13 view models, not yet merged), so the PR targets that branch and should merge after #90. It closes the app-launch, emulator and npm/SwiftPM advisory items in F24; a Gradle advisory scan remains open. The apps are now launched in CI and npm and SwiftPM dependency advisories are scanned. Required-check configuration stays a repository-owner action; [release checks](release-checks.md) lists the names.
@@ -373,6 +389,7 @@ Merging code does not change hosted state. The following are prelaunch checks or
 | F17/F27 (merged) | Apply `20261102152851` before deploying the calendar functions. Set up the listed alerts and choose a log retention period. Measure check latency and quota use from the new log lines, and decide on caching from those results | [Integration diagnostics](integration-diagnostics.md#alerts-and-retention) |
 | F21 (merged) | Apply `20261025021513` after `20261023224522`. Inspect existing `is_all_day` rows; legacy 23:59 ends remain valid and display by start date. Release the web/native clients with the schema so new all-day options use exclusive ends | [Date/time contract](date-time-contract.md) |
 | F19/F20 guest reads | Apply `20261105214548` after `20261025062518`, before deploying the web build that calls `get_poll_detail_as_guest`. It only adds and replaces functions, so it takes no table lock. Keep `get_guest_poll_detail` until no deployed web build calls it | [Guest reads](read-contracts.md#guest-reads) |
+| F19 legacy read retirement | Apply `20261106051325` **only after** every deployed web build calls `get_poll_detail_as_guest` (tranche 8, #89) and no released iOS or Android build calls `get_user_participated_polls`, `get_poll_with_summary` or `get_guest_poll_detail`. It drops those three functions (and the `poll_private` definer behind the last) and takes no table lock. Afterwards, confirm with `SELECT proname FROM pg_proc WHERE proname IN ('get_user_participated_polls','get_poll_with_summary','get_guest_poll_detail')` that nothing remains. Rollback is recreating the functions from `20261022181851` and `20261022212301` | [Retired functions](read-contracts.md#retired-functions) |
 | F26 (merged) | CI already verifies signing behavior with a throwaway key. Before distribution, configure the intended keystore, passwords, alias, and certificate SHA-256 through the secret store; confirm the upload/app-signing key and register its SHA-1 with the Google OAuth client; supply `google-services.json` from a secret | [Android release signing](android-release-signing.md) |
 
 ## Coordinator follow-ups

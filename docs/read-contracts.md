@@ -2,7 +2,7 @@
 
 Migration: [`20261025062518_bounded_read_apis.sql`](../supabase/migrations/20261025062518_bounded_read_apis.sql), created with `supabase migration new bounded_read_apis`.
 
-Before this change, the poll list came from `get_user_participated_polls`, which returns a user's entire created and joined history as one JSON value. Detail screens read options, participants and responses straight from the tables, where the Data API silently stops at 1,000 rows (`max_rows` in `supabase/config.toml`). A poll can have 500 options and 100 participants, so its responses can reach 50,000 rows. Neither path told the client whether it had everything.
+Before this change, the poll list came from `get_user_participated_polls` (since dropped; see [Retired functions](#retired-functions)), which returns a user's entire created and joined history as one JSON value. Detail screens read options, participants and responses straight from the tables, where the Data API silently stops at 1,000 rows (`max_rows` in `supabase/config.toml`). A poll can have 500 options and 100 participants, so its responses can reach 50,000 rows. Neither path told the client whether it had everything.
 
 Three RPCs replace those reads for signed-in members. Each one has a hard size bound and tells the client how to confirm the result is complete.
 
@@ -68,7 +68,7 @@ Both collections are returned in full because writes already bound them: `check_
 list_poll_responses(poll_uuid uuid, page_size int = 500, page_cursor text = null) -> jsonb
 ```
 
-`page_size` must be 1–1000. Items are complete `availability_responses` rows ordered by `(participant_id, time_option_id)`, which the existing unique index serves. Only pairs whose participant and option both belong to the poll are included, matching guest detail and `get_poll_with_summary`. Legacy cross-poll rows written before F06 never appear.
+`page_size` must be 1–1000. Items are complete `availability_responses` rows ordered by `(participant_id, time_option_id)`, which the existing unique index serves. Only pairs whose participant and option both belong to the poll are included, matching the retired `get_guest_poll_detail` and `get_poll_with_summary`. Legacy cross-poll rows written before F06 never appear.
 
 `total_count` is present on the first page (no cursor) and null on later pages. Recounting on every page would repeat work proportional to the poll's responses.
 
@@ -83,7 +83,24 @@ list_poll_responses_as_guest(participant_uuid uuid, guest_token text, page_size 
 
 `get_poll_detail_as_guest` returns `get_poll_detail`'s value plus `participant_id`, and `list_poll_responses_as_guest` returns `list_poll_responses` pages, cursors and first-page total. Member and guest functions call the same private builders, so the size limits, ordering, cross-poll exclusion and `22023`/`54000` errors are identical. Only authorization differs: the capability must verify for a guest row, and the poll is the one that row belongs to. A wrong or rotated token, a member's participant id, and a missing participant all fail with `42501` `Guest access denied`. Like the legacy guest detail, a guest can read its poll in any state. `anon`, `authenticated` and `service_role` can execute both; a signed-in browser may still hold a guest capability.
 
-`get_guest_poll_detail`, which returns every response in one value, stays for web builds released before this migration. Retire it with `get_user_participated_polls` once no shipped client calls it.
+The legacy `get_guest_poll_detail`, which returned every response in one value, was kept for web builds released before this migration and is now dropped; see [Retired functions](#retired-functions).
+
+## Retired functions
+
+Migration: [`20261106051325_retire_legacy_read_rpcs.sql`](../supabase/migrations/20261106051325_retire_legacy_read_rpcs.sql).
+
+| Dropped | Replacement |
+| --- | --- |
+| `get_user_participated_polls(uuid)` | `list_poll_summaries` |
+| `get_poll_with_summary(uuid)` | `get_poll_detail` and `list_poll_responses` |
+| `get_guest_poll_detail(uuid, text)`, with its `poll_private` definer | `get_poll_detail_as_guest` and `list_poll_responses_as_guest` |
+
+The replacements return different shapes: paged, with explicit counts, and not per-option response tallies. No client in this repository reads the old shapes. The migration uses `DROP FUNCTION` without `CASCADE` on exact signatures, so a dependent object it did not anticipate makes it fail. It leaves the private builders from `20261105214548` (`bounded_poll_detail`, `poll_response_page`, `guest_poll`) and the helpers they use, because the replacements call them. After it runs, a call to a dropped function fails with `42883` (or `PGRST202` through the Data API) for every role.
+
+**Apply the migration only after both of these are true:**
+
+1. Every deployed web build calls `get_poll_detail_as_guest` (tranche 8, #89). A web build from before that still calls `get_guest_poll_detail`, and its guest reads would fail.
+2. No released native build calls any of the three functions. The current iOS and Android sources do not, but a store release made earlier might.
 
 ## Cursors and the completeness rule
 
@@ -110,7 +127,7 @@ Clients must therefore:
 | iOS | Adopted in the native continuation. The list reads one combined summary page (50 polls), exposes the current total and **Load more**, and uses summary counts/ranges directly. Filters apply to loaded polls. Both detail and response screens consume validated `get_poll_detail` metadata and traverse response pages before caching or displaying them. |
 | Android | Adopted in the native continuation. One combined summary page populates both list sections, with the total and **Load more**. No per-poll enrichment runs. Detail and response screens use `get_poll_detail` and validated response traversal. |
 
-`get_user_participated_polls` and `get_poll_with_summary` stay, with their F02 authorization, for compatibility with older builds. Current web/iOS/Android list and detail screens no longer call them. Retire them in a later migration once no shipped client calls them.
+Current web/iOS/Android list and detail screens call none of the retired functions. The migration that drops them waits on the rollout order in [Retired functions](#retired-functions).
 
 The native adapters reject mismatched metadata counts, duplicate response IDs/pairs, foreign participant/option references, missing first-page response totals, inconsistent continuation flags, and repeated cursors. They check the final response count against the first total. A failed traversal does not publish its partial rows. Account/request generations prevent late reads from replacing another account or a newer refresh. Transport tests cover these boundaries with intercepted SDK requests; hosted execution remains a separate check.
 
@@ -129,6 +146,7 @@ The existing availability editor accepts a refreshed snapshot only when clean. A
 ## Verification
 
 - `npm run test:reads:db` (also part of `npm run test:database`): migration replay with a legacy null `created_at`, grants, full traversal at several page sizes up to 100, including polls that share a microsecond timestamp, role filters, a poll created mid-traversal, 1,200 responses across pages of 400 and 500, cross-poll exclusion, invalid cursors and sizes, unrelated and missing callers, and the oversized-detail failure.
+- `npm run test:rpc:db` (and the other database suites) check that the three retired functions no longer exist in `public` or `poll_private`, so no API role can execute them, and run the access cases of the old functions against the replacements.
 - `npm run test:reads:db` also covers guest reads: grants, equality with the member detail and pages, 1,200-row traversal, invalid sizes and cursors, wrong, foreign and missing capabilities, and reads after the poll closes. The private builders are not executable by any API role.
 - `npm run test:web:reads`: the bundled web store, list screen and refresh scheduler against a mocked transport and deterministic clock. F20 adds cadence, visibility/offline, focus/reconnect coalescing, full response traversal, dirty/clean editors, conflict versions, failures/recovery, local mutation races, access loss, and route/account/disposal cases. A guest test traverses 1,200 rows through the guest RPCs, receives a closure on the next refresh, stops an old schedule after a rejoin without sending the replaced token or raising the notice, and keeps the poll and join prompt when its capability is revoked. It checks request counts, load-more and its fencing across account changes, error display, 1,200-row response traversal, and rejection of mismatched totals or counts.
 
@@ -140,8 +158,10 @@ Apply the migration with the other ordered migrations. `ALTER COLUMN created_at 
 
 Apply `20261105214548_guest_bounded_reads.sql` before deploying the web build that calls the guest RPCs. It only creates and replaces functions.
 
+Apply `20261106051325_retire_legacy_read_rpcs.sql` last, after the web build that calls the guest RPCs is the only deployed web build and no released native build calls the retired functions (see [Retired functions](#retired-functions)). It takes no table lock. Rolling it back means recreating the functions from `20261022181851` and `20261022212301`.
+
 ## Remaining work
 
-- Retire `get_guest_poll_detail`, `get_user_participated_polls` and `get_poll_with_summary` once no shipped client calls them.
+- Apply `20261106051325_retire_legacy_read_rpcs.sql` to hosted projects in the order above.
 - Measure query plans and payload sizes against representative hosted data.
 - Hosted multi-client validation of the F20 cadence, reconnect and draft-conflict behavior remains a release check. Member and guest background refreshes use the F19 RPCs; no participant table reload remains.

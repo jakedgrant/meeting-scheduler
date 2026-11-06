@@ -4,6 +4,8 @@ Migration: [`20261022181851_privileged_rpc_authorization.sql`](../supabase/migra
 
 The legacy self-service functions accepted another user's UUID and ran with the database owner's privileges. The migration keeps their existing names, argument names, defaults, and result types, but binds every self-service read to `auth.uid()`. The summary RPC requires current ownership or membership. Its reads run with the caller's table grants and RLS.
 
+> **Retired functions.** `get_user_participated_polls` and `get_poll_with_summary` are dropped by [`20261106051325_retire_legacy_read_rpcs.sql`](../supabase/migrations/20261106051325_retire_legacy_read_rpcs.sql). Their authorization rules live on in the bounded reads: `list_poll_summaries` (self only), and `get_poll_detail` and `list_poll_responses` (owner or member, `42501` `Poll access denied` for a missing or inaccessible poll). See [read contracts](read-contracts.md#retired-functions). The rest of this page describes the F02 migration as written; rows marked retired no longer exist once the later migration is applied.
+
 This closes direct RPC authorization gaps in the checked-in schema. Participant read/update policies and direct membership inserts still have the F03/F04 vulnerabilities. **F02 alone does not establish poll isolation:** a caller who forges or claims membership through those unchanged table paths can satisfy a membership-based RPC check.
 
 ## Access contract
@@ -19,11 +21,11 @@ This closes direct RPC authorization gaps in the checked-in schema. Participant 
 
 Self-service callers should continue omitting `user_uuid`. Installed clients that send their own UUID still work. An explicit `NULL` is rejected rather than treated as a missing argument. Having the `authenticated` database role without a user identity is insufficient. A service-role call to a self-service function also needs a matching user identity; backend billing and calendar operations use their separate service-only contracts.
 
-`get_poll_with_summary` returns the same `42501` / `Poll access denied` error for a missing poll and an inaccessible poll. It includes only responses whose participant and time option both belong to the requested poll. Its existing participant projection contains display names, avatars, response statuses, and notes; it does not add guest emails or access tokens. Cross-poll response **writes** remain F06 work.
+`get_poll_with_summary` (retired) returned the same `42501` / `Poll access denied` error for a missing poll and an inaccessible poll. It included only responses whose participant and time option both belong to the requested poll. Its participant projection contained display names, avatars, response statuses, and notes, not guest emails or access tokens. Cross-poll response **writes** remain F06 work.
 
 `get_poll_by_code(code)` trims whitespace and normalizes case. An active invitation returns the existing nine-column projection: ID, title, description, location, status, creator ID, timestamps, and share code. It returns no participant, response, email, or guest capability data. Knowing an inactive poll's code alone does not authorize its preview or summary.
 
-Anonymous guests can continue opening active invitation previews. Existing guest joins and edits use direct table paths; this migration does not change those policies. No current client calls the summary RPC as a guest. A verified guest read/edit command for closed polls needs the capability ownership and rotation rules from F03. The existing globally readable access tokens are not a suitable new authorization boundary.
+Anonymous guests can continue opening active invitation previews. Existing guest joins and edits use direct table paths; this migration does not change those policies. No client called the summary RPC as a guest. Guests read through their capability with the F03 and F19 guest functions. The existing globally readable access tokens are not a suitable new authorization boundary.
 
 ## Function and grant inventory
 
@@ -33,13 +35,13 @@ The migration revokes `PUBLIC`, `anon`, and `authenticated` grants on each affec
 
 | Public signature | Runs as after F02 | `anon` execution | `authenticated` execution | Current callers |
 | --- | --- | --- | --- | --- |
-| `get_user_participated_polls(uuid DEFAULT auth.uid())` | Invoker, self guard | Denied | Self only | Web, iOS, Android |
+| `get_user_participated_polls(uuid DEFAULT auth.uid())` (retired) | Invoker, self guard | Denied | Self only | None; replaced by `list_poll_summaries` |
 | `has_active_subscription(uuid DEFAULT auth.uid())` | Invoker, self guard | Denied | Self only | `can_create_poll` |
 | `get_user_entitlement(uuid DEFAULT auth.uid())` | Invoker, self guard | Denied | Self only | No current direct client call |
 | `count_unredeemed_passes(uuid DEFAULT auth.uid())` | Invoker, self guard | Denied | Self only | `can_create_poll` |
 | `count_active_polls(uuid DEFAULT auth.uid())` | Invoker, self guard | Denied | Self only | iOS, `can_create_poll` |
 | `can_create_poll(uuid DEFAULT auth.uid())` | Invoker, self guard | Denied | Self only | iOS |
-| `get_poll_with_summary(uuid)` | Invoker, owner/member guard | Denied | Owner/member | No current client call |
+| `get_poll_with_summary(uuid)` (retired) | Invoker, owner/member guard | Denied | Owner/member | None; replaced by `get_poll_detail` and `list_poll_responses` |
 | `get_poll_by_code(text)` | Invoker wrapper | Allowed preview | Allowed preview | Web, iOS, Android |
 | `is_poll_participant(uuid,uuid)` | Invoker wrapper | `false` | Current user's membership only | Existing RLS policies |
 | `generate_share_code()` | Invoker | Denied | Allowed | Share-code helper |
