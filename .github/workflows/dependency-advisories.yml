@@ -21,12 +21,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
-      - name: Fail on high or critical advisories in production dependencies
-        # Reads only the committed lockfiles; nothing is installed.
-        run: |
-          npm audit --package-lock-only --omit=dev --audit-level=high
-          npm --prefix apps/web audit --package-lock-only --omit=dev --audit-level=high
+      # These read only the committed lockfiles; nothing is installed. Each runs even if the
+      # other fails, so one run reports both.
+      - name: Fail on high or critical advisories in root production dependencies
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+      - name: Fail on high or critical advisories in web production dependencies
+        if: ${{ !cancelled() }}
+        run: npm --prefix apps/web audit --package-lock-only --omit=dev --audit-level=high
       - name: Report every advisory, development dependencies included
+        if: ${{ !cancelled() }}
         # Build and test tooling is not shipped, so these do not fail the build. They are listed
         # in the job summary for review and are what Dependabot proposes updates for.
         run: |

@@ -4,7 +4,7 @@ set -euo pipefail
 # Builds the MeetingScheduler app wrapper for a simulator, installs it on a fresh simulator and
 # launches it with no signed-in session. The launch must stay alive for IOS_LAUNCH_SECONDS, and
 # the system must write no crash report for it. No account, secret or test backend is involved:
-# a signed-out launch makes no authenticated request, so the run does not depend on hosted data.
+# a signed-out launch makes no authenticated request. The app may still contact RevenueCat and Supabase anonymously on a hosted runner; the check does not depend on the result.
 #
 # On a disposable GitHub Actions runner the script creates and deletes its own simulator. For a
 # local run, set IOS_LAUNCH_SIMULATOR_ID to a simulator you own; the script then boots it if
@@ -56,7 +56,8 @@ PY
     com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$runtime_id")"
 fi
 
-if ! xcrun simctl list devices booted | grep -q "$simulator_id"; then
+booted_devices="$(xcrun simctl list devices booted)"
+if [[ "$booted_devices" != *"$simulator_id"* ]]; then
   booted_here=true
   xcrun simctl boot "$simulator_id"
 fi
@@ -86,19 +87,22 @@ pid="${launch_output##*: }"
 
 # The process must still be the same running process after the settle period.
 sleep "$settle_seconds"
-xcrun simctl io "$simulator_id" screenshot "$output/launched.png"
+xcrun simctl io "$simulator_id" screenshot "$output/launched.png" || true
 if ! kill -0 "$pid" 2>/dev/null; then
   echo "::error::MeetingScheduler (pid $pid) exited within ${settle_seconds}s of launch"
   exit 1
 fi
-if xcrun simctl spawn "$simulator_id" launchctl list | awk -v id="UIKitApplication:$bundle_id" 'index($0, id)' \
-    | tee "$output/launchctl.txt" | grep -q .; then :; else
+registered="$(xcrun simctl spawn "$simulator_id" launchctl list | awk -v id="UIKitApplication:$bundle_id" 'index($0, id)')"
+printf '%s\n' "$registered" > "$output/launchctl.txt"
+if [[ -z "$registered" ]]; then
   echo "::error::the app is not registered with the simulator after launch"
   exit 1
 fi
-if [[ -d "$reports" ]] && find "$reports" -name 'MeetingScheduler*' -newer "$marker" | grep -q .; then
+crashes=""
+[[ ! -d "$reports" ]] || crashes="$(find "$reports" -name 'MeetingScheduler*' -newer "$marker")"
+if [[ -n "$crashes" ]]; then
   echo "::error::a crash report was written for MeetingScheduler"
-  find "$reports" -name 'MeetingScheduler*' -newer "$marker" -print
+  printf '%s\n' "$crashes"
   exit 1
 fi
 echo "MeetingScheduler stayed running as pid $pid for ${settle_seconds}s with no crash report."

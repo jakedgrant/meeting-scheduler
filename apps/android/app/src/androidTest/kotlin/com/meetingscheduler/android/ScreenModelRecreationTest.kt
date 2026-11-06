@@ -48,6 +48,15 @@ class ScreenModelRecreationTest {
         lateinit var screen: ScreenModelViewModel<*>
         var generation = 0L
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            // The first provider status bumps the identity generation, which would clear the store
+            // this test is about to fill, so wait for auth to finish initializing first.
+            val deadline = System.nanoTime() + 30_000_000_000L
+            var loading = true
+            while (loading && System.nanoTime() < deadline) {
+                instrumentation.runOnMainSync { loading = auth.isLoading }
+                if (loading) Thread.sleep(50)
+            }
+            assertFalse("auth did not finish initializing", loading)
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 // The composition created this store; the provider returns that instance.
