@@ -38,7 +38,6 @@ fun PollNavHost(
         composable(Screen.PollList.route) {
             PollListView(
                 pollService = pollService,
-                purchaseService = purchaseService,
                 onNavigateToPoll = { pollId ->
                     navController.navigate(Screen.PollDetail.createRoute(pollId))
                 },
@@ -116,6 +115,7 @@ fun PollNavHost(
 
         composable(Screen.Paywall.route) {
             PaywallView(
+                authService = authService,
                 purchaseService = purchaseService,
                 onDismiss = { navController.popBackStack() }
             )

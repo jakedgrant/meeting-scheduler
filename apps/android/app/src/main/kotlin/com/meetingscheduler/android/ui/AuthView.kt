@@ -1,7 +1,6 @@
 package com.meetingscheduler.android.ui
 
 import android.util.Log
-import com.meetingscheduler.android.FailureLog
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -10,15 +9,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
-import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
@@ -26,157 +24,67 @@ import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
-import com.meetingscheduler.android.services.AuthService
-import kotlinx.coroutines.launch
-import java.security.MessageDigest
-import java.util.UUID
+import com.meetingscheduler.android.services.SignInAuth
+import kotlinx.coroutines.Job
 
 private const val TAG = "AuthView"
 private const val WEB_CLIENT_ID = "761708589972-t4o5c3b51shbt84h6ijpsr1qom0ri54s.apps.googleusercontent.com"
 
+/**
+ * Asks the system credential UI for a Google ID token. [context] must be the Activity, which the
+ * UI needs; the source lives only as long as one sign-in, which [AuthView] cancels when it leaves
+ * the composition.
+ */
+private fun googleCredentialSource(context: Context, credentialManager: CredentialManager) =
+    GoogleCredentialSource { hashedNonce, returningAccountsOnly ->
+        val option = if (returningAccountsOnly) {
+            // One Tap for returning users is faster.
+            GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(true)
+                .setServerClientId(WEB_CLIENT_ID)
+                .setAutoSelectEnabled(true)
+                .setNonce(hashedNonce)
+                .build()
+        } else {
+            // Works without an Android OAuth client; only needs the Web Client ID.
+            GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID).setNonce(hashedNonce).build()
+        }
+        val request = GetCredentialRequest.Builder().addCredentialOption(option).build()
+        val response = try {
+            credentialManager.getCredential(context, request)
+        } catch (e: GetCredentialCancellationException) {
+            Log.d(TAG, "Google sign-in cancelled")
+            throw GoogleCredentialCancelled()
+        } catch (e: NoCredentialException) {
+            Log.d(TAG, "No returning user")
+            throw GoogleCredentialUnavailable()
+        } catch (e: GetCredentialException) {
+            Log.d(TAG, "Google credential request failed: ${e.type}")
+            throw GoogleCredentialFailed(e)
+        }
+        val credential = response.credential
+        if (credential !is CustomCredential || credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+            throw GoogleCredentialRejected("Unexpected credential type")
+        }
+        try {
+            GoogleIdTokenCredential.createFrom(credential.data).idToken
+        } catch (e: GoogleIdTokenParsingException) {
+            throw GoogleCredentialRejected("Failed to parse Google credentials", e)
+        }
+    }
+
 @Composable
-fun AuthView(authService: AuthService) {
-    var email by remember { mutableStateOf(TextFieldValue("")) }
-    var isLoading by remember { mutableStateOf(false) }
-    var uiRequest by remember { mutableStateOf(0L) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showMagicLinkSent by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+fun AuthView(authService: SignInAuth) {
+    // The holder is kept by the store of this identity generation (see ContentView), so the form
+    // and a magic-link request outlast the Activity; the next generation gets a fresh form.
+    val holder = signInHolder(authService)
+    val model = holder.opened.getOrThrow()
     val context = LocalContext.current
     val credentialManager = remember { CredentialManager.create(context) }
 
-    // Generate a raw nonce for security (prevents replay attacks)
-    // Returns a pair of (rawNonce, hashedNonce)
-    // - rawNonce: passed to Supabase for verification
-    // - hashedNonce: passed to Google Credential Manager
-    fun generateNonce(): Pair<String, String> {
-        val rawNonce = UUID.randomUUID().toString()
-        val bytes = rawNonce.toByteArray()
-        val md = MessageDigest.getInstance("SHA-256")
-        val digest = md.digest(bytes)
-        val hashedNonce = digest.fold("") { str, it -> str + "%02x".format(it) }
-        return Pair(rawNonce, hashedNonce)
-    }
-
-    // Handle the credential response from Google Sign-In
-    // Note: rawNonce is the unhashed nonce that Supabase needs for verification
-    suspend fun handleSignIn(result: GetCredentialResponse, rawNonce: String, attempt: com.meetingscheduler.android.services.NativeSignInAttempt) {
-        if (!authService.isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
-        when (val credential = result.credential) {
-            is CustomCredential -> {
-                if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                    try {
-                        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                        val idToken = googleIdTokenCredential.idToken
-                        Log.d(TAG, "Successfully received Google ID token, signing in with Supabase...")
-                        authService.signInWithGoogle(idToken, rawNonce, attempt)
-                        Log.d(TAG, "Supabase sign-in completed successfully")
-                    } catch (e: GoogleIdTokenParsingException) {
-                        FailureLog.record(TAG, "Received an invalid Google ID token response", e)
-                        if (authService.isCurrent(attempt)) errorMessage = "Failed to parse Google credentials"
-                    } catch (e: kotlinx.coroutines.CancellationException) { throw e
-                    } catch (e: Exception) {
-                        FailureLog.record(TAG, "Supabase sign-in failed", e)
-                        if (authService.isCurrent(attempt)) errorMessage = e.message ?: "Sign-in failed"
-                    }
-                } else {
-                    Log.e(TAG, "Unexpected credential type: ${credential.type}")
-                    errorMessage = "Unexpected credential type"
-                }
-            }
-            else -> {
-                Log.e(TAG, "Unexpected credential class: ${credential::class.java}")
-                errorMessage = "Unexpected credential type"
-            }
-        }
-    }
-
-    // Sign in with Google using Credential Manager
-    fun signInWithGoogle() {
-        val attempt = authService.beginNativeSignIn()
-        val request = ++uiRequest
-        isLoading = true
-        errorMessage = null
-        val (rawNonce, hashedNonce) = generateNonce()
-
-        scope.launch {
-            try {
-                // First, try One Tap sign-in for returning users (faster UX)
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(true)
-                    .setServerClientId(WEB_CLIENT_ID)
-                    .setAutoSelectEnabled(true)
-                    .setNonce(hashedNonce)
-                    .build()
-
-                val oneTapRequest = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
-                    .build()
-
-                try {
-                    val result = credentialManager.getCredential(context, oneTapRequest)
-                    handleSignIn(result, rawNonce, attempt)
-                    return@launch
-                } catch (e: NoCredentialException) {
-                    Log.d(TAG, "No returning user, using Sign In With Google button flow")
-                } catch (e: GetCredentialCancellationException) {
-                    // User cancelled One Tap or it failed after account selection, fall through to SIWG
-                    Log.d(TAG, "One Tap cancelled or failed, falling back to Sign In With Google")
-                } catch (e: GetCredentialException) {
-                    Log.d(TAG, "One Tap failed, falling back to Sign In With Google: ${e.type}")
-                }
-
-                if (!authService.isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
-                // Fall back to "Sign In With Google" button flow
-                // This works without Android OAuth client, only needs Web Client ID
-                val signInWithGoogleOption = GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID)
-                    .setNonce(hashedNonce)
-                    .build()
-
-                val signInRequest = GetCredentialRequest.Builder()
-                    .addCredentialOption(signInWithGoogleOption)
-                    .build()
-
-                val result = credentialManager.getCredential(context, signInRequest)
-                handleSignIn(result, rawNonce, attempt)
-
-            } catch (e: GetCredentialCancellationException) {
-                Log.d(TAG, "User cancelled Google sign-in")
-                // User cancelled, no error message needed
-            } catch (e: GetCredentialException) {
-                FailureLog.record(TAG, "Google sign-in failed: ${e.type}", e)
-                if (authService.isCurrent(attempt)) errorMessage = "Google sign-in failed. Please ensure you have a Google account on this device."
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e
-            } catch (e: Exception) {
-                FailureLog.record(TAG, "Unexpected error during Google sign-in", e)
-                if (authService.isCurrent(attempt)) errorMessage = e.message ?: "Sign-in failed"
-            } finally {
-                if (uiRequest == request) isLoading = false
-            }
-        }
-    }
-
-    fun signInWithMagicLink() {
-        if (email.text.isBlank()) {
-            errorMessage = "Please enter your email"
-            return
-        }
-
-        val request = ++uiRequest
-        isLoading = true
-        errorMessage = null
-        scope.launch {
-            try {
-                authService.signInWithMagicLink(email.text)
-                if (uiRequest == request) showMagicLinkSent = true
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e
-            } catch (e: Exception) {
-                if (uiRequest == request) errorMessage = e.message
-            } finally {
-                if (uiRequest == request) isLoading = false
-            }
-        }
-    }
+    // The credential UI belongs to this Activity, so a Google sign-in does not outlive its composition.
+    var googleSignIn by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(holder) { onDispose { googleSignIn?.cancel() } }
 
     Box(
         modifier = Modifier
@@ -220,11 +128,13 @@ fun AuthView(authService: AuthService) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Button(
-                    onClick = { signInWithGoogle() },
+                    onClick = {
+                        googleSignIn = holder.launch { signInWithGoogle(googleCredentialSource(context, credentialManager)) }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
-                    enabled = !isLoading,
+                    enabled = !model.isLoading,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant
                     ),
@@ -236,16 +146,7 @@ fun AuthView(authService: AuthService) {
                 }
             }
 
-            TextButton(onClick = {
-                val request = ++uiRequest
-                isLoading = true
-                errorMessage = null
-                scope.launch {
-                    try { authService.signInWithGoogleBrowser() }
-                    catch (error: Exception) { if (error !is kotlinx.coroutines.CancellationException && uiRequest == request) errorMessage = "Browser sign-in could not be started." }
-                    finally { if (uiRequest == request) isLoading = false }
-                }
-            }, enabled = !isLoading) { Text("Sign in with Google in browser") }
+            TextButton(onClick = { holder.launch { signInWithGoogleBrowser() } }, enabled = !model.isLoading) { Text("Sign in with Google in browser") }
 
             // Divider
             Row(
@@ -264,23 +165,23 @@ fun AuthView(authService: AuthService) {
                 modifier = Modifier.fillMaxWidth()
             ) {
                 OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it },
+                    value = model.email,
+                    onValueChange = model::editEmail,
                     label = { Text("Email") },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isLoading,
+                    enabled = !model.isLoading,
                     singleLine = true
                 )
 
                 Button(
-                    onClick = { signInWithMagicLink() },
+                    onClick = { holder.launch { signInWithMagicLink() } },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
-                    enabled = !isLoading,
+                    enabled = !model.isLoading,
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    if (isLoading) {
+                    if (model.isLoading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
                             color = MaterialTheme.colorScheme.onPrimary
@@ -292,7 +193,7 @@ fun AuthView(authService: AuthService) {
             }
 
             // Error Message
-            (errorMessage ?: authService.callbackError)?.let { error ->
+            model.displayedError?.let { error ->
                 Text(
                     text = error,
                     color = MaterialTheme.colorScheme.error,
@@ -305,13 +206,13 @@ fun AuthView(authService: AuthService) {
     }
 
     // Magic Link Sent Dialog
-    if (showMagicLinkSent) {
+    if (model.showMagicLinkSent) {
         AlertDialog(
-            onDismissRequest = { showMagicLinkSent = false },
+            onDismissRequest = model::dismissMagicLinkSent,
             title = { Text("Check your email") },
-            text = { Text("We've sent a sign-in link to ${email.text}") },
+            text = { Text("We've sent a sign-in link to ${model.email}") },
             confirmButton = {
-                TextButton(onClick = { showMagicLinkSent = false }) {
+                TextButton(onClick = model::dismissMagicLinkSent) {
                     Text("OK")
                 }
             }

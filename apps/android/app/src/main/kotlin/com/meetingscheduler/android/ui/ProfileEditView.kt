@@ -13,8 +13,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.meetingscheduler.android.services.AuthService
-import kotlinx.coroutines.launch
+import com.meetingscheduler.android.services.AccountScreenAuth
 
 val timezones = listOf(
     "UTC",
@@ -44,52 +43,27 @@ val timezones = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileEditView(
-    authService: AuthService,
+    authService: AccountScreenAuth,
     onDismiss: () -> Unit
 ) {
-    var displayName by remember { mutableStateOf(authService.profile?.displayName ?: "") }
-    var avatarUrl by remember { mutableStateOf(authService.profile?.avatarUrl ?: "") }
-    var timezone by remember { mutableStateOf(authService.profile?.timezone ?: "UTC") }
-    var isSaving by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var showSuccessDialog by remember { mutableStateOf(false) }
+    // The holder is kept by the navigation entry's store, so the edits and a save in flight outlast the Activity.
+    val holder = profileEditHolder(authService)
+    val model = holder.opened.getOrThrow()
     var expandedTimezone by remember { mutableStateOf(false) }
-
-    val scope = rememberCoroutineScope()
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Edit Profile") },
                 navigationIcon = {
-                    IconButton(onClick = onDismiss, enabled = !isSaving) {
+                    IconButton(onClick = onDismiss, enabled = !model.isSaving) {
                         Icon(Icons.Default.Close, "Cancel")
                     }
                 },
                 actions = {
                     TextButton(
-                        onClick = {
-                            scope.launch {
-                                val owner = authService.currentUser?.id
-                                val generation = authService.identityGeneration
-                                isSaving = true
-                                errorMessage = null
-                                try {
-                                    authService.updateProfile(
-                                        displayName = displayName.ifBlank { null },
-                                        avatarUrl = avatarUrl.ifBlank { null },
-                                        timezone = timezone
-                                    )
-                                    if (authService.isCurrent(owner, generation)) showSuccessDialog = true
-                                } catch (e: kotlinx.coroutines.CancellationException) { throw e
-                                } catch (e: Exception) {
-                                    if (authService.isCurrent(owner, generation)) errorMessage = "Failed to update profile: ${e.message}"
-                                } finally {
-                                    if (authService.isCurrent(owner, generation)) isSaving = false
-                                }
-                            }
-                        },
-                        enabled = !isSaving
+                        onClick = { holder.launch { save() } },
+                        enabled = !model.isSaving
                     ) {
                         Text("Save")
                     }
@@ -110,33 +84,33 @@ fun ProfileEditView(
 
             item {
                 OutlinedTextField(
-                    value = displayName,
-                    onValueChange = { displayName = it },
+                    value = model.displayName,
+                    onValueChange = model::editDisplayName,
                     label = { Text("Display Name") },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSaving
+                    enabled = !model.isSaving
                 )
             }
 
             item {
                 OutlinedTextField(
-                    value = avatarUrl,
-                    onValueChange = { avatarUrl = it },
+                    value = model.avatarUrl,
+                    onValueChange = model::editAvatarUrl,
                     label = { Text("Avatar URL") },
                     modifier = Modifier.fillMaxWidth(),
-                    enabled = !isSaving
+                    enabled = !model.isSaving
                 )
             }
 
             // Avatar Preview
-            if (avatarUrl.isNotBlank()) {
+            if (model.avatarUrl.isNotBlank()) {
                 item {
                     Box(
                         modifier = Modifier.fillMaxWidth(),
                         contentAlignment = Alignment.Center
                     ) {
                         AsyncImage(
-                            model = avatarUrl,
+                            model = model.avatarUrl,
                             contentDescription = "Avatar preview",
                             modifier = Modifier
                                 .size(100.dp)
@@ -163,10 +137,10 @@ fun ProfileEditView(
             item {
                 ExposedDropdownMenuBox(
                     expanded = expandedTimezone,
-                    onExpandedChange = { expandedTimezone = !expandedTimezone && !isSaving }
+                    onExpandedChange = { expandedTimezone = !expandedTimezone && !model.isSaving }
                 ) {
                     OutlinedTextField(
-                        value = timezone,
+                        value = model.timezone,
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Timezone") },
@@ -174,7 +148,7 @@ fun ProfileEditView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(),
-                        enabled = !isSaving
+                        enabled = !model.isSaving
                     )
 
                     ExposedDropdownMenu(
@@ -185,7 +159,7 @@ fun ProfileEditView(
                             DropdownMenuItem(
                                 text = { Text(tz) },
                                 onClick = {
-                                    timezone = tz
+                                    model.editTimezone(tz)
                                     expandedTimezone = false
                                 }
                             )
@@ -203,7 +177,7 @@ fun ProfileEditView(
             }
 
             // Error Message
-            errorMessage?.let { error ->
+            model.errorMessage?.let { error ->
                 item {
                     Card(
                         colors = CardDefaults.cardColors(
@@ -222,14 +196,14 @@ fun ProfileEditView(
     }
 
     // Success Dialog
-    if (showSuccessDialog) {
+    if (model.saved) {
         AlertDialog(
             onDismissRequest = { },
             title = { Text("Profile Updated") },
             text = { Text("Your profile has been updated successfully") },
             confirmButton = {
                 TextButton(onClick = {
-                    showSuccessDialog = false
+                    model.acknowledgeSaved()
                     onDismiss()
                 }) {
                     Text("OK")

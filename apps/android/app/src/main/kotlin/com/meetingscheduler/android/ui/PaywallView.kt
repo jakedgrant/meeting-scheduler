@@ -19,33 +19,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.meetingscheduler.android.models.PollCreationEntitlement
-import com.meetingscheduler.android.services.PurchaseService
+import com.meetingscheduler.android.services.AccountScreenAuth
+import com.meetingscheduler.android.services.ScreenBilling
 import com.revenuecat.purchases.Package
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaywallView(
-    purchaseService: PurchaseService?,
+    authService: AccountScreenAuth,
+    purchaseService: ScreenBilling<Package>?,
     onDismiss: () -> Unit
 ) {
-    var selectedPackage by remember { mutableStateOf<Package?>(null) }
-    var isPurchasing by remember { mutableStateOf(false) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    var availablePackages by remember { mutableStateOf<List<Package>>(emptyList()) }
+    // The holder is kept by the navigation entry's store, so a purchase in flight outlasts the Activity.
+    val holder = paywallHolder(authService, purchaseService)
+    val model = holder.opened.getOrThrow()
+    LaunchedEffect(model.finished) { if (model.finished) onDismiss() }
 
-    val context = LocalContext.current
-    val activity = context as? android.app.Activity
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(Unit) {
-        purchaseService?.let {
-            it.loadOfferings()
-            availablePackages = it.currentOffering?.availablePackages ?: emptyList()
-        }
-        isLoading = false
-    }
+    val activity = LocalContext.current as? android.app.Activity
 
     Scaffold(
         topBar = {
@@ -95,11 +85,11 @@ fun PaywallView(
             }
 
             // Packages Section
-            if (isLoading) {
+            if (model.isLoading) {
                 item {
                     CircularProgressIndicator()
                 }
-            } else if (availablePackages.isEmpty()) {
+            } else if (model.packages.isEmpty()) {
                 item {
                     Text(
                         "No plans available",
@@ -107,11 +97,11 @@ fun PaywallView(
                     )
                 }
             } else {
-                items(availablePackages) { pkg ->
+                items(model.packages) { pkg ->
                     PackageCard(
                         package_ = pkg,
-                        isSelected = selectedPackage?.identifier == pkg.identifier,
-                        onClick = { selectedPackage = pkg }
+                        isSelected = model.selected?.identifier == pkg.identifier,
+                        onClick = { model.select(pkg) }
                     )
                 }
             }
@@ -140,7 +130,7 @@ fun PaywallView(
             }
 
             // Error Message
-            errorMessage?.let { error ->
+            model.errorMessage?.let { error ->
                 item {
                     Text(
                         error,
@@ -153,63 +143,27 @@ fun PaywallView(
             // Purchase Button
             item {
                 Button(
-                    onClick = {
-                        selectedPackage?.let { pkg ->
-                            scope.launch {
-                                isPurchasing = true
-                                errorMessage = null
-                                try {
-                                    activity?.let { act ->
-                                        purchaseService?.purchase(act, pkg)
-                                        onDismiss()
-                                    } ?: run {
-                                        errorMessage = "Activity context not available"
-                                    }
-                                } catch (e: Exception) {
-                                    errorMessage = e.message
-                                }
-                                isPurchasing = false
-                            }
-                        }
-                    },
+                    onClick = { holder.launch { purchase(activity) } },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
-                    enabled = selectedPackage != null && !isPurchasing,
+                    enabled = model.selected != null && !model.isPurchasing,
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    if (isPurchasing) {
+                    if (model.isPurchasing) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(24.dp),
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                     } else {
-                        Text(if (isPurchasing) "Processing..." else "Subscribe Now")
+                        Text("Subscribe Now")
                     }
                 }
             }
 
             // Restore Button
             item {
-                TextButton(onClick = {
-                    scope.launch {
-                        isPurchasing = true
-                        errorMessage = null
-                        try {
-                            purchaseService?.let {
-                                it.restorePurchases()
-                                if (it.hasProAccess) {
-                                    onDismiss()
-                                } else {
-                                    errorMessage = "No purchases to restore"
-                                }
-                            }
-                        } catch (e: Exception) {
-                            errorMessage = e.message
-                        }
-                        isPurchasing = false
-                    }
-                }) {
+                TextButton(onClick = { holder.launch { restore() } }) {
                     Text("Restore Purchases")
                 }
             }

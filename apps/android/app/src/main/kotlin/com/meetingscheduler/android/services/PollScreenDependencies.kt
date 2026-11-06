@@ -1,6 +1,7 @@
 package com.meetingscheduler.android.services
 
 import com.meetingscheduler.android.models.*
+import kotlinx.datetime.Instant
 
 /** The signed-in account that screen models fence their results to. `PollService` implements it. */
 interface PollAccount {
@@ -14,10 +15,33 @@ interface PollCreationPolls : PollAccount {
     suspend fun createPoll(request: PollCreationRequest): PollCreationResult
 }
 
-/** The poll commands the detail screen runs. `PollService` implements it. */
-interface PollDetailPolls : PollAccount {
-    fun availabilitySession(pollId: String): AvailabilitySaveSession
+/** The poll read the responses screen runs. `PollService` implements it. */
+interface PollResponsesPolls : PollAccount {
     suspend fun loadPollDetail(pollId: String): PollDetail
+}
+
+/** The list state the poll list shows and the list commands it runs. `PollService` implements it. */
+interface PollListPolls : PollAccount {
+    val myPolls: List<Poll>
+    val createdPolls: List<Poll>
+    val joinedPolls: List<Poll>
+    val isLoading: Boolean
+    val isLoadingMore: Boolean
+    val listLoadError: String?
+    val listTotalCount: Int?
+    val hasMorePolls: Boolean
+    val pollParticipantCounts: Map<String, Int>
+    val pollTimeRanges: Map<String, Pair<Instant, Instant>>
+    fun formatTimeRange(earliest: Instant, latest: Instant): String
+    suspend fun loadMyPolls()
+    suspend fun loadMorePolls()
+    suspend fun retryPollLoad()
+    suspend fun loadPollByCode(code: String): PollLookupResponse?
+}
+
+/** The poll commands the detail screen runs. `PollService` implements it. */
+interface PollDetailPolls : PollResponsesPolls {
+    fun availabilitySession(pollId: String): AvailabilitySaveSession
     suspend fun joinPoll(pollId: String): PollParticipant
     suspend fun getAvailability(pollId: String): AvailabilitySnapshot
     suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot

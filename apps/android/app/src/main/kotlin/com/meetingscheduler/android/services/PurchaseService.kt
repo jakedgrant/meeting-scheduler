@@ -31,7 +31,7 @@ class PurchaseService(
     private val application: Application?,
     private val scope: CoroutineScope,
     private val provider: BillingProvider = RevenueCatBillingProvider(),
-) : BillingIdentity {
+) : BillingIdentity, ScreenBilling<Package> {
     private val providerLock = Mutex()
     private var accountId: String? = null
     private var generation = 0L
@@ -57,7 +57,7 @@ class PurchaseService(
     var isLoading by mutableStateOf(false)
         private set
 
-    val hasProAccess: Boolean
+    override val hasProAccess: Boolean
         get() = hasTeamAccess || customerInfo?.entitlements?.get(PollCreationEntitlement.PRO.id)?.isActive == true
 
     val hasTeamAccess: Boolean
@@ -113,7 +113,7 @@ class PurchaseService(
 
     // MARK: - Offerings
 
-    suspend fun loadOfferings() {
+    override suspend fun loadOfferings() {
         val id = accountId ?: return
         val stamp = generation
         val readiness = identityReady
@@ -136,7 +136,11 @@ class PurchaseService(
 
     // MARK: - Purchases
 
-    suspend fun purchase(activity: Activity, packageToPurchase: Package): CustomerInfo = providerLock.withLock {
+    override val packages: List<Package>
+        get() = currentOffering?.availablePackages ?: emptyList()
+
+    override suspend fun purchase(activity: Activity, pkg: Package): Unit = providerLock.withLock {
+        val packageToPurchase = pkg
         val id = checkNotNull(accountId) { "Sign in before purchasing." }
         val stamp = generation
         check(reconciledId == id) { "Your billing account is being updated. Try again." }
@@ -144,17 +148,15 @@ class PurchaseService(
         val result = provider.purchase(purchaseParams)
         if (!current(id, stamp)) throw kotlinx.coroutines.CancellationException("Account changed")
         customerInfo = result
-        result
     }
 
-    suspend fun restorePurchases(): CustomerInfo = providerLock.withLock {
+    override suspend fun restorePurchases(): Unit = providerLock.withLock {
         val id = checkNotNull(accountId) { "Sign in before restoring purchases." }
         val stamp = generation
         check(reconciledId == id) { "Your billing account is being updated. Try again." }
         val info = provider.restore()
         if (!current(id, stamp)) throw kotlinx.coroutines.CancellationException("Account changed")
         customerInfo = info
-        info
     }
 }
 
