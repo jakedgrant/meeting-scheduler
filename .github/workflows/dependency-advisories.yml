@@ -64,3 +64,37 @@ jobs:
           "$RUNNER_TEMP/osv-scanner" scan source
           --lockfile apps/mobile/Package.resolved
           --lockfile apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+  gradle-advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Same checksum-verified release as swiftpm-advisories.
+      OSV_SCANNER_VERSION: v2.7.0
+      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install osv-scanner
+        run: |
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - name: Fail on known advisories in the locked app dependencies
+        # app/gradle.lockfile is written by Gradle (see docs/release-checks.md). It pins the
+        # classpaths of the debug and release builds and their test variants.
+        run: >-
+          "$RUNNER_TEMP/osv-scanner" scan source
+          --lockfile apps/android/app/gradle.lockfile
+      - name: Report advisories in the Gradle plugin classpath (report only)
+        if: ${{ !cancelled() }}
+        # The Android Gradle plugin and the other build plugins bring their own libraries (netty,
+        # bouncycastle, guava). They run on the build machine and are not in the app, and only
+        # raising the plugin versions changes them. They are listed in the job summary for review.
+        run: |
+          {
+            echo '### Gradle plugin classpath (report only)'
+            echo '```'
+            "$RUNNER_TEMP/osv-scanner" scan source --lockfile apps/android/buildscript-gradle.lockfile 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
