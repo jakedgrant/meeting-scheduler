@@ -2,6 +2,22 @@
 
 Updated November 5, 2026. The [work sequence](architecture-review-2026-10-21.md#proposed-implementation-sequence) defines scope and dependencies. This file tracks the active workers, shared runtime reservations, and outstanding hosted owner actions; the coordinator owns updates.
 
+## F13 Android view models, November 5
+
+Branch `claude/next-remedy-tranche-9` started from fetched main `6d22c1c`, which contains merged #89. It takes step 2 of F13: the detail and creation screen models from #85 were held with `remember`, so a configuration change dropped their state and cancelled their requests.
+
+`ScreenModelViewModel` now holds each model. `PollDetailViewModelFactory` and `PollCreationViewModelFactory` build it from the services, clock and draft-store factory the screen already receives from `AppContainer`; they hold no Activity, `Context` or `LifecycleOwner`. The detail load starts once, when the holder is made. User actions run through `holder.launch { ... }` in `viewModelScope`, so a save, join, finalize or creation keeps going while the Activity is recreated, and leaving the screen or ending the session cancels it. `PollCreationModel` gained a `created` flag, which the form watches to close itself, so a creation that finished during recreation still dismisses. The models' own logic and tests are unchanged.
+
+F12 contract: a model is bound to the account key it was made under and drops late results, as before. In addition, `SessionViewModelStores`, an Activity-scoped `ViewModel` created in `ContentView`, provides the authenticated tree a `ViewModelStore` for each identity generation (the key `ContentView` already used to recreate the tree). The previous generation's store is cleared as soon as the generation changes, from a snapshot observer or the next request for a store, which cancels its work and releases its models. Sign-out, a different account and a new session for the same account therefore never leave a previous account's model reachable. Navigation entries keep their own `ViewModel`s inside that store.
+
+Not changed, and stated plainly: the models' state is Compose snapshot state, not `Flow`, so there is nothing for `collectAsStateWithLifecycle` to collect and it isn't used. Moving the state to `StateFlow` would rewrite every field of both models and their tests, and nothing in this step needs it. No `onCleared` override was needed on the screen holders, since `viewModelScope` ends with them; `SessionViewModelStores.onCleared` clears every session store. The poll list, responses, settings, profile and paywall screens still call services from `rememberCoroutineScope`.
+
+Tests: `ScreenViewModelTest` (13 tests, `kotlinx-coroutines-test` added for a test Main dispatcher) checks that the same store returns the same holder and model and loads once, that a load and a creation in flight finish after the provider is rebuilt over the same store, that clearing the store cancels both, that a late detail after an account change is still dropped, that a new identity generation clears the old store (by observer and on request) and gives a fresh model, that clearing the Activity store clears the session stores, and that the factories hold no `Context` or `LifecycleOwner`.
+
+Local results: with a portable Temurin 21 and Android SDK platform 36 downloaded to a temp directory outside the repo, `./gradlew :app:testDebugUnitTest` ran **143 tests**, all passed, and `:app:assembleDebug` and `:app:assembleDebugAndroidTest` built, so the views compiled. The release signing steps were not run locally. No emulator ran, so Activity recreation was exercised through `ViewModelStore` semantics in JVM tests, not on a device. CI result: pending, recorded below once the PR's Android run finishes.
+
+Still open in F13: moving the other screens' work into `ViewModel`s, `Flow`-based state with lifecycle-aware collection, and a device check of rotation with a request in flight.
+
 ## F19/F20 guest reads, November 5
 
 Branch `claude/next-remedy-tranche-8` started from fetched main `b14f801`, which contains merged #87 and the #88 status corrections. It takes the guest half of F19 and F20: guests still loaded a poll through `get_guest_poll_detail`, which returns every response in one value, so their reads had no size bound and they were left off the refresh schedule. F13's `ViewModel` ownership is the other open code item; it is Android-only, and Gradle 8.11 can't run on the JDK 25/26 installed here, so it waits for its own tranche.
