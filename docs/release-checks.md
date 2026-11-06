@@ -13,11 +13,11 @@ This page lists the deterministic checks that run in GitHub Actions, what each o
 | Calendar security / `calendar-security` | Every pull request and push to `main` | Calendar database suite; type checks and offline Deno tests for the calendar functions |
 | Android / `android-build-and-signing` | Every pull request and push to `main`; the work runs only when [Android paths change](#how-the-gating-works) | Debug and instrumentation builds, JVM unit tests, and the release-signing checks in [Android release signing](android-release-signing.md) |
 | Android / `android-emulator-tests` | Same as the Android job | Every instrumented test (`connectedDebugAndroidTest`) on an API 34 x86_64 emulator: Activity lifecycle, auth deep links and screen-model recreation |
+| iOS package regressions / `package-regressions` | Every pull request and push to `main`; the work runs only when [iOS paths change](#how-the-gating-works) | `ServiceSet` key check; package build and every package test on a new iOS 26 simulator; the app wrapper build; the committed package pins stay unchanged |
 | iOS package regressions / `app-launch` | Same as the package job | Builds the app wrapper for a fresh iOS 26 simulator, launches it signed out and fails if it exits, isn't running after 15 seconds or leaves a crash report |
 | Dependency advisories / `npm-advisories` | Every pull request, push to `main`, weekly and on demand | Fails on high or critical advisories in production dependencies of the root and web lockfiles; lists the full tree, development dependencies included, in the job summary |
 | Dependency advisories / `swiftpm-advisories` | Same as above | Fails on any known advisory (osv-scanner) in the two `Package.resolved` files |
 | Dependency advisories / `gradle-advisories` | Same as above | Fails on any known advisory (osv-scanner) in `apps/android/app/gradle.lockfile`, the locked app classpaths; lists advisories in the build plugins' `buildscript-gradle.lockfile` in the job summary without failing |
-| iOS package regressions / `package-regressions` | Every pull request and push to `main`; the work runs only when [iOS paths change](#how-the-gating-works) | `ServiceSet` key check; package build and every package test on a new iOS 26 simulator; the app wrapper build; the committed package pins stay unchanged |
 
 Each workflow installs locked dependencies: `npm ci` from the committed lockfiles, `deno --frozen`, the Gradle wrapper with locked dependencies (see [Updating Gradle locks](#updating-gradle-locks)), and SwiftPM restricted to `Package.resolved`. Every run starts from a fresh checkout on a hosted runner, which is the clean-checkout build the review asks for.
 
@@ -74,18 +74,18 @@ The other workflows run unconditionally on every pull request and need no gate.
 
 ## Updating a pinned action
 
-Every `uses:` line in `.github/workflows` names a full 40-character commit SHA with the release it came from in a comment, such as `actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0`. A tag can be moved after the fact. A commit can't, so a compromised action repository can't change what the workflows run. This applies to first-party actions and to the Claude Code workflows too.
+Every `uses:` line in `.github/workflows` names a full 40-character commit SHA with the release it came from in a comment, such as `actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0`. A tag can be moved after the fact. A commit can't, so a compromised action repository can't change what the workflows run. This applies to first-party actions and to the Claude Code workflows too.
 
 Dependabot's `github-actions` entry in `.github/dependabot.yml` opens a weekly pull request that raises the SHA and the comment together. To update by hand, resolve the tag to a commit. An annotated tag points to a tag object, so dereference it:
 
 ```sh
-repo=actions/checkout; tag=v4.4.0
+repo=actions/setup-node; tag=v4.4.0
 read -r type sha < <(gh api "repos/$repo/git/ref/tags/$tag" -q '.object.type + " " + .object.sha')
 [ "$type" = tag ] && sha=$(gh api "repos/$repo/git/tags/$sha" -q .object.sha)
 echo "$repo@$sha # $tag"
 ```
 
-Replace every use of that action with the new SHA and comment, then run `actionlint`. The current pins stay on the major version each workflow already used, so a major upgrade is a deliberate change that needs a review of that action's release notes.
+Replace each use that pins the old release with the new SHA and comment, then run `actionlint`. The pins aren't uniform: `actions/checkout` is at v7.0.1 in the Android workflow and v4.4.0 elsewhere, because each workflow stayed on the major version it already used. Update each group to the newest release of its own major. A major upgrade is a deliberate change that needs a review of that action's release notes.
 
 ## Updating Gradle locks
 
