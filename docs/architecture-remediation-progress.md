@@ -14,6 +14,10 @@ Review. The correctness reviewer found no defects. The writing audit's accuracy 
 
 CI evidence. On `72d8a5a`, which changes workflow files, the gate script and docs: run 42274123799 (Android) had `android-changes` success, `android-build-and-signing` success and `android-emulator-tests` success on the second attempt, after the first attempt failed one instrumented test (`SessionActivityTest.warmAuthCallbackSurvivesRecreationAndCalendarRouteDoesNotEnterAuth`) that passed on #94 and passed on the rerun, with no app code changed. Run 42274123736 (iOS) had `ios-changes`, `package-regressions` and `app-launch` all success. Web, database, billing, calendar and dependency advisory runs passed.
 
+Gate skipping. A pull request that changes workflow files always runs the platform jobs, because the gate compares the whole pull request with its base. To show a skip, temporary draft PR #96 (closed; its docs-only commit, now `2672e7e`, was fast-forwarded onto this branch) changed only `docs/release-checks.md` on top of this branch. Android run 42278989882: `android-changes` success, `android-build-and-signing` skipped, `android-emulator-tests` skipped, run conclusion success. iOS run 42278989851: `ios-changes` success, `package-regressions` skipped, `app-launch` skipped, run conclusion success. `gh pr checks` listed the four skipped jobs as "skipping" and every other check as pass, and the web, database, billing, calendar and advisory jobs ran and passed.
+
+Final head `2672e7e` on #95: Android run 42279204757 (`android-changes`, `android-build-and-signing`, `android-emulator-tests` success), iOS run 42279204649 (`ios-changes`, `package-regressions`, `app-launch` success), and the web, database (all five jobs), billing, calendar and advisory runs (42279204620, 42279204657, 42279204805, 42279204640, 42279204604) success.
+
 Still open in F24: owner actions only. The repository owner must make the agreed checks required (the list is in [release checks](release-checks.md#making-checks-required)) and enable Dependabot alerts and security updates.
 
 ## F24 Gradle locking and advisories, November 6
