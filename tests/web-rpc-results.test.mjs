@@ -141,7 +141,10 @@ test('database function results pass the web result checks', async t => {
   expectValid('isPollDetail', detail, 'get_poll_detail');
   assert.ok(detail.participants.some(participant => participant.profiles?.display_name === 'Member'), 'detail embeds the profile name');
   assert.ok(detail.participants.some(participant => participant.profiles === null), 'a guest has no profile');
-  expectValid('isGuestPollDetail', await call(null, 'public.get_guest_poll_detail($1,$2)', [guest.participant.id, token]), 'get_guest_poll_detail');
+  expectValid('isPollDetailAsGuest', await call(null, 'public.get_poll_detail_as_guest($1,$2)', [guest.participant.id, token]), 'get_poll_detail_as_guest');
+  const guestPage = await call(null, 'public.list_poll_responses_as_guest($1,$2,$3,$4)', [guest.participant.id, token, 10, null]);
+  assert.equal(guestPage.items.length, 2);
+  for (const item of guestPage.items) expectValid('isAvailabilityResponse', item, 'list_poll_responses_as_guest item');
 
   const page = await call(member, 'public.list_poll_responses($1,$2,$3)', [pollId, 10, null]);
   assert.equal(page.items.length, 2);

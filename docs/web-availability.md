@@ -8,7 +8,7 @@ This adapter requires the F03 participant-access, F04 membership-integrity, and 
 
 `joinPoll` generates a 32-byte token with `crypto.getRandomValues` before calling `join_poll_as_guest`. The pending token is kept per poll in memory and, when possible, in browser storage. A transport failure keeps that token, so retrying a join returns the existing participant through F04's idempotency contract. A working storage implementation also keeps the pending token across a page reload.
 
-After a successful join, the participant ID and capability are kept per poll in memory before attempting browser persistence. `loadPoll` checks that memory map first. The immediate join-to-load flow and later navigation in the same session therefore work when storage throws or is unavailable. A full browser refresh still loses an unpersisted capability. Invalid or revoked capabilities are removed and the page offers to join again.
+After a successful join, the participant ID and capability are kept per poll in memory before attempting browser persistence. `loadPoll` checks that memory map first. The immediate join-to-load flow and later navigation in the same session therefore work when storage throws or is unavailable. A full browser refresh still loses an unpersisted capability. Invalid or revoked capabilities are removed and the page offers to join again. Guests refresh on the bounded schedule described in [read contracts](read-contracts.md#web-live-updates-f20).
 
 The token is sent only to capability-aware RPCs. It is never rendered, and transport errors from these operations are not logged with their request payloads. Signed-in joins use the idempotent `join_poll` command.
 

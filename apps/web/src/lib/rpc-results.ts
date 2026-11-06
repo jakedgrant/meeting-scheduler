@@ -126,29 +126,23 @@ export interface PollDetail {
 	participant_count: number
 }
 
-export const isPollDetail = object<PollDetail>({
+const pollDetailFields = {
 	poll: isPoll,
 	time_options: arrayOf(isPollTimeOption),
 	participants: arrayOf(isPollParticipant),
 	time_option_count: integer,
 	participant_count: integer
-})
+}
+export const isPollDetail = object<PollDetail>(pollDetailFields)
 
-/** get_guest_poll_detail: the whole poll, read through a guest capability. */
-export interface GuestPollDetail {
+/** get_poll_detail_as_guest: get_poll_detail read through a guest capability. */
+export interface PollDetailAsGuest extends PollDetail {
 	participant_id: string
-	poll: Poll
-	time_options: PollTimeOption[]
-	participants: PollParticipant[]
-	responses: AvailabilityResponse[]
 }
 
-export const isGuestPollDetail = object<GuestPollDetail>({
-	participant_id: string,
-	poll: isPoll,
-	time_options: arrayOf(isPollTimeOption),
-	participants: arrayOf(isPollParticipant),
-	responses: arrayOf(isAvailabilityResponse)
+export const isPollDetailAsGuest = object<PollDetailAsGuest>({
+	...pollDetailFields,
+	participant_id: string
 })
 
 export const isCreationResult = object<CreationResult>({

@@ -16,13 +16,14 @@ import {
   clearPendingGuestToken,
   readGuestCapability,
   saveGuestCapability,
-  type GuestCapability
+  type GuestCapability,
+  type RpcError
 } from '$lib/guest-capability'
 import type { AvailabilitySave, AvailabilitySnapshot } from '$lib/availability-editor'
 import type { CreationOperation, CreationResult } from '$lib/poll-creation'
 import { IncompleteReadError, checkedPage, readAllPages, type Page } from '$lib/paged-read'
 import {
-  isAvailabilityResponse, isAvailabilitySnapshot, isCreationResult, isGuestJoinResult, isGuestPollDetail,
+  isAvailabilityResponse, isAvailabilitySnapshot, isCreationResult, isPollDetailAsGuest, isGuestJoinResult,
   isJoinResult, isPoll, isPollDetail, isSummaryRow, type PollDetail, type SummaryRow
 } from '$lib/rpc-results'
 
@@ -228,40 +229,31 @@ function dropGuestCapability(pollId: string, expectedToken: string) {
   }
 }
 
-// Signed-out guests cannot read participant rows; they load the poll through
-// their capability. Returns false when the caller should use the normal path.
-async function loadGuestPoll(pollId: string, guest: GuestCapability, generation: number): Promise<boolean> {
-  const { data: detail, error } = await sessionRpc('get_guest_poll_detail', {
-    participant_uuid: guest.participantId,
-    guest_token: guest.token
-  }, detailAbort.signal)
-  if (generation !== loadGeneration) return true
-  if (error) {
-    if (isGuestAccessDenied(error)) {
+// Signed-out guests cannot read participant rows; they read the same bounded
+// detail and response pages through their capability. Returns false when the
+// caller should use the normal path.
+async function loadGuestPoll(pollId: string, guest: GuestCapability, generation: number, signal: AbortSignal): Promise<boolean> {
+  let responses: AvailabilityResponse[]
+  try {
+    const detail = await readDetail(pollId, guest, signal)
+    if (generation !== loadGeneration) return true
+    currentGuest.set(guest)
+    publishDetail(detail)
+    responses = await readPollResponses(pollId, guest, signal)
+  } catch (error) {
+    if (generation !== loadGeneration) return true
+    currentGuest.set(null)
+    if (guestAccessLost(error)) {
       dropGuestCapability(pollId, guest.token)
       return false
     }
     throw error
   }
-  // No detail, or another poll's, means this capability no longer opens the poll.
-  // A detail that fails its check is an incomplete read and keeps the capability.
-  if (detail === null) {
-    dropGuestCapability(pollId, guest.token)
-    return false
-  }
-  if (!isGuestPollDetail(detail) || detail.participant_id !== guest.participantId) throw new IncompleteReadError()
-  if (detail.poll.id !== pollId) {
-    dropGuestCapability(pollId, guest.token)
-    return false
-  }
-  currentGuest.set(guest)
-  currentPoll.set(detail.poll)
-  currentPollTimeOptions.set(detail.time_options)
-  currentPollParticipants.set(detail.participants)
-  currentPollResponses.set(detail.responses)
-  await loadCurrentAvailability(pollId, detail.participant_id, generation)
   if (generation !== loadGeneration) return true
-  // Guest response paging is separate work; keep guest reads on load/after saves.
+  currentPollResponses.set(responses)
+  await loadCurrentAvailability(pollId, guest.participantId, generation)
+  if (generation !== loadGeneration) return true
+  pollUpdates = startPollRefresh(() => refreshPoll(pollId, generation, guest))
   return true
 }
 
@@ -285,19 +277,15 @@ export async function loadPoll(pollId: string) {
   try {
     const guest = get(user) ? null : capabilityForPoll(pollId)
     currentGuest.set(null)
-    if (guest && await loadGuestPoll(pollId, guest, generation)) return
+    if (guest && await loadGuestPoll(pollId, guest, generation, signal)) return
 
     // Poll, options and participants arrive together with their counts.
-    const { data: detailData, error: detailError } = await sessionRpc('get_poll_detail', { poll_uuid: pollId }, signal)
+    const detail = await readDetail(pollId, null, signal)
     if (generation !== loadGeneration) return
-    if (detailError) throw detailError
-    const detail = checkedDetail(detailData, pollId)
-    currentPoll.set(detail.poll)
-    currentPollTimeOptions.set(detail.time_options)
-    currentPollParticipants.set(detail.participants)
+    publishDetail(detail)
 
     // Responses can exceed one page; show them only once traversal is complete.
-    const responses = await readPollResponses(pollId, signal)
+    const responses = await readPollResponses(pollId, null, signal)
     if (generation !== loadGeneration) return
     currentPollResponses.set(responses)
 
@@ -320,19 +308,22 @@ export async function loadPoll(pollId: string) {
 
 // Background reads publish only after every collection and the member snapshot
 // are complete. The editor keeps dirty drafts at their original save version.
-async function refreshPoll(pollId: string, generation: number) {
+async function refreshPoll(pollId: string, generation: number, guest: GuestCapability | null = null) {
   const revision = detailRevision
   const isCurrent = () => generation === loadGeneration && revision === detailRevision
   const signal = AbortSignal.any([detailAbort.signal, captureSession().signal])
+  // A dropped or replaced capability stops this schedule; a rejoin reloads.
+  if (guest && capabilityForPoll(pollId)?.token !== guest.token) {
+    stopPollUpdates()
+    return
+  }
   try {
-    const { data, error } = await sessionRpc('get_poll_detail', { poll_uuid: pollId }, signal)
+    const detail = await readDetail(pollId, guest, signal)
     if (!isCurrent()) return
-    if (error) throw error
-    const detail = checkedDetail(data, pollId)
-    const responses = await readPollResponses(pollId, signal)
+    const responses = await readPollResponses(pollId, guest, signal)
     if (!isCurrent()) return
-    const participant = detail.participants.find(row => row.user_id === get(user)?.id)
-    const snapshot = participant ? await loadAvailability(pollId, participant.id) : null
+    const participantId = guest?.participantId ?? detail.participants.find(row => row.user_id === get(user)?.id)?.id
+    const snapshot = participantId ? await loadAvailability(pollId, participantId) : null
     if (!isCurrent()) return
     currentPoll.set(detail.poll)
     // Republishing identical options would repeat the page's calendar/provider check.
@@ -346,6 +337,12 @@ async function refreshPoll(pollId: string, generation: number) {
     pollRefreshError.set(null)
   } catch (error) {
     if (!isCurrent()) return
+    // Like a denied save, a lost capability keeps the poll and its join prompt.
+    if (guest && guestAccessLost(error)) {
+      stopPollUpdates()
+      dropGuestCapability(pollId, guest.token)
+      return
+    }
     if ((error as { code?: string })?.code === '42501') {
       cleanupPollRealtime()
       return
@@ -354,7 +351,28 @@ async function refreshPoll(pollId: string, generation: number) {
   }
 }
 
-function checkedDetail(data: unknown, pollId: string): PollDetail {
+/** A guest capability that verifies but opens another poll. */
+class ForeignGuestPollError extends Error {}
+
+// A denied capability, or one for another poll, no longer opens this poll.
+function guestAccessLost(error: unknown) {
+  return error instanceof ForeignGuestPollError || isGuestAccessDenied(error as RpcError)
+}
+
+function guestArgs(guest: GuestCapability) {
+  return { participant_uuid: guest.participantId, guest_token: guest.token }
+}
+
+// Members and guests read the same bounded contract; only authorization differs.
+async function readDetail(pollId: string, guest: GuestCapability | null, signal: AbortSignal): Promise<PollDetail> {
+  const { data, error } = guest
+    ? await sessionRpc('get_poll_detail_as_guest', guestArgs(guest), signal)
+    : await sessionRpc('get_poll_detail', { poll_uuid: pollId }, signal)
+  if (error) throw error
+  if (guest) {
+    if (!isPollDetailAsGuest(data) || data.participant_id !== guest.participantId) throw new IncompleteReadError()
+    if (data.poll.id !== pollId) throw new ForeignGuestPollError()
+  }
   if (!isPollDetail(data) || data.poll.id !== pollId
       || data.time_options.length !== data.time_option_count
       || data.participants.length !== data.participant_count) {
@@ -363,11 +381,18 @@ function checkedDetail(data: unknown, pollId: string): PollDetail {
   return data
 }
 
-function readPollResponses(pollId: string, signal: AbortSignal) {
+function publishDetail(detail: PollDetail) {
+  currentPoll.set(detail.poll)
+  currentPollTimeOptions.set(detail.time_options)
+  currentPollParticipants.set(detail.participants)
+}
+
+function readPollResponses(pollId: string, guest: GuestCapability | null, signal: AbortSignal) {
   return readAllPages(async cursor => {
-    const { data, error } = await sessionRpc('list_poll_responses', {
-      poll_uuid: pollId, page_size: RESPONSE_PAGE_SIZE, page_cursor: cursor
-    }, signal)
+    const page = { page_size: RESPONSE_PAGE_SIZE, page_cursor: cursor }
+    const { data, error } = guest
+      ? await sessionRpc('list_poll_responses_as_guest', { ...guestArgs(guest), ...page }, signal)
+      : await sessionRpc('list_poll_responses', { poll_uuid: pollId, ...page }, signal)
     if (error) throw error
     return checkedPage(data, isAvailabilityResponse)
   }, response => `${response.participant_id}:${response.time_option_id}`)

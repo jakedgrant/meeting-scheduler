@@ -475,6 +475,13 @@ export type Database = {
         }
         Returns: Json
       }
+      get_poll_detail_as_guest: {
+        Args: {
+          participant_uuid: string | null
+          guest_token: string | null
+        }
+        Returns: Json
+      }
       get_poll_with_summary: {
         Args: {
           poll_uuid: string | null
@@ -524,6 +531,15 @@ export type Database = {
       list_poll_responses: {
         Args: {
           poll_uuid: string | null
+          page_size?: number | null
+          page_cursor?: string | null
+        }
+        Returns: Json
+      }
+      list_poll_responses_as_guest: {
+        Args: {
+          participant_uuid: string | null
+          guest_token: string | null
           page_size?: number | null
           page_cursor?: string | null
         }

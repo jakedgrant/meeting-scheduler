@@ -14,7 +14,7 @@ An **open poll** has status `active` and a `closes_at` that is unset or in the f
 
 | Operation | Signed out | Signed-in non-member | Poll owner | Current member | Holder of a valid guest capability |
 | --- | --- | --- | --- | --- | --- |
-| Read `poll_participants` rows, any poll state | None | Own rows only (none before joining) | All rows of the poll | All rows of the poll | Through `get_guest_poll_detail` |
+| Read `poll_participants` rows, any poll state | None | Own rows only (none before joining) | All rows of the poll | All rows of the poll | Through `get_poll_detail_as_guest` |
 | Read guest email or capability | Never | Never | Never | Never | Never; the capability is shown once, at join |
 | Update own `comment` through the Data API | Denied | Own rows only | Own rows only | Own row | Use `update_guest_participant` |
 | Update `id`, `poll_id`, `user_id`, `anonymous_name`, `anonymous_email`, `access_token`, `created_at` through the Data API | Denied | Denied | Denied | Denied | Denied |
@@ -46,17 +46,18 @@ The existing `Anyone can join active polls` insert policy is unchanged; F04 repl
 
 ## Guest capability commands
 
-All five are exposed as `public` invoker wrappers over `poll_private` definers, following the F02 pattern. Every function revokes `PUBLIC` execution, grants `anon`, `authenticated`, and `service_role`, and pins an empty `search_path`. The capability is 64 lowercase hex characters (two v4 UUIDs, 244 bits from PostgreSQL's strong random source). Only its SHA-256 is stored. Any malformed, unknown, swapped, rotated, or legacy value produces the same `42501` / `Guest access denied`.
+All are exposed as `public` invoker wrappers over `poll_private` definers, following the F02 pattern. Every function revokes `PUBLIC` execution, grants `anon`, `authenticated`, and `service_role`, and pins an empty `search_path`. The capability is 64 lowercase hex characters (two v4 UUIDs, 244 bits from PostgreSQL's strong random source). Only its SHA-256 is stored. Any malformed, unknown, swapped, rotated, or legacy value produces the same `42501` / `Guest access denied`.
 
 | RPC | Request | Success response | Errors |
 | --- | --- | --- | --- |
 | `join_poll_as_guest` | `poll_uuid uuid`, `display_name text`, `contact_email text` (optional) | `{ "participant": <poll_participants row>, "guest_token": "<64 hex>" }` | `42501` `Signed-in callers must join as members`; `42501` `Poll is not accepting participants` (missing, non-active, or past `closes_at`; indistinguishable); `22023` `Guest display name must be 1 to 100 characters` (after trimming); `22023` `Guest contact email is invalid` (over 320 characters or not `local@domain`) |
 | `get_guest_participant` | `participant_uuid uuid`, `guest_token text` | `{ "participant": <row>, "poll": { "id", "status", "closes_at" } }`, in any poll state | `42501` `Guest access denied` |
-| `get_guest_poll_detail` | `participant_uuid uuid`, `guest_token text` | `{ "participant_id", "poll": <polls row>, "time_options": [<poll_time_options row>], "participants": [<poll_participants row + "profiles": { "display_name" } \| null>], "responses": [<availability_responses row>] }`, in any poll state | `42501` `Guest access denied` |
+| `get_poll_detail_as_guest`, `list_poll_responses_as_guest` | `participant_uuid uuid`, `guest_token text`; pages also take `page_size`, `page_cursor` | The bounded detail and response pages of [guest reads](read-contracts.md#guest-reads), in any poll state | `42501` `Guest access denied`; `22023` and `54000` as for member reads |
+| `get_guest_poll_detail` (legacy) | `participant_uuid uuid`, `guest_token text` | `{ "participant_id", "poll": <polls row>, "time_options": [<poll_time_options row>], "participants": [<poll_participants row + "profiles": { "display_name" } \| null>], "responses": [<availability_responses row>] }`, in any poll state | `42501` `Guest access denied` |
 | `update_guest_participant` | `participant_uuid uuid`, `guest_token text`, `display_name text`, `comment text` (optional; `NULL` clears) | Updated `poll_participants` row | `42501` `Guest access denied`; `42501` `Poll is not accepting changes`; `22023` name length as above; `22023` `Comment must be 500 characters or fewer` |
 | `rotate_guest_token` | `participant_uuid uuid`, `guest_token text` | New capability (text). The presented one stops working immediately. | `42501` `Guest access denied` |
 
-`get_guest_poll_detail` gives a verified guest the same view a member gets from the tables: the poll row, time options ordered by start time, the poll's participant rows in the `select('*, profiles(display_name)')` shape, and responses whose participant and time option both belong to the poll. It contains no emails or capabilities.
+The legacy `get_guest_poll_detail`, kept for web builds released before the bounded guest reads, gives a verified guest the same view a member gets from the tables: the poll row, time options ordered by start time, the poll's participant rows in the `select('*, profiles(display_name)')` shape, and responses whose participant and time option both belong to the poll. It contains no emails or capabilities.
 
 `update_guest_participant` replaces both editable fields, so clients send the current display name with the new comment. It cannot change any other column. The returned `participant.anonymous_email` is always `NULL`; a supplied contact email is stored privately and has no client read path yet. Join and edit take a `FOR SHARE` lock on the poll row, so they cannot interleave with a concurrent close.
 
@@ -88,9 +89,9 @@ iOS and Android do not support signed-out participation (`PollDetailView` passes
 
 Guests join with a client-generated capability kept per poll in memory and browser storage. The pending token survives uncertain join responses, so retries use F04's idempotent join rather than creating another participant. Failed storage does not discard the capability during the immediate detail reload or same-session navigation. Invalid capabilities are cleared and the page offers to join again.
 
-The page loads guests through `get_guest_poll_detail`, then obtains the versioned own-response snapshot through `get_availability`. Members and guests both save availability and comment with `save_availability`, keep drafts and request IDs on failure, and explicitly resolve version conflicts. Guest availability controls are enabled. Signed-in joins use `join_poll`, and organizers finalize through `finalize_poll`.
+The page loads guests through `get_poll_detail_as_guest` and every `list_poll_responses_as_guest` page, then obtains the versioned own-response snapshot through `get_availability`. Members and guests both save availability and comment with `save_availability`, keep drafts and request IDs on failure, and explicitly resolve version conflicts. Guest availability controls are enabled. Signed-in joins use `join_poll`, and organizers finalize through `finalize_poll`.
 
-The unreleased application ships this adapter with its backend prerequisites; missing RPCs produce retryable errors and never fall back to direct guest inserts or per-row response writes. Tokens are not rendered or included in logs. Guests refresh on load and do not subscribe to participant/response Realtime events.
+The unreleased application ships this adapter with its backend prerequisites; missing RPCs produce retryable errors and never fall back to direct guest inserts or per-row response writes. Tokens are not rendered or included in logs. Guests refresh on the same bounded schedule as members and do not subscribe to participant/response Realtime events.
 
 See [Web guest access and availability saves](web-availability.md) for the complete retry contract, integration evidence, CI commands, and validation limits.
 
