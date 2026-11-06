@@ -1,0 +1,66 @@
+name: Dependency advisories
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Advisories are published without any change here, so scan the default branch weekly too.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  npm-advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+      # These read only the committed lockfiles; nothing is installed. Each runs even if the
+      # other fails, so one run reports both.
+      - name: Fail on high or critical advisories in root production dependencies
+        run: npm audit --package-lock-only --omit=dev --audit-level=high
+      - name: Fail on high or critical advisories in web production dependencies
+        if: ${{ !cancelled() }}
+        run: npm --prefix apps/web audit --package-lock-only --omit=dev --audit-level=high
+      - name: Report every advisory, development dependencies included
+        if: ${{ !cancelled() }}
+        # Build and test tooling is not shipped, so these do not fail the build. They are listed
+        # in the job summary for review and are what Dependabot proposes updates for.
+        run: |
+          {
+            echo '### Full dependency tree (report only)'
+            for dir in . apps/web; do
+              echo "#### $dir"
+              echo '```'
+              npm --prefix "$dir" audit --package-lock-only 2>&1 || true
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  swiftpm-advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Official release binary from https://github.com/google/osv-scanner/releases/tag/v2.7.0,
+      # verified against the digest from that release's osv-scanner_SHA256SUMS.
+      OSV_SCANNER_VERSION: v2.7.0
+      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install osv-scanner
+        run: |
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/osv-scanner" \
+            "https://github.com/google/osv-scanner/releases/download/${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          echo "${OSV_SCANNER_SHA256}  $RUNNER_TEMP/osv-scanner" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/osv-scanner"
+      - name: Fail on known advisories in the pinned Swift packages
+        run: >-
+          "$RUNNER_TEMP/osv-scanner" scan source
+          --lockfile apps/mobile/Package.resolved
+          --lockfile apps/mobile/MeetingScheduler/MeetingScheduler.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved

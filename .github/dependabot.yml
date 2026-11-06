@@ -1,0 +1,25 @@
+version: 2
+# Dependabot raises security updates for these manifests once the repository setting
+# "Dependabot security updates" is on, and the version updates below keep pins current.
+# Gradle versions are declared inline in app/build.gradle.kts, which Dependabot reads.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: npm
+    directory: /apps/web
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: swift
+    directory: /apps/mobile
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
