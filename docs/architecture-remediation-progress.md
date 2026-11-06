@@ -24,6 +24,8 @@ Local results (portable Temurin 21 and Android SDK 36 in a temp directory, no em
 
 Reviews. Independent correctness, structure and simplification reviewers ran on the code. Correctness found no defects. Fixed from the structure and simplification reviews: the shared holder key for the account screens, the unused `polls` exposure on `PollListModel`, an unused import, the purchase parameter alias, the refresh-contract KDoc and the factory guard test. Deferred: folding the two tranche 9 factories into `ScreenModelFactory` (they are referenced by tranche 9 tests), the dead `Settings` and `ProfileEdit` routes in `PollNavHost` and the second hand-written settings graph in `MainTabView` (both pre-existing), moving `sameAccount` next to the interfaces, sharing the test fakes between `RemainingScreenModelsTest` and `NavigationScopingTest`, and narrowing `PollDetailView` and `CreatePollView` to interfaces.
 
+CI results: PR #93, at `c1d13e1`, ran every check green: `android-build-and-signing` (assembleDebug, assembleDebugAndroidTest, unit tests and the signing checks), `android-emulator-tests` (4 instrumented tests on an API 34 emulator, `ScreenModelRecreationTest` among them), and the Web, Architecture database regressions, Billing webhooks, Calendar security and Dependency advisories checks. The emulator tests do not cover the new screens.
+
 Still open in F13: `Flow`-based state with lifecycle-aware collection (nothing needs it yet), the dedicated-factory consolidation above, and a device check of rotation with a request in flight, including a purchase and the Google prompt, and of the sign-in scope and the tab back stacks.
 
 ## F19 legacy read retirement, November 5
