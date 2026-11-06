@@ -42,31 +42,31 @@ class PollService(
     private val supabase: io.github.jan.supabase.SupabaseClient,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
-) : PollDetailPolls, PollCreationPolls {
+) : PollDetailPolls, PollCreationPolls, PollListPolls {
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
-    var myPolls by mutableStateOf<List<Poll>>(emptyList())
+    override var myPolls by mutableStateOf<List<Poll>>(emptyList())
         private set
-    var createdPolls by mutableStateOf<List<Poll>>(emptyList())
+    override var createdPolls by mutableStateOf<List<Poll>>(emptyList())
         private set
-    var joinedPolls by mutableStateOf<List<Poll>>(emptyList())
+    override var joinedPolls by mutableStateOf<List<Poll>>(emptyList())
         private set
-    var isLoading by mutableStateOf(false)
+    override var isLoading by mutableStateOf(false)
         private set
 
-    var isLoadingMore by mutableStateOf(false)
+    override var isLoadingMore by mutableStateOf(false)
         private set
-    var listLoadError by mutableStateOf<String?>(null)
+    override var listLoadError by mutableStateOf<String?>(null)
         private set
-    var listTotalCount by mutableStateOf<Int?>(null)
+    override var listTotalCount by mutableStateOf<Int?>(null)
         private set
     private var nextListCursor by mutableStateOf<String?>(null)
-    val hasMorePolls: Boolean get() = nextListCursor != null
+    override val hasMorePolls: Boolean get() = nextListCursor != null
     private var listCursors = emptySet<String>()
     private var retryLoadsMore = false
-    var pollParticipantCounts by mutableStateOf<Map<String, Int>>(emptyMap())
+    override var pollParticipantCounts by mutableStateOf<Map<String, Int>>(emptyMap())
         private set
-    var pollTimeRanges by mutableStateOf<Map<String, Pair<Instant, Instant>>>(emptyMap())
+    override var pollTimeRanges by mutableStateOf<Map<String, Pair<Instant, Instant>>>(emptyMap())
         private set
 
     private var creationRevision = 0L
@@ -124,7 +124,7 @@ class PollService(
 
     // MARK: - Formatting
 
-    fun formatTimeRange(earliest: Instant, latest: Instant): String {
+    override fun formatTimeRange(earliest: Instant, latest: Instant): String {
         val earliestDate = Date.from(java.time.Instant.ofEpochMilli(earliest.toEpochMilliseconds()))
         val latestDate = Date.from(java.time.Instant.ofEpochMilli(latest.toEpochMilliseconds()))
         return "${timeRangeFormatter.format(earliestDate)} - ${timeRangeFormatter.format(latestDate)}"
@@ -132,11 +132,11 @@ class PollService(
 
     // MARK: - Load Polls
 
-    suspend fun loadMyPolls() = loadPollPage(refresh = true)
+    override suspend fun loadMyPolls() = loadPollPage(refresh = true)
 
-    suspend fun loadMorePolls() = loadPollPage(refresh = false)
+    override suspend fun loadMorePolls() = loadPollPage(refresh = false)
 
-    suspend fun retryPollLoad() = loadPollPage(refresh = !retryLoadsMore)
+    override suspend fun retryPollLoad() = loadPollPage(refresh = !retryLoadsMore)
 
     private suspend fun loadPollPage(refresh: Boolean) {
         selectPollAccount()
@@ -237,7 +237,7 @@ class PollService(
         }
     }
 
-    suspend fun loadPollByCode(code: String): PollLookupResponse? = withSession {
+    override suspend fun loadPollByCode(code: String): PollLookupResponse? = withSession {
         return@withSession try {
             val params = buildJsonObject {
                 put("code", code.uppercase())

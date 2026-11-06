@@ -60,21 +60,21 @@ class CalendarService(
     private val writeDevicePreference: (suspend (String, Boolean) -> Unit)? = null,
     private val readPermission: (() -> Boolean)? = null,
     private val readDeviceConflicts: (suspend (List<PollTimeOption>, String) -> Set<String>)? = null,
-) : PollDetailCalendar {
+) : PollDetailCalendar, SettingsCalendar {
     private val json = Json { ignoreUnknownKeys = true }
     private var connectionGeneration = 0
     override var calendarError by mutableStateOf<String?>(null)
         private set
-    var googleCalendarAccountEmail by mutableStateOf<String?>(null)
+    override var googleCalendarAccountEmail by mutableStateOf<String?>(null)
         private set
 
-    var hasCalendarPermission by mutableStateOf(false)
+    override var hasCalendarPermission by mutableStateOf(false)
         private set
-    var appleCalendarEnabled by mutableStateOf(false)
+    override var appleCalendarEnabled by mutableStateOf(false)
         private set
-    var googleCalendarEnabled by mutableStateOf(false)
+    override var googleCalendarEnabled by mutableStateOf(false)
         private set
-    var googleCalendarLoading by mutableStateOf(false)
+    override var googleCalendarLoading by mutableStateOf(false)
         private set
 
     val isEnabled: Boolean
@@ -124,7 +124,7 @@ class CalendarService(
         refreshJob = scope.launch { refreshGoogleCalendarConnection() }
     }
 
-    suspend fun setAppleCalendarEnabled(enabled: Boolean) {
+    override suspend fun setAppleCalendarEnabled(enabled: Boolean) {
         val id = authService.currentUser?.id ?: return
         val session = authService.identityGeneration
         val allowed = enabled && hasCalendarPermission
@@ -201,7 +201,7 @@ class CalendarService(
         }
     }
 
-    suspend fun setGoogleCalendarEnabled(enabled: Boolean) {
+    override suspend fun setGoogleCalendarEnabled(enabled: Boolean) {
         val userId = authService.currentUser?.id ?: return
         connectionGeneration++
         val session = authService.identityGeneration

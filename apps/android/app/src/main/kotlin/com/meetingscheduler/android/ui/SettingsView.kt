@@ -20,48 +20,32 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
-import com.meetingscheduler.android.FailureLog
-import com.meetingscheduler.android.services.AuthService
-import com.meetingscheduler.android.services.CalendarService
-import com.meetingscheduler.android.services.PurchaseService
-import kotlinx.coroutines.launch
+import com.meetingscheduler.android.services.AccountScreenAuth
+import com.meetingscheduler.android.services.ScreenBilling
+import com.meetingscheduler.android.services.SettingsCalendar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsView(
-    authService: AuthService,
-    purchaseService: PurchaseService?,
-    calendarService: CalendarService,
+    authService: AccountScreenAuth,
+    purchaseService: ScreenBilling<*>?,
+    calendarService: SettingsCalendar,
     onNavigateToProfileEdit: () -> Unit,
     onNavigateToPaywall: () -> Unit
 ) {
-    var isSigningOut by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    // The holder is kept by the navigation entry's store, so a sign-out or purchase check outlasts the Activity.
+    val holder = settingsHolder(authService, purchaseService, calendarService)
+    val model = holder.opened.getOrThrow()
 
     // Calendar permission launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
-        if (isGranted) {
-            scope.launch {
-                calendarService.setAppleCalendarEnabled(true)
-            }
-        }
+        holder.launch { deviceCalendarPermissionResult(isGranted) }
     }
 
-    val displayName = authService.profile?.displayName
-        ?: authService.currentUser?.email
-        ?: "User"
-
-    val initials = remember(displayName) {
-        val components = displayName.split(" ")
-        if (components.size >= 2) {
-            (components[0].firstOrNull()?.toString() ?: "") +
-                    (components[1].firstOrNull()?.toString() ?: "")
-        } else {
-            displayName.take(2)
-        }.uppercase()
-    }
+    val displayName = model.displayName
+    val initials = model.initials
 
     Scaffold(
         topBar = {
@@ -88,7 +72,7 @@ fun SettingsView(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Avatar
-                        val avatarUrl = authService.profile?.avatarUrl
+                        val avatarUrl = model.avatarUrl
 
                         if (!avatarUrl.isNullOrBlank()) {
                             AsyncImage(
@@ -125,7 +109,7 @@ fun SettingsView(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                authService.currentUser?.email ?: "",
+                                model.email,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -148,7 +132,7 @@ fun SettingsView(
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column {
-                        if (purchaseService?.hasProAccess == true) {
+                        if (model.hasProAccess) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -192,15 +176,7 @@ fun SettingsView(
                         Divider()
 
                         TextButton(
-                            onClick = {
-                                scope.launch {
-                                    try {
-                                        purchaseService?.restorePurchases()
-                                    } catch (e: Exception) {
-                                        FailureLog.record("SettingsView", "Restore failed", e)
-                                    }
-                                }
-                            },
+                            onClick = { holder.launch { restorePurchases() } },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
@@ -256,17 +232,9 @@ fun SettingsView(
                             Switch(
                                 checked = calendarService.appleCalendarEnabled,
                                 onCheckedChange = { enabled ->
-                                    if (enabled) {
-                                        if (!calendarService.hasCalendarPermission) {
+                                    holder.launch {
+                                        toggleDeviceCalendar(enabled) {
                                             permissionLauncher.launch(Manifest.permission.READ_CALENDAR)
-                                        } else {
-                                            scope.launch {
-                                                calendarService.setAppleCalendarEnabled(true)
-                                            }
-                                        }
-                                    } else {
-                                        scope.launch {
-                                            calendarService.setAppleCalendarEnabled(false)
                                         }
                                     }
                                 }
@@ -310,11 +278,7 @@ fun SettingsView(
 
                             Switch(
                                 checked = calendarService.googleCalendarEnabled,
-                                onCheckedChange = { enabled ->
-                                    scope.launch {
-                                        calendarService.setGoogleCalendarEnabled(enabled)
-                                    }
-                                },
+                                onCheckedChange = { enabled -> holder.launch { setGoogleCalendar(enabled) } },
                                 enabled = !calendarService.googleCalendarLoading
                             )
                         }
@@ -372,30 +336,16 @@ fun SettingsView(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Button(
-                        onClick = {
-                            scope.launch {
-                                val owner = authService.currentUser?.id
-                                val generation = authService.identityGeneration
-                                isSigningOut = true
-                                try {
-                                    authService.signOut()
-                                } catch (e: kotlinx.coroutines.CancellationException) { throw e
-                                } catch (e: Exception) {
-                                    if (authService.isCurrent(owner, generation)) FailureLog.record("SettingsView", "Sign out failed", e)
-                                } finally {
-                                    if (authService.isCurrent(owner, generation)) isSigningOut = false
-                                }
-                            }
-                        },
+                        onClick = { holder.launch { signOut() } },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.error
                         ),
-                        enabled = !isSigningOut
+                        enabled = !model.isSigningOut
                     ) {
-                        if (isSigningOut) {
+                        if (model.isSigningOut) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(20.dp),
                                 color = MaterialTheme.colorScheme.onError

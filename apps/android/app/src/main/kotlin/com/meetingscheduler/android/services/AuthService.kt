@@ -34,23 +34,25 @@ class AuthService(
     /** Decides when a session has expired and when a sign-in link has. */
     private val clock: Clock,
     private val attempts: AuthAttemptStore = MemoryAuthAttemptStore(),
-) : PollSessionIdentity {
+) : PollSessionIdentity, AccountScreenAuth, SignInAuth {
     override var identityGeneration by mutableStateOf(0L)
         private set
     var currentUser by mutableStateOf<UserInfo?>(null)
         private set
     var currentSession by mutableStateOf<UserSession?>(null)
         private set
-    var profile by mutableStateOf<Profile?>(null)
+    override var profile by mutableStateOf<Profile?>(null)
         private set
     var profileError by mutableStateOf<String?>(null)
         private set
-    var callbackError by mutableStateOf<String?>(null)
+    override var callbackError by mutableStateOf<String?>(null)
         private set
     var isLoading by mutableStateOf(true)
         private set
     override val pollAccessToken: String? get() = currentSession?.accessToken
     override val pollUserId: String? get() = currentUser?.id
+    override val accountId: String? get() = currentUser?.id
+    override val accountEmail: String? get() = currentUser?.email
     val isAuthenticated: Boolean get() = currentUser != null
     private var expiryJob: kotlinx.coroutines.Job? = null
     private var profileJob: kotlinx.coroutines.Job? = null
@@ -167,7 +169,7 @@ class AuthService(
         }
     }
 
-    fun isCurrent(id: String?, generation: Long) = !disposed && currentUser?.id == id && identityGeneration == generation
+    override fun isCurrent(id: String?, generation: Long) = !disposed && currentUser?.id == id && identityGeneration == generation
 
     /** For explicit teardown in tests; process services otherwise live with Application. */
     fun dispose() {
@@ -184,16 +186,16 @@ class AuthService(
 
     // MARK: - Sign In Methods
 
-    fun beginNativeSignIn(): NativeSignInAttempt {
+    override fun beginNativeSignIn(): NativeSignInAttempt {
         check(!disposed) { "Authentication service disposed" }
         val revision = ++authAttemptRevision
         callbackRouter.cancelFlow()
         return NativeSignInAttempt(revision, currentUser?.id, identityGeneration)
     }
 
-    fun isCurrent(attempt: NativeSignInAttempt) = isCurrent(attempt.accountId, attempt.generation) && attempt.revision == authAttemptRevision
+    override fun isCurrent(attempt: NativeSignInAttempt) = isCurrent(attempt.accountId, attempt.generation) && attempt.revision == authAttemptRevision
 
-    suspend fun signInWithGoogle(idToken: String, nonce: String? = null, attempt: NativeSignInAttempt = beginNativeSignIn()) {
+    override suspend fun signInWithGoogle(idToken: String, nonce: String?, attempt: NativeSignInAttempt) {
         try {
             if (!isCurrent(attempt)) throw kotlinx.coroutines.CancellationException("Authentication attempt changed")
             val session = gateway.googleSession(idToken, nonce)
@@ -205,8 +207,8 @@ class AuthService(
         }
     }
 
-    suspend fun signInWithMagicLink(email: String) = startExternal { redirect, current -> gateway.startMagicLink(email, redirect, current) }
-    suspend fun signInWithGoogleBrowser() = startExternal { redirect, current -> gateway.startBrowserGoogle(redirect, current) }
+    override suspend fun signInWithMagicLink(email: String) = startExternal { redirect, current -> gateway.startMagicLink(email, redirect, current) }
+    override suspend fun signInWithGoogleBrowser() = startExternal { redirect, current -> gateway.startBrowserGoogle(redirect, current) }
 
     private suspend fun startExternal(start: suspend (String, () -> Boolean) -> Unit) {
         val initiating = beginNativeSignIn() // Supersede before awaiting SDK initialization.
@@ -234,7 +236,7 @@ class AuthService(
         }
     }
 
-    suspend fun signOut() {
+    override suspend fun signOut() {
         val original = currentSession // Capture before resetting UI or suspending.
         authSessionIdentity(original)?.let { signedOutSessions += it }
         ++authAttemptRevision
@@ -255,7 +257,7 @@ class AuthService(
 
     // MARK: - Profile Updates
 
-    suspend fun updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) {
+    override suspend fun updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) {
         val userId = currentUser?.id ?: throw AuthError.NotAuthenticated
         val generation = identityGeneration
 

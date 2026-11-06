@@ -18,77 +18,28 @@ import androidx.compose.ui.unit.dp
 import com.google.accompanist.swiperefresh.SwipeRefresh
 import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import com.meetingscheduler.android.models.Poll
-import com.meetingscheduler.android.services.PollService
-import com.meetingscheduler.android.services.PurchaseService
-import kotlinx.coroutines.launch
+import com.meetingscheduler.android.services.PollListPolls
 import kotlinx.datetime.Instant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PollListView(
-    pollService: PollService,
-    purchaseService: PurchaseService?,
+    pollService: PollListPolls,
     onNavigateToPoll: (String) -> Unit,
     onNavigateToCreatePoll: () -> Unit,
     onNavigateToPaywall: () -> Unit
 ) {
-    var showJoinByCode by remember { mutableStateOf(false) }
-    var joinCode by remember { mutableStateOf("") }
-    var joinError by remember { mutableStateOf<String?>(null) }
-    var isJoining by remember { mutableStateOf(false) }
-    var navigateToPollId by remember { mutableStateOf<String?>(null) }
-    var isRefreshing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
+    // The holder is kept by the navigation entry's store, so the list's join sheet and requests outlast the Activity.
+    val holder = pollListHolder(pollService)
+    val model = holder.opened.getOrThrow()
+    // The list reloads each time it comes back into view: after a child screen, a tab switch or a recreation.
+    RefreshOnReturn(holder)
+    DisposableEffect(holder) { onDispose { holder.coverWithChild() } }
 
-    LaunchedEffect(pollService.creationAccountKey) {
-        pollService.loadMyPolls()
-    }
-
-    LaunchedEffect(navigateToPollId) {
-        navigateToPollId?.let { pollId ->
+    LaunchedEffect(model.pollToOpen) {
+        model.pollToOpen?.let { pollId ->
             onNavigateToPoll(pollId)
-            navigateToPollId = null
-        }
-    }
-
-    fun handleCreatePoll() {
-        onNavigateToCreatePoll()
-    }
-
-    fun handleJoinByCode() {
-        scope.launch {
-            isJoining = true
-            joinError = null
-
-            val code = joinCode.trim().uppercase()
-
-            if (code.length != 6) {
-                joinError = "Code must be 6 characters"
-                isJoining = false
-                return@launch
-            }
-
-            val poll = pollService.loadPollByCode(code)
-
-            if (poll == null) {
-                joinError = "Poll not found. Please check the code."
-                isJoining = false
-                return@launch
-            }
-
-            if (poll.status == com.meetingscheduler.android.models.PollStatus.CLOSED ||
-                poll.status == com.meetingscheduler.android.models.PollStatus.ARCHIVED
-            ) {
-                joinError = "This poll is closed and cannot accept new participants."
-                isJoining = false
-                return@launch
-            }
-
-            showJoinByCode = false
-            joinCode = ""
-            joinError = null
-            isJoining = false
-            navigateToPollId = poll.id
+            model.openedPoll()
         }
     }
 
@@ -97,10 +48,10 @@ fun PollListView(
             TopAppBar(
                 title = { Text("My Polls") },
                 actions = {
-                    IconButton(onClick = { showJoinByCode = true }) {
+                    IconButton(onClick = { model.showJoinSheet() }) {
                         Icon(Icons.Default.Download, "Join Poll")
                     }
-                    IconButton(onClick = { handleCreatePoll() }) {
+                    IconButton(onClick = onNavigateToCreatePoll) {
                         Icon(Icons.Default.Add, "Create Poll")
                     }
                 }
@@ -108,14 +59,8 @@ fun PollListView(
         }
     ) { padding ->
         SwipeRefresh(
-            state = rememberSwipeRefreshState(isRefreshing),
-            onRefresh = {
-                scope.launch {
-                    isRefreshing = true
-                    try { pollService.loadMyPolls() }
-                    finally { isRefreshing = false }
-                }
-            },
+            state = rememberSwipeRefreshState(model.isRefreshing),
+            onRefresh = { holder.launch { refresh() } },
             modifier = Modifier.padding(padding)
         ) {
             when {
@@ -129,7 +74,7 @@ fun PollListView(
                 }
 
                 pollService.myPolls.isEmpty() && pollService.listLoadError == null -> {
-                    EmptyPollsView(onCreatePoll = { handleCreatePoll() })
+                    EmptyPollsView(onCreatePoll = onNavigateToCreatePoll)
                 }
 
                 else -> {
@@ -184,15 +129,13 @@ fun PollListView(
                             Column {
                                 pollService.listTotalCount?.let { Text("Loaded ${pollService.myPolls.size} of $it polls") }
                                 if (pollService.hasMorePolls) {
-                                    TextButton(onClick = { scope.launch { pollService.loadMorePolls() } },
+                                    TextButton(onClick = { holder.launch { loadMore() } },
                                         enabled = !pollService.isLoadingMore && !pollService.isLoading) { Text("Load more") }
                                 }
                                 if (pollService.isLoadingMore) CircularProgressIndicator()
                                 pollService.listLoadError?.let { error ->
                                     Text(error, color = MaterialTheme.colorScheme.error)
-                                    TextButton(onClick = { scope.launch {
-                                        pollService.retryPollLoad()
-                                    } }) { Text("Retry") }
+                                    TextButton(onClick = { holder.launch { retry() } }) { Text("Retry") }
                                 }
                             }
                         }
@@ -203,18 +146,14 @@ fun PollListView(
     }
 
     // Join by Code Sheet
-    if (showJoinByCode) {
+    if (model.showJoinByCode) {
         JoinByCodeSheet(
-            joinCode = joinCode,
-            joinError = joinError,
-            isJoining = isJoining,
-            onCodeChange = { joinCode = it },
-            onJoin = { handleJoinByCode() },
-            onDismiss = {
-                showJoinByCode = false
-                joinCode = ""
-                joinError = null
-            }
+            joinCode = model.joinCode,
+            joinError = model.joinError,
+            isJoining = model.isJoining,
+            onCodeChange = model::editJoinCode,
+            onJoin = { holder.launch { join() } },
+            onDismiss = model::dismissJoinSheet
         )
     }
 }
@@ -262,7 +201,7 @@ fun PollRowView(
     participantCount: Int = 0,
     timeRange: Pair<Instant, Instant>? = null,
     onClick: () -> Unit,
-    pollService: PollService,
+    pollService: PollListPolls,
     isOwner: Boolean = false
 ) {
     Card(
@@ -361,7 +300,7 @@ fun JoinByCodeSheet(
 
                 OutlinedTextField(
                     value = joinCode,
-                    onValueChange = { if (it.length <= 6) onCodeChange(it.uppercase()) },
+                    onValueChange = onCodeChange,
                     label = { Text("Share Code") },
                     placeholder = { Text("ABC123") },
                     modifier = Modifier.fillMaxWidth(),
