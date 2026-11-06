@@ -27,7 +27,6 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
 import kotlin.time.Clock
@@ -48,11 +47,8 @@ fun PollDetailView(
     onNavigateToResponses: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    // The holder is kept by the navigation entry, so the model and its work outlast the Activity.
-    val holder = viewModel<ScreenModelViewModel<PollDetailModel>>(
-        key = "poll-detail/$pollId/${pollService.creationAccountKey}",
-        factory = PollDetailViewModelFactory(pollId, pollService, calendarService, clock),
-    )
+    // The holder is kept by the navigation entry's store, so the model and its work outlast the Activity.
+    val holder = pollDetailHolder(pollId, pollService, calendarService, clock)
     val model = holder.opened.getOrElse {
         Column(Modifier.padding(24.dp)) {
             Text("Your saved response retry could not be read. Check your saved responses before editing.")
@@ -60,6 +56,8 @@ fun PollDetailView(
         }
         return
     }
+    // Popping back from a child screen refreshes the poll; the first resume and a rotation do not.
+    RefreshOnReturn(holder)
     var showClosePollDialog by remember(model) { mutableStateOf(false) }
     var finalTimeOption by remember(model) { mutableStateOf<PollTimeOption?>(null) }
 
@@ -388,7 +386,10 @@ fun PollDetailView(
                         calendarUnchecked = option.id in model.calendarCheck.unchecked,
                         canRespond = model.canRespond,
                         onResponseChange = { status -> model.setResponse(option.id, status) },
-                        onClick = { onNavigateToResponses(option.id) }
+                        onClick = {
+                            holder.coverWithChild()
+                            onNavigateToResponses(option.id)
+                        }
                     )
                 }
 

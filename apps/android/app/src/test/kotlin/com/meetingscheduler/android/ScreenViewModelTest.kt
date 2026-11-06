@@ -188,6 +188,72 @@ class ScreenViewModelTest {
         assertFalse(holder.opened.getOrThrow().created)
     }
 
+    @Test fun resumingWithoutAChildScreenDoesNotReload() {
+        val polls = DetailPolls { detail }
+        val holder = detailHolder(ViewModelStore(), polls)
+        // The first resume, and one after a configuration change, find nothing recorded.
+        assertNull(holder.resumed())
+        assertNull(holder.resumed())
+        assertEquals(1, polls.loads)
+    }
+
+    @Test fun returningFromAChildScreenReloadsOnce() {
+        val polls = DetailPolls { detail }
+        val holder = detailHolder(ViewModelStore(), polls)
+        holder.coverWithChild()
+        assertNotNull(holder.resumed())
+        assertEquals(2, polls.loads)
+        assertNull(holder.resumed())
+        assertEquals(2, polls.loads)
+    }
+
+    @Test fun aReloadThatOverlapsAnEarlierLoadSupersedesIt() {
+        val first = CompletableDeferred<PollDetail>()
+        val second = CompletableDeferred<PollDetail>()
+        val replies = ArrayDeque(listOf(first, second))
+        val polls = DetailPolls { replies.removeFirst().await() }
+        val holder = detailHolder(ViewModelStore(), polls)
+        val model = holder.opened.getOrThrow()
+        holder.coverWithChild()
+        holder.resumed()
+        val stale = detail.copy(poll = poll.copy(title = "Stale"))
+        first.complete(stale)
+        assertTrue(first.isCompleted)
+        assertNull(model.poll)
+        second.complete(detail)
+        assertEquals("Planning", model.poll?.title)
+        assertFalse(model.isLoading)
+    }
+
+    @Test fun aReloadCancelsALoadStillRunning() {
+        var cancelled = false
+        val replies = ArrayDeque(listOf<suspend () -> PollDetail>(
+            { try { CompletableDeferred<PollDetail>().await() } finally { cancelled = true } },
+            { detail },
+        ))
+        val polls = DetailPolls { replies.removeFirst()() }
+        val holder = detailHolder(ViewModelStore(), polls)
+        holder.coverWithChild()
+        holder.resumed()
+        assertTrue(cancelled)
+        assertEquals(poll, holder.opened.getOrThrow().poll)
+    }
+
+    @Test fun aReloadAfterTheAccountChangesIsDropped() {
+        val polls = DetailPolls { detail }
+        val holder = detailHolder(ViewModelStore(), polls)
+        val model = holder.opened.getOrThrow()
+        val reply = CompletableDeferred<PollDetail>()
+        val later = DetailPolls { reply.await() }
+        val laterHolder = detailHolder(ViewModelStore(), later)
+        laterHolder.coverWithChild()
+        laterHolder.resumed()
+        later.generation = 2
+        reply.complete(detail)
+        assertNull(laterHolder.opened.getOrThrow().poll)
+        assertEquals(poll, model.poll)
+    }
+
     @Test fun aModelThatCannotBeOpenedIsReportedInsteadOfThrown() {
         val holder = ScreenModelViewModel<Any>(open = { error("unreadable") })
         assertTrue(holder.opened.isFailure)

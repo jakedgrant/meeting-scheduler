@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollService
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.datetime.*
 
 @Composable
@@ -32,14 +31,13 @@ private fun CreationForm(
     screens: PollScreenEnvironment,
     onDismiss: () -> Unit
 ) {
-    // The holder is kept by the navigation entry, so the draft and an in-flight creation outlast the Activity.
-    val holder = viewModel<ScreenModelViewModel<PollCreationModel>>(
-        key = "poll-creation/${pollService.creationAccountKey}",
-        factory = PollCreationViewModelFactory(
-            polls = pollService,
-            store = { screens.creationStore(pollService.creationAccountId) },
-            clock = screens.clock,
-        ),
+    // The holder lives in the navigation entry's store, which is nested in the session store. The
+    // draft and an in-flight creation outlast the Activity; popping the entry cancels them, and
+    // reopening the form builds a fresh model.
+    val holder = pollCreationHolder(
+        polls = pollService,
+        store = { screens.creationStore(pollService.creationAccountId) },
+        clock = screens.clock,
     )
     val model = holder.opened.getOrElse {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
