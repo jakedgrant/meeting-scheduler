@@ -16,7 +16,7 @@ Gradle has no CI scan. The app declares versions inline and keeps no dependency 
 
 Local results: the iOS launch script ran on the reserved iPhone 17 simulator (iOS 27.0, Xcode 27.1) through `IOS_LAUNCH_SIMULATOR_ID`: build succeeded, the app launched, stayed up 15 seconds and the screenshot shows the sign-in screen. The CI-only path (create an iOS 26 simulator, pick the runtime, delete it afterwards) was not run locally. `npm audit --package-lock-only --omit=dev --audit-level=high` passes for both lockfiles and osv-scanner reports no issues for both `Package.resolved` files. `:app:assembleDebugAndroidTest` compiles the new test; it did not run, since no emulator image is installed. `actionlint` passes for every workflow. The web app was not rebuilt after the `ws` lockfile bump; CI's web job covers it.
 
-CI results: pending.
+CI results: PR #91, after merging tranche 9's head `070d29f`, ran every check green, including the new `app-launch`, `android-emulator-tests` (4 instrumented tests on an emulator, `ScreenModelRecreationTest` among them), `npm-advisories` and `swiftpm-advisories`. The first emulator run failed in the KVM step, which reloaded udev rules; the job now checks that `/dev/kvm` exists and opens its permissions directly.
 
 Still open in F24: the owner enabling required checks (and Dependabot security updates), a Gradle advisory scan, and running the launch and emulator jobs on every pull request instead of by path filter if the owner wants them required.
 
