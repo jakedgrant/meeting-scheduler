@@ -62,7 +62,15 @@ cd apps/android
 git diff --stat -- '*.lockfile'
 ```
 
-The tasks matter: a lock records only the configurations that get resolved, and `--rerun-tasks` forces resolution of those that would otherwise be up to date. Review the lockfile diff like any dependency change.
+The tasks matter: a lock records only the configurations that get resolved. `--rerun-tasks` forces resolution of those that would otherwise be up to date, and `dependencies :app:dependencies` resolves the rest. `-PallowUnsignedRelease=true` only lets `assembleRelease` run without a keystore so its classpath resolves; the output isn't shipped. Run it with a JDK 21 and the Android SDK, as the Android jobs do. Review the lockfile diff like any dependency change.
+
+Then confirm the locks are complete by building without `--write-locks`:
+
+```sh
+./gradlew --no-daemon -PallowUnsignedRelease=true :app:testDebugUnitTest :app:assembleDebugAndroidTest :app:assembleRelease
+```
+
+A failure naming a module that is "not part of the dependency lock state" means the regeneration missed something; see below.
 
 If a build fails with "Resolved 'x' which is not part of the dependency lock state" for `debugAndroidTestRuntimeClasspath`, Gradle resolved the module through the Android plugin's version alignment and doesn't write such modules to the lock. Declare it as an `androidTestRuntimeOnly` dependency, as `kotlin-stdlib-common` is in `app/build.gradle.kts`, and regenerate.
 

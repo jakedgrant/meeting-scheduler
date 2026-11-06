@@ -12,6 +12,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # osv-scanner for the swiftpm and gradle jobs: the official release binary from
+  # https://github.com/google/osv-scanner/releases/tag/v2.7.0, verified against the digest from
+  # that release's osv-scanner_SHA256SUMS.
+  OSV_SCANNER_VERSION: v2.7.0
+  OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+
 jobs:
   npm-advisories:
     runs-on: ubuntu-latest
@@ -46,11 +53,6 @@ jobs:
   swiftpm-advisories:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # Official release binary from https://github.com/google/osv-scanner/releases/tag/v2.7.0,
-      # verified against the digest from that release's osv-scanner_SHA256SUMS.
-      OSV_SCANNER_VERSION: v2.7.0
-      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
     steps:
       - uses: actions/checkout@v4
       - name: Install osv-scanner
@@ -68,10 +70,6 @@ jobs:
   gradle-advisories:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      # Same checksum-verified release as swiftpm-advisories.
-      OSV_SCANNER_VERSION: v2.7.0
-      OSV_SCANNER_SHA256: 160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
     steps:
       - uses: actions/checkout@v4
       - name: Install osv-scanner
