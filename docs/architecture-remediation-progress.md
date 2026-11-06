@@ -16,6 +16,8 @@ Tests: the cases that exercised the old functions now run against the replacemen
 
 Local results: `npm run test:database` **171 tests** passed, `npm run test:web` **176 tests** passed, `npm run check:database-types` matches the migrations after regeneration, and the web type check reports 0 errors and the 5 existing warnings. These ran in PGlite and Node only; no hosted project, simulator or emulator was used.
 
+CI results: PR #92, at `ac51751`, ran Web, Architecture database regressions, Billing webhooks, Calendar security and Dependency advisories, and all passed. The iOS and Android workflows did not run, because their path filters did not match this change.
+
 Still open in F19: applying the migration to hosted projects in the order above, and measuring query plans and payloads on representative hosted data. F20's hosted multi-client check remains.
 
 ## F24 launch runs and advisory scanning, November 5
