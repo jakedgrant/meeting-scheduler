@@ -27,7 +27,6 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.CalendarSource
 import com.meetingscheduler.android.services.PollService
-import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
 import kotlin.time.Clock
@@ -48,24 +47,23 @@ fun PollDetailView(
     onNavigateToResponses: (String) -> Unit,
     onNavigateBack: () -> Unit
 ) {
-    val accountKey = pollService.creationAccountKey
-    val opened = remember(pollId, accountKey) { runCatching { PollDetailModel(pollId, pollService, calendarService, clock) } }
-    val model = opened.getOrElse {
+    // The holder is kept by the navigation entry's store, so the model and its work outlast the Activity.
+    val holder = pollDetailHolder(pollId, pollService, calendarService, clock)
+    val model = holder.opened.getOrElse {
         Column(Modifier.padding(24.dp)) {
             Text("Your saved response retry could not be read. Check your saved responses before editing.")
             TextButton(onClick = onNavigateBack) { Text("Back") }
         }
         return
     }
+    // Popping back from a child screen refreshes the poll; the first resume and a rotation do not.
+    RefreshOnReturn(holder)
     var showClosePollDialog by remember(model) { mutableStateOf(false) }
     var finalTimeOption by remember(model) { mutableStateOf<PollTimeOption?>(null) }
 
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val poll = model.poll
-
-    LaunchedEffect(model) { model.load() }
 
     Scaffold(
         topBar = {
@@ -128,7 +126,7 @@ fun PollDetailView(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(model.detailError ?: "Poll not found")
-                    TextButton(onClick = { scope.launch { model.load() } }) { Text("Retry") }
+                    TextButton(onClick = { holder.launch { load() } }) { Text("Retry") }
                 }
             }
         } else {
@@ -144,7 +142,7 @@ fun PollDetailView(
                         Column {
                             Text("${calendarSourceNames(model.calendarCheck.failedSources)} couldn't be checked. Options marked \"Couldn't check\" may still conflict.",
                                 style = MaterialTheme.typography.bodySmall)
-                            TextButton(enabled = !model.isCheckingCalendar, onClick = { scope.launch { model.checkCalendar() } }) {
+                            TextButton(enabled = !model.isCheckingCalendar, onClick = { holder.launch { checkCalendar() } }) {
                                 Text("Retry calendar check")
                             }
                         }
@@ -324,7 +322,7 @@ fun PollDetailView(
                     item {
                         Button(
                             onClick = {
-                                scope.launch { model.join() }
+                                holder.launch { join() }
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !model.isJoining
@@ -388,7 +386,10 @@ fun PollDetailView(
                         calendarUnchecked = option.id in model.calendarCheck.unchecked,
                         canRespond = model.canRespond,
                         onResponseChange = { status -> model.setResponse(option.id, status) },
-                        onClick = { onNavigateToResponses(option.id) }
+                        onClick = {
+                            holder.coverWithChild()
+                            onNavigateToResponses(option.id)
+                        }
                     )
                 }
 
@@ -442,11 +443,11 @@ fun PollDetailView(
                     item {
                         Text(model.saveError.orEmpty(), color = MaterialTheme.colorScheme.error)
                         if (model.myParticipant != null && !model.availabilityLoaded) {
-                            TextButton(onClick = { scope.launch { model.loadSavedAvailability() } }) {
+                            TextButton(onClick = { holder.launch { loadSavedAvailability() } }) {
                                 Text("Retry loading saved responses")
                             }
                         } else if (model.hasVersionConflict) {
-                            TextButton(onClick = { scope.launch { model.reviewLatestVersion() } }) {
+                            TextButton(onClick = { holder.launch { reviewLatestVersion() } }) {
                                 Text("Review latest saved version")
                             }
                         }
@@ -457,7 +458,7 @@ fun PollDetailView(
                 if (model.myParticipant != null && poll?.status == PollStatus.ACTIVE) {
                     item {
                         Button(
-                            onClick = { scope.launch { model.save() } },
+                            onClick = { holder.launch { save() } },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = model.canSave
                         ) {
@@ -523,7 +524,7 @@ fun PollDetailView(
             text = { Text("Are you sure you want to close this poll? Once closed, participants will no longer be able to submit or modify their availability.") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { model.close() }
+                    holder.launch { close() }
                     showClosePollDialog = false
                 }) {
                     Text("Close Poll")
@@ -574,7 +575,7 @@ fun PollDetailView(
             text = { Text("Set $formattedOption as the final meeting time? All participants will be notified.") },
             confirmButton = {
                 TextButton(onClick = {
-                    scope.launch { model.finalize(option) }
+                    holder.launch { finalize(option) }
                     finalTimeOption = null
                 }) {
                     Text("Confirm")

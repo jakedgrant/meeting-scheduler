@@ -17,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollService
-import kotlinx.coroutines.launch
 import kotlinx.datetime.*
 
 @Composable
@@ -32,10 +31,15 @@ private fun CreationForm(
     screens: PollScreenEnvironment,
     onDismiss: () -> Unit
 ) {
-    val opened = remember { runCatching {
-        PollCreationModel(pollService, screens.creationStore(pollService.creationAccountId), screens.clock)
-    } }
-    val model = opened.getOrElse {
+    // The holder lives in the navigation entry's store, which is nested in the session store. The
+    // draft and an in-flight creation outlast the Activity; popping the entry cancels them, and
+    // reopening the form builds a fresh model.
+    val holder = pollCreationHolder(
+        polls = pollService,
+        store = { screens.creationStore(pollService.creationAccountId) },
+        clock = screens.clock,
+    )
+    val model = holder.opened.getOrElse {
         Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Your saved creation could not be read. Check your poll list before starting another poll.")
             TextButton(onClick = onDismiss) { Text("Close") }
@@ -61,10 +65,11 @@ private fun CreationForm(
     // Picker dialog state for due date
     var showDueDatePicker by remember { mutableStateOf(false) }
 
-    val scope = rememberCoroutineScope()
+    // Dismiss once the creation succeeded, including when it finished while the Activity was recreated.
+    LaunchedEffect(model.created) { if (model.created) onDismiss() }
 
     fun submitCreation() {
-        scope.launch { if (model.submit()) onDismiss() }
+        holder.launch { submit() }
     }
 
     model.pending?.let { pending ->

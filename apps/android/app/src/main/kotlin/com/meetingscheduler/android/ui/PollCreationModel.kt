@@ -115,6 +115,9 @@ class PollCreationModel(
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
+    /** True once the poll is created for this account, so the screen can close even if it was recreated meanwhile. */
+    var created by mutableStateOf(false)
+        private set
 
     private fun isCurrentAccount() = polls.creationAccountKey == createdForAccount
 
@@ -194,6 +197,7 @@ class PollCreationModel(
             session.submit(payload, send = polls::createPoll, isCurrent = ::isCurrentAccount) ?: return false
             completed = true
             store.clearDraft()
+            created = true
             return true
         } catch (error: CancellationException) {
             throw error
