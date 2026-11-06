@@ -247,6 +247,18 @@ dependencies {
     implementation("com.google.accompanist:accompanist-permissions:0.36.0")
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.36.0")
 
+    // Transitive versions raised past known advisories (F24, scanned from the lockfile).
+    constraints {
+        // google-api-client 2.0.0 brings guava 31.1-jre (GHSA-xxph-c9ww-hj94, fixed in 33.7.2).
+        implementation("com.google.guava:guava:33.7.2-jre") {
+            because("guava 31.1-jre has known advisories")
+        }
+        // Robolectric brings bcprov 1.78.1 (several advisories, fixed in 1.85). Tests only.
+        testImplementation("org.bouncycastle:bcprov-jdk18on:1.85") {
+            because("bcprov 1.78.1 has known advisories")
+        }
+    }
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
@@ -260,6 +272,13 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    // AGP pins debugAndroidTestRuntimeClasspath to the versions in debugRuntimeClasspath
+    // ("consistent resolution"). Gradle resolves this module through that pin alone and
+    // doesn't write it to the lockfile, so STRICT locking rejects it. Declaring it makes it
+    // a real dependency that gets locked. Keep it at the version the app resolves; if a
+    // lock update fails with "Resolved 'x' which is not part of the dependency lock state"
+    // on this configuration, declare the module named in the message the same way.
+    androidTestRuntimeOnly("org.jetbrains.kotlin:kotlin-stdlib-common:2.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

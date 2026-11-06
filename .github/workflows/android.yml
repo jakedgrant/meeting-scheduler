@@ -40,6 +40,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Fails if gradle-wrapper.jar isn't a jar Gradle published; ./gradlew runs it.
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -47,6 +50,7 @@ jobs:
           cache: gradle
           cache-dependency-path: |
             apps/android/*.gradle*
+            apps/android/**/*.lockfile
             apps/android/app/*.gradle*
             apps/android/gradle.properties
             apps/android/gradle/wrapper/gradle-wrapper.properties
@@ -153,6 +157,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Fails if gradle-wrapper.jar isn't a jar Gradle published; ./gradlew runs it.
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -160,6 +167,7 @@ jobs:
           cache: gradle
           cache-dependency-path: |
             apps/android/*.gradle*
+            apps/android/**/*.lockfile
             apps/android/app/*.gradle*
             apps/android/gradle.properties
             apps/android/gradle/wrapper/gradle-wrapper.properties

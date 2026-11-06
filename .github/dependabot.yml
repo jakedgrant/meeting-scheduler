@@ -1,7 +1,9 @@
 version: 2
 # Dependabot raises security updates for these manifests once the repository setting
 # "Dependabot security updates" is on, and the version updates below keep pins current.
-# Gradle versions are declared inline in app/build.gradle.kts, which Dependabot reads.
+# Gradle versions are declared inline in app/build.gradle.kts, which Dependabot reads. The
+# Android build locks dependencies, so a Gradle update pull request needs its lockfiles
+# regenerated before CI passes: see "Updating Gradle locks" in docs/release-checks.md.
 updates:
   - package-ecosystem: npm
     directory: /
