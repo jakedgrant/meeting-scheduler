@@ -5,9 +5,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.PollService
@@ -21,16 +24,24 @@ fun ContentView(
     purchaseService: PurchaseService?,
     screens: PollScreenEnvironment,
 ) {
+    // Kept across Activity recreation; hands each session its own ViewModelStore (F13, F12).
+    val sessionStores = viewModel<SessionViewModelStores>(
+        factory = SessionViewModelStores.Factory { authService.identityGeneration },
+    )
     when {
         authService.isLoading -> LoadingView()
         authService.isAuthenticated -> key(authService.identityGeneration) {
-            MainTabView(
-                authService = authService,
-                pollService = pollService,
-                calendarService = calendarService,
-                purchaseService = purchaseService,
-                screens = screens,
-            )
+            CompositionLocalProvider(
+                LocalViewModelStoreOwner provides sessionStores.storeOwnerFor(authService.identityGeneration),
+            ) {
+                MainTabView(
+                    authService = authService,
+                    pollService = pollService,
+                    calendarService = calendarService,
+                    purchaseService = purchaseService,
+                    screens = screens,
+                )
+            }
         }
         else -> AuthView(authService)
     }
