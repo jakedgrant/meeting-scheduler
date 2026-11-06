@@ -2,20 +2,9 @@ name: Android
 
 on:
   pull_request:
-    paths:
-      - 'apps/android/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/android.yml'
-      - 'scripts/ci/write-placeholder-google-services.sh'
   push:
     branches: [main]
-    paths:
-      - 'apps/android/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/android.yml'
-      - 'scripts/ci/write-placeholder-google-services.sh'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,7 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  android-changes:
+    # Always runs, so the jobs below can be skipped (which counts as passing for a required
+    # check) instead of the whole workflow being filtered out (which leaves it pending).
+    # Relevant: the Android app, the shared fixtures it reads, this workflow and the scripts it runs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: paths
+        run: >-
+          bash scripts/ci/changed-paths.sh
+          'apps/android'
+          'packages/shared-config/date-time-fixtures.json'
+          'packages/shared-config/entitlements.json'
+          '.github/workflows/android.yml'
+          'scripts/ci/write-placeholder-google-services.sh'
+          'scripts/ci/changed-paths.sh'
+
   android-build-and-signing:
+    needs: android-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.android-changes.result != 'success' || needs.android-changes.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -144,6 +159,9 @@ jobs:
           fi
 
   android-emulator-tests:
+    needs: android-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.android-changes.result != 'success' || needs.android-changes.outputs.relevant == 'true') }}
     # Runs the instrumented tests (Activity lifecycle, deep links, screen-model recreation) on an
     # x86_64 emulator. Hosted Ubuntu runners expose /dev/kvm once its permissions are opened below.
     runs-on: ubuntu-latest
@@ -204,7 +222,7 @@ jobs:
 
       - name: Upload instrumentation reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: android-instrumentation-${{ github.run_id }}-${{ github.run_attempt }}
           path: apps/android/app/build/reports/androidTests
