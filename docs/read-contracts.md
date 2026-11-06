@@ -95,12 +95,14 @@ Migration: [`20261106051325_retire_legacy_read_rpcs.sql`](../supabase/migrations
 | `get_poll_with_summary(uuid)` | `get_poll_detail` and `list_poll_responses` |
 | `get_guest_poll_detail(uuid, text)`, with its `poll_private` definer | `get_poll_detail_as_guest` and `list_poll_responses_as_guest` |
 
-The replacements return different shapes: paged, with explicit counts, and not per-option response tallies. No client in this repository reads the old shapes. The migration uses `DROP FUNCTION` without `CASCADE` on exact signatures, so a dependent object it did not anticipate makes it fail. It leaves the private builders from `20261105214548` (`bounded_poll_detail`, `poll_response_page`, `guest_poll`) and the helpers they use, because the replacements call them. After it runs, a call to a dropped function fails with `42883` (or `PGRST202` through the Data API) for every role.
+The replacements return different shapes: paged, with explicit counts and completeness markers. No client in this repository reads the old shapes. The migration uses `DROP FUNCTION` without `CASCADE` on exact signatures, so a view, policy or SQL-function dependency that PostgreSQL tracks makes it fail. It cannot detect a call inside a `plpgsql` body. Before applying to a hosted project, run `SELECT n.nspname, p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE p.prosrc ~ 'get_guest_poll_detail|get_user_participated_polls|get_poll_with_summary'`; expect only the functions being dropped. It leaves the private builders from `20261105214548` (`bounded_poll_detail`, `poll_response_page`, `guest_poll`) and the helpers they use, because the replacements call them. After it runs, a SQL call to a dropped function fails with `42883` for `anon`, `authenticated` and `service_role`; the database tests assert this. Through the Data API, PostgREST reports a missing function as `PGRST202` (not covered by a test here). Check that `SELECT proname FROM pg_proc WHERE proname IN ('get_user_participated_polls','get_poll_with_summary','get_guest_poll_detail')` returns no rows.
 
 **Apply the migration only after both of these are true:**
 
 1. Every deployed web build calls `get_poll_detail_as_guest` (tranche 8, #89). A web build from before that still calls `get_guest_poll_detail`, and its guest reads would fail.
 2. No released native build calls any of the three functions. The current iOS and Android sources do not, but a store release made earlier might.
+
+Confirm the first from the web deploy history (the oldest build still served or cached) and the second from the minimum supported native version. If either cannot be confirmed, do not apply the migration; older builds would then fail with `42883` or `PGRST202`.
 
 ## Cursors and the completeness rule
 
@@ -158,7 +160,7 @@ Apply the migration with the other ordered migrations. `ALTER COLUMN created_at 
 
 Apply `20261105214548_guest_bounded_reads.sql` before deploying the web build that calls the guest RPCs. It only creates and replaces functions.
 
-Apply `20261106051325_retire_legacy_read_rpcs.sql` last, after the web build that calls the guest RPCs is the only deployed web build and no released native build calls the retired functions (see [Retired functions](#retired-functions)). It takes no table lock. Rolling it back means recreating the functions from `20261022181851` and `20261022212301`.
+Apply `20261106051325_retire_legacy_read_rpcs.sql` last, and only when both conditions in [Retired functions](#retired-functions) hold. It takes no table lock. Rollback: recreate only the four dropped functions, copying their `CREATE FUNCTION` statements and matching `REVOKE`/`GRANT` statements from `20261022181851` (`get_user_participated_polls`, `get_poll_with_summary`) and `20261022212301` (both `get_guest_poll_detail` functions). Re-running those migrations is not a rollback, and no test exercises this path.
 
 ## Remaining work
 

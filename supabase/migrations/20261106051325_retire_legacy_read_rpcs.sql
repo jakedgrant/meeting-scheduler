@@ -15,10 +15,11 @@
 -- helpers they use (can_read_poll, verified_guest_participant, require_self)
 -- stay: the replacement reads and other functions call them.
 --
--- The public functions are SECURITY INVOKER wrappers or standalone bodies, and
--- poll_private.get_guest_poll_detail is only reached through its wrapper, so no
--- CASCADE is needed. A dependency this migration did not anticipate makes it
--- fail instead of dropping something silently.
+-- No checked-in migration references the dropped functions except the wrapper
+-- that calls poll_private.get_guest_poll_detail, so no CASCADE is needed. Without
+-- CASCADE a view, policy or SQL-function dependency that PostgreSQL tracks makes
+-- the migration fail. A call inside a plpgsql body is not tracked; check hosted
+-- definitions as described in docs/read-contracts.md before applying.
 BEGIN;
 
 DROP FUNCTION public.get_guest_poll_detail(UUID, TEXT);
