@@ -30,20 +30,32 @@ fun ContentView(
     )
     when {
         authService.isLoading -> LoadingView()
-        authService.isAuthenticated -> key(authService.identityGeneration) {
-            CompositionLocalProvider(
-                LocalViewModelStoreOwner provides sessionStores.storeOwnerFor(authService.identityGeneration),
-            ) {
-                MainTabView(
-                    authService = authService,
-                    pollService = pollService,
-                    calendarService = calendarService,
-                    purchaseService = purchaseService,
-                    screens = screens,
-                )
-            }
+        authService.isAuthenticated -> SessionScope(sessionStores, authService.identityGeneration) {
+            MainTabView(
+                authService = authService,
+                pollService = pollService,
+                calendarService = calendarService,
+                purchaseService = purchaseService,
+                screens = screens,
+            )
         }
         else -> AuthView(authService)
+    }
+}
+
+/**
+ * Composes [content] in the session store for [generation]. Each NavHost inside it calls
+ * `navController.setViewModelStore` with this `LocalViewModelStoreOwner`, which nests every
+ * navigation entry's store here (F12, F13). A new generation recomposes from a new key, and the
+ * session store has already cleared the older generation's stores.
+ */
+@Composable
+fun SessionScope(sessionStores: SessionViewModelStores, generation: Long, content: @Composable () -> Unit) {
+    key(generation) {
+        CompositionLocalProvider(
+            LocalViewModelStoreOwner provides sessionStores.storeOwnerFor(generation),
+            content = content,
+        )
     }
 }
 
