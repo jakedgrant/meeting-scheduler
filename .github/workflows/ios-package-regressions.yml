@@ -2,24 +2,8 @@ name: iOS package regressions
 
 on:
   pull_request:
-    paths:
-      - 'apps/mobile/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/ios-package-regressions.yml'
-      - 'scripts/ci/ios-package-regressions.sh'
-      - 'scripts/ci/check-ios-environment-keys.sh'
-      - 'scripts/ci/ios-app-launch.sh'
   push:
     branches: [main]
-    paths:
-      - 'apps/mobile/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/ios-package-regressions.yml'
-      - 'scripts/ci/ios-package-regressions.sh'
-      - 'scripts/ci/check-ios-environment-keys.sh'
-      - 'scripts/ci/ios-app-launch.sh'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +14,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ios-changes:
+    # Always runs, so the jobs below can be skipped (which counts as passing for a required
+    # check) instead of the whole workflow being filtered out (which leaves it pending).
+    # Relevant: the iOS packages and app wrapper, the shared fixtures, this workflow and the scripts it runs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: paths
+        run: >-
+          bash scripts/ci/changed-paths.sh
+          'apps/mobile'
+          'packages/shared-config/date-time-fixtures.json'
+          'packages/shared-config/entitlements.json'
+          '.github/workflows/ios-package-regressions.yml'
+          'scripts/ci/ios-package-regressions.sh'
+          'scripts/ci/check-ios-environment-keys.sh'
+          'scripts/ci/ios-app-launch.sh'
+          'scripts/ci/changed-paths.sh'
+
   package-regressions:
+    needs: ios-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.ios-changes.result != 'success' || needs.ios-changes.outputs.relevant == 'true') }}
     # Official runner inventory: macos-26 is arm64 and includes Xcode 26.6.
     # https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
     runs-on: macos-26
@@ -58,6 +70,9 @@ jobs:
           if-no-files-found: warn
 
   app-launch:
+    needs: ios-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.ios-changes.result != 'success' || needs.ios-changes.outputs.relevant == 'true') }}
     # Launches the signed-out app wrapper on a fresh simulator. Needs no account, secret or test
     # backend: see scripts/ci/ios-app-launch.sh.
     runs-on: macos-26
