@@ -8,12 +8,12 @@ import com.meetingscheduler.android.services.PollListPolls
 
 /**
  * One account's poll list screen: the join-by-code sheet, pull-to-refresh and the list commands.
- * The polls themselves stay in [polls] (the process-lifetime `PollService`, which resets them
- * when the account changes); the screen reads them through it.
+ * The polls themselves stay in the process-lifetime `PollService`, which resets them when the
+ * account changes; the screen reads them from it.
  *
  * A join result that arrives after the account changes is dropped.
  */
-class PollListModel(val polls: PollListPolls) {
+class PollListModel(private val polls: PollListPolls) {
     private val isCurrent = polls.sameAccount()
 
     var showJoinByCode by mutableStateOf(false)

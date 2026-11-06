@@ -56,7 +56,12 @@ class ScreenModelViewModel<M : Any>(
         if (model != null && start != null) startJob = viewModelScope.launch { model.start() }
     }
 
-    /** Records that a child screen is about to cover this one. */
+    /**
+     * Records that this screen is about to be covered, so that its next resume refreshes it. The
+     * detail screen calls it when it opens a child. The poll list calls it when its composition
+     * is disposed, which also happens on a tab switch and on Activity recreation, so the list
+     * reloads after a rotation as it did before it had a holder.
+     */
     fun coverWithChild() {
         refreshOnReturn = true
     }
@@ -128,6 +133,9 @@ internal fun PollAccount.sameAccount(): () -> Boolean {
     return { creationAccountKey == key }
 }
 
+/** Keys a holder by the auth service's account and identity generation. */
+internal val AccountScreenAuth.holderKey: String get() = "$accountId:$identityGeneration"
+
 /** The same check for the auth service's account and identity generation. */
 internal fun AccountScreenAuth.sameAccount(): () -> Boolean {
     val id = accountId
@@ -188,7 +196,7 @@ fun settingsHolder(
     calendar: SettingsCalendar,
 ): ScreenModelViewModel<SettingsModel> =
     viewModel(
-        key = "settings/${auth.accountId}:${auth.identityGeneration}",
+        key = "settings/${auth.holderKey}",
         factory = ScreenModelFactory(open = { SettingsModel(auth, billing, calendar) }),
     )
 
@@ -196,7 +204,7 @@ fun settingsHolder(
 @Composable
 fun profileEditHolder(auth: AccountScreenAuth): ScreenModelViewModel<ProfileEditModel> =
     viewModel(
-        key = "profile-edit/${auth.accountId}:${auth.identityGeneration}",
+        key = "profile-edit/${auth.holderKey}",
         factory = ScreenModelFactory(open = { ProfileEditModel(auth) }),
     )
 
@@ -207,7 +215,7 @@ fun <P : Any> paywallHolder(
     billing: ScreenBilling<P>?,
 ): ScreenModelViewModel<PaywallModel<P>> =
     viewModel(
-        key = "paywall/${auth.accountId}:${auth.identityGeneration}",
+        key = "paywall/${auth.holderKey}",
         factory = ScreenModelFactory(open = { PaywallModel(auth, billing) }, start = { load() }),
     )
 

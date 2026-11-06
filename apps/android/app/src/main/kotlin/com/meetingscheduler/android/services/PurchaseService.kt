@@ -140,11 +140,10 @@ class PurchaseService(
         get() = currentOffering?.availablePackages ?: emptyList()
 
     override suspend fun purchase(activity: Activity, pkg: Package): Unit = providerLock.withLock {
-        val packageToPurchase = pkg
         val id = checkNotNull(accountId) { "Sign in before purchasing." }
         val stamp = generation
         check(reconciledId == id) { "Your billing account is being updated. Try again." }
-        val purchaseParams = PurchaseParams.Builder(activity, packageToPurchase).build()
+        val purchaseParams = PurchaseParams.Builder(activity, pkg).build()
         val result = provider.purchase(purchaseParams)
         if (!current(id, stamp)) throw kotlinx.coroutines.CancellationException("Account changed")
         customerInfo = result
