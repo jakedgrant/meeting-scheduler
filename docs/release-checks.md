@@ -72,6 +72,8 @@ Both lists also include the workflow's own file and `scripts/ci/changed-paths.sh
 
 The other workflows run unconditionally on every pull request and need no gate.
 
+To confirm the gate on a pull request, open its checks list. A pull request that touches none of a platform's paths shows that platform's gate as passed and its jobs as skipped, which a required check treats as passing. The gate compares the whole pull request with its base, not the latest commit, so a pull request that has changed a platform path anywhere keeps running that platform's jobs on every push.
+
 ## Updating a pinned action
 
 Every `uses:` line in `.github/workflows` names a full 40-character commit SHA with the release it came from in a comment, such as `actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0`. A tag can be moved after the fact. A commit can't, so a compromised action repository can't change what the workflows run. This applies to first-party actions and to the Claude Code workflows too.
