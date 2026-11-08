@@ -229,7 +229,7 @@ dependencies {
     implementation("com.google.apis:google-api-services-calendar:v3-rev20220715-2.0.0")
 
     // Calendar integration
-    implementation("androidx.work:work-runtime-ktx:2.10.0")
+    implementation("androidx.work:work-runtime-ktx:2.12.0")
 
     // Preferences DataStore
     implementation("androidx.datastore:datastore-preferences:1.1.1")
