@@ -278,7 +278,7 @@ dependencies {
     // a real dependency that gets locked. Keep it at the version the app resolves; if a
     // lock update fails with "Resolved 'x' which is not part of the dependency lock state"
     // on this configuration, declare the module named in the message the same way.
-    androidTestRuntimeOnly("org.jetbrains.kotlin:kotlin-stdlib-common:2.3.0")
+    androidTestRuntimeOnly("org.jetbrains.kotlin:kotlin-stdlib-common:2.4.21")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
