@@ -126,6 +126,8 @@ android {
     testOptions {
         // FailureLog and Kermit both reach android.util.Log from JVM tests, where the stub would throw.
         unitTests.isReturnDefaultValues = true
+        // Robolectric needs merged resources and the manifest for Compose tests.
+        unitTests.isIncludeAndroidResources = true
     }
 
     packaging {
@@ -188,6 +190,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.activity:activity-compose:1.9.3")
 
     // Jetpack Compose
@@ -246,8 +249,13 @@ dependencies {
 
     // Testing
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     testImplementation("org.json:json:20240303")
     testImplementation("io.ktor:ktor-client-mock:3.3.3")
+    // Navigation scoping tests (F13) host a NavHost on the JVM.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    testImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
