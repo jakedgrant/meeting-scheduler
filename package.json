@@ -30,7 +30,7 @@
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.11",
+    "@electric-sql/pglite": "0.5.15",
     "pg": "8.23.1"
   }
 }
