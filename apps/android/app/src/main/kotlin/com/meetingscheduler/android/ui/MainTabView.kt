@@ -26,6 +26,10 @@ fun MainTabView(
     screens: PollScreenEnvironment,
 ) {
     var selectedTab by remember { mutableStateOf(0) }
+    // Both controllers outlive a tab switch, so each tab's screens (and their models) stay owned by a
+    // live back stack until they are popped or the session ends, instead of being orphaned in the store.
+    val pollNavController = rememberNavController()
+    val settingsNavController = rememberNavController()
 
     Scaffold(
         bottomBar = {
@@ -49,7 +53,6 @@ fun MainTabView(
             when (selectedTab) {
                 0 -> {
                     // Polls Tab with Navigation
-                    val pollNavController = rememberNavController()
                     PollNavHost(
                         navController = pollNavController,
                         authService = authService,
@@ -61,7 +64,6 @@ fun MainTabView(
                 }
                 1 -> {
                     // Settings Tab with Navigation
-                    val settingsNavController = rememberNavController()
                     NavHost(
                         navController = settingsNavController,
                         startDestination = "settings"
@@ -89,6 +91,7 @@ fun MainTabView(
 
                         composable("paywall") {
                             PaywallView(
+                                authService = authService,
                                 purchaseService = purchaseService,
                                 onDismiss = { settingsNavController.popBackStack() }
                             )

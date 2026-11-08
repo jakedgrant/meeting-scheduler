@@ -446,13 +446,6 @@ export type Database = {
         }
         Returns: Json
       }
-      get_guest_poll_detail: {
-        Args: {
-          participant_uuid: string | null
-          guest_token: string | null
-        }
-        Returns: Json
-      }
       get_poll_by_code: {
         Args: {
           code: string | null
@@ -482,23 +475,11 @@ export type Database = {
         }
         Returns: Json
       }
-      get_poll_with_summary: {
-        Args: {
-          poll_uuid: string | null
-        }
-        Returns: Json
-      }
       get_user_entitlement: {
         Args: {
           user_uuid?: string | null
         }
         Returns: string
-      }
-      get_user_participated_polls: {
-        Args: {
-          user_uuid?: string | null
-        }
-        Returns: Json
       }
       has_active_subscription: {
         Args: {

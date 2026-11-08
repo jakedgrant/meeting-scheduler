@@ -146,9 +146,12 @@ test('account deletion anonymizes participation and keeps existing cascades on P
     const otherRow = (await db.query('SELECT user_id,comment FROM public.poll_participants WHERE id=$1', [otherMembership.id])).rows[0];
     assert.deepEqual(otherRow, { user_id: other, comment: 'Other comment' });
     await asRole('authenticated', owner, async () => {
-      const summary = await scalar('SELECT public.get_poll_with_summary($1) AS result', [joined.id]);
-      assert.ok(summary.participants.some(p => p.id === membership.id && p.display_name === 'Deleted user'));
-      assert.deepEqual(summary.time_options.map(o => o.responses.total).sort(), [1, 2]);
+      const detail = await scalar('SELECT public.get_poll_detail($1) AS result', [joined.id]);
+      assert.ok(detail.participants.some(p => p.id === membership.id && p.anonymous_name === 'Deleted user'));
+      const page = await scalar('SELECT public.list_poll_responses($1) AS result', [joined.id]);
+      const perOption = {};
+      for (const item of page.items) perOption[item.time_option_id] = (perOption[item.time_option_id] ?? 0) + 1;
+      assert.deepEqual(Object.values(perOption).sort(), [1, 2]);
     });
   });
 
@@ -164,7 +167,8 @@ test('account deletion anonymizes participation and keeps existing cascades on P
       await asRole(role, userId, async () => {
         for (const target of [id, membership.id]) {
           await assert.rejects(scalar('SELECT public.get_guest_participant($1,$2) AS result', [target, hex('a')]), guestDenied);
-          await assert.rejects(scalar('SELECT public.get_guest_poll_detail($1,$2) AS result', [target, hex('a')]), guestDenied);
+          await assert.rejects(scalar('SELECT public.get_poll_detail_as_guest($1,$2) AS result', [target, hex('a')]), guestDenied);
+          await assert.rejects(scalar('SELECT public.list_poll_responses_as_guest($1,$2) AS result', [target, hex('a')]), guestDenied);
           await assert.rejects(scalar('SELECT public.update_guest_participant($1,$2,$3,NULL) AS result',
             [target, hex('a'), 'Reclaimed']), guestDenied);
         }

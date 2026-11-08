@@ -16,6 +16,7 @@ import com.meetingscheduler.android.ui.PollCreationStore
 import com.meetingscheduler.android.ui.PollCreationViewModelFactory
 import com.meetingscheduler.android.ui.PollDetailModel
 import com.meetingscheduler.android.ui.PollDetailViewModelFactory
+import com.meetingscheduler.android.ui.ScreenModelFactory
 import com.meetingscheduler.android.ui.ScreenModelViewModel
 import com.meetingscheduler.android.ui.SessionViewModelStores
 import com.meetingscheduler.android.ui.TimeOption
@@ -303,7 +304,7 @@ class ScreenViewModelTest {
     }
 
     @Test fun factoriesKeepNoActivityContextOrLifecycleOwner() {
-        listOf(PollDetailViewModelFactory::class.java, PollCreationViewModelFactory::class.java, SessionViewModelStores.Factory::class.java)
+        listOf(PollDetailViewModelFactory::class.java, PollCreationViewModelFactory::class.java, ScreenModelFactory::class.java, SessionViewModelStores.Factory::class.java)
             .flatMap { it.declaredFields.toList() }
             .forEach { field ->
                 assertFalse("${field.declaringClass.simpleName}.${field.name}", Context::class.java.isAssignableFrom(field.type))

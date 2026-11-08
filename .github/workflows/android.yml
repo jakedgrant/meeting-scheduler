@@ -2,18 +2,9 @@ name: Android
 
 on:
   pull_request:
-    paths:
-      - 'apps/android/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/android.yml'
   push:
     branches: [main]
-    paths:
-      - 'apps/android/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/android.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,7 +14,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  android-changes:
+    # Always runs, so the jobs below can be skipped (which counts as passing for a required
+    # check) instead of the whole workflow being filtered out (which leaves it pending).
+    # Relevant: the Android app, the shared fixtures it reads, this workflow and the scripts it runs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: paths
+        run: >-
+          bash scripts/ci/changed-paths.sh
+          'apps/android'
+          'packages/shared-config/date-time-fixtures.json'
+          'packages/shared-config/entitlements.json'
+          '.github/workflows/android.yml'
+          'scripts/ci/write-placeholder-google-services.sh'
+          'scripts/ci/changed-paths.sh'
+
   android-build-and-signing:
+    needs: android-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.android-changes.result != 'success' || needs.android-changes.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -38,6 +55,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Fails if gradle-wrapper.jar isn't a jar Gradle published; ./gradlew runs it.
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -45,6 +65,7 @@ jobs:
           cache: gradle
           cache-dependency-path: |
             apps/android/*.gradle*
+            apps/android/**/*.lockfile
             apps/android/app/*.gradle*
             apps/android/gradle.properties
             apps/android/gradle/wrapper/gradle-wrapper.properties
@@ -57,38 +78,7 @@ jobs:
           echo "$ANDROID_HOME/build-tools/${ANDROID_BUILD_TOOLS_VERSION}" >> "$GITHUB_PATH"
 
       - name: Write placeholder google-services.json (CI only, not a Firebase config)
-        run: |
-          test ! -e app/google-services.json
-          cat > app/google-services.json <<'JSON'
-          {
-            "project_info": {
-              "project_number": "000000000000",
-              "project_id": "ci-placeholder-not-a-real-project",
-              "storage_bucket": "ci-placeholder-not-a-real-project.appspot.com"
-            },
-            "client": [
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
-                  "android_client_info": { "package_name": "com.meetingscheduler.android" }
-                },
-                "oauth_client": [],
-                "api_key": [{ "current_key": "CI-PLACEHOLDER-NOT-A-REAL-KEY" }],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              },
-              {
-                "client_info": {
-                  "mobilesdk_app_id": "1:000000000000:android:0000000000000001",
-                  "android_client_info": { "package_name": "com.meetingscheduler.android.debug" }
-                },
-                "oauth_client": [],
-                "api_key": [{ "current_key": "CI-PLACEHOLDER-NOT-A-REAL-KEY" }],
-                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
-              }
-            ],
-            "configuration_version": "1"
-          }
-          JSON
+        run: bash ../../scripts/ci/write-placeholder-google-services.sh
 
       - name: Debug and instrumentation builds; unit tests
         run: |
@@ -167,3 +157,73 @@ jobs:
             echo "::error::the opt-in unsigned APK unexpectedly verifies"
             exit 1
           fi
+
+  android-emulator-tests:
+    needs: android-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.android-changes.result != 'success' || needs.android-changes.outputs.relevant == 'true') }}
+    # Runs the instrumented tests (Activity lifecycle, deep links, screen-model recreation) on an
+    # x86_64 emulator. Hosted Ubuntu runners expose /dev/kvm once its permissions are opened below.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/android
+    env:
+      ORG_GRADLE_PROJECT_disableCrashlyticsMappingUpload: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Fails if gradle-wrapper.jar isn't a jar Gradle published; ./gradlew runs it.
+      - uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+          cache-dependency-path: |
+            apps/android/*.gradle*
+            apps/android/**/*.lockfile
+            apps/android/app/*.gradle*
+            apps/android/gradle.properties
+            apps/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Enable KVM for the emulator
+        working-directory: .
+        run: |
+          if [ ! -e /dev/kvm ]; then
+            echo "::error::/dev/kvm is not available on this runner; the emulator needs hardware acceleration"
+            exit 1
+          fi
+          sudo chmod 666 /dev/kvm
+          test -w /dev/kvm
+
+      - name: Install Android SDK platform 36
+        run: |
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          (yes || true) | "$sdkmanager" --licenses > /dev/null
+          "$sdkmanager" --install "platforms;android-36"
+
+      - name: Write placeholder google-services.json (CI only, not a Firebase config)
+        run: bash ../../scripts/ci/write-placeholder-google-services.sh
+
+      - name: Run instrumented tests on an emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          profile: pixel_6
+          disable-animations: true
+          working-directory: apps/android
+          script: ./gradlew --no-daemon :app:connectedDebugAndroidTest
+
+      - name: Upload instrumentation reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-instrumentation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: apps/android/app/build/reports/androidTests
+          if-no-files-found: warn

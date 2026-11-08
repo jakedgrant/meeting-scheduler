@@ -13,9 +13,12 @@ const session = '00000000-0000-4000-8000-000000000005';
 const missing = '00000000-0000-4000-8000-000000000099';
 const selfFunctions = [
   'has_active_subscription', 'get_user_entitlement', 'count_unredeemed_passes',
-  'count_active_polls', 'can_create_poll', 'get_user_participated_polls',
+  'count_active_polls', 'can_create_poll',
 ];
-const legacyFunctions = [...selfFunctions, 'get_poll_with_summary', 'get_poll_by_code',
+// Retired by 20261106051325_retire_legacy_read_rpcs.sql; their replacements are the
+// bounded reads (list_poll_summaries, get_poll_detail, list_poll_responses).
+const retiredFunctions = ['get_user_participated_polls', 'get_poll_with_summary', 'get_guest_poll_detail'];
+const legacyFunctions = [...selfFunctions, 'get_poll_by_code',
   'is_poll_participant', 'generate_share_code', 'generate_unique_share_code',
   'handle_new_user', 'set_poll_share_code', 'update_updated_at', 'calendar_admin'];
 const deny = error => error.code === '42501';
@@ -159,11 +162,17 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
   };
   const scalar = async (sql, params = []) => (await db.query(sql, params)).rows[0].result;
   const selfRead = (name, args = '', params = []) => scalar(`SELECT public.${name}(${args}) AS result`, params);
+  // The caller's poll ids from list_poll_summaries (these fixtures fit one page).
+  const summaryIds = async role => {
+    const page = await selfRead('list_poll_summaries', '$1', [role]);
+    assert.equal(page.has_more, false);
+    return page.items.map(item => item.poll.id);
+  };
 
   await t.test('catalog inventory covers every legacy signature and removes effective anonymous self-service grants', async () => {
     const anonymous = new Set(['get_poll_by_code(text)', 'is_poll_participant(uuid,uuid)']);
     const authenticated = new Set([...anonymous, ...selfFunctions.map(name => `${name}(uuid)`),
-      'get_poll_with_summary(uuid)', 'generate_share_code()', 'generate_unique_share_code()']);
+      'generate_share_code()', 'generate_unique_share_code()']);
     const inventory = (await db.query(`SELECT p.oid::regprocedure::text AS signature,
       has_function_privilege('anon',p.oid,'EXECUTE') AS anon,
       has_function_privilege('authenticated',p.oid,'EXECUTE') AS authenticated,
@@ -178,7 +187,7 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
       assert.ok(fn.proconfig.includes('search_path=""'), fn.signature);
     }
     assert.equal(inventory.filter(fn => fn.trigger).length, 3);
-    assert.equal(inventory.length, 15);
+    assert.equal(inventory.length, 13);
     const publicGrants = (await db.query(`SELECT p.proname FROM pg_proc p
       JOIN pg_namespace n ON n.oid=p.pronamespace,
       LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) acl
@@ -187,14 +196,16 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     assert.deepEqual(publicGrants, []);
   });
 
-  await t.test('anonymous callers cannot invoke any legacy user/summary signature, including explicit UUIDs', async () => {
+  await t.test('anonymous callers cannot invoke any legacy self-service signature or bounded read, including explicit UUIDs', async () => {
     await asRole('anon', null, async () => {
       for (const name of selfFunctions) {
         await assert.rejects(selfRead(name), deny);
         await assert.rejects(selfRead(name, '$1', [owner]), deny);
         await assert.rejects(selfRead(name, 'NULL'), deny);
       }
-      await assert.rejects(selfRead('get_poll_with_summary', '$1', [polls.closed.id]), deny);
+      await assert.rejects(selfRead('list_poll_summaries'), deny);
+      await assert.rejects(selfRead('get_poll_detail', '$1', [polls.closed.id]), deny);
+      await assert.rejects(selfRead('list_poll_responses', '$1', [polls.closed.id]), deny);
     });
   });
 
@@ -222,11 +233,9 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
         assert.equal(await selfRead(name), expected[i], name);
         assert.equal(await selfRead(name, '$1', [owner]), expected[i], name);
       }
-      for (const args of [[], [owner]]) {
-        const result = await selfRead('get_user_participated_polls', args.length ? '$1' : '', args);
-        assert.deepEqual(result.created_polls.map(poll => poll.id).sort(), Object.values(polls).map(poll => poll.id).sort());
-        assert.deepEqual(result.joined_polls.map(poll => poll.id), [otherPoll.id]);
-      }
+      const ids = role => summaryIds(role).then(list => list.sort());
+      assert.deepEqual(await ids('owner'), Object.values(polls).map(poll => poll.id).sort());
+      assert.deepEqual(await ids('member'), [otherPoll.id]);
     });
     await asRole('authenticated', member, async () => {
       assert.equal(await selfRead('has_active_subscription'), false);
@@ -234,12 +243,11 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
       assert.equal(await selfRead('count_unredeemed_passes'), 0);
       assert.equal(await selfRead('count_active_polls'), 0);
       assert.equal(await selfRead('can_create_poll'), true);
-      const result = await selfRead('get_user_participated_polls');
-      assert.deepEqual(result.created_polls, []);
-      assert.deepEqual(result.joined_polls.map(poll => poll.id).sort(), Object.values(polls).map(poll => poll.id).sort());
+      assert.deepEqual(await summaryIds('owner'), []);
+      assert.deepEqual((await summaryIds('member')).sort(), Object.values(polls).map(poll => poll.id).sort());
     });
     await asRole('authenticated', unrelated, async () => {
-      assert.deepEqual(await selfRead('get_user_participated_polls'), { created_polls: [], joined_polls: [] });
+      assert.deepEqual(await summaryIds(null), []);
       assert.equal(await selfRead('has_active_subscription'), false);
       assert.equal(await selfRead('get_user_entitlement'), null);
       assert.equal(await selfRead('count_unredeemed_passes'), 0);
@@ -275,11 +283,11 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     }
   });
 
-  await t.test('owners and current members can read summaries in every poll state', async () => {
+  await t.test('owners and current members can read poll detail in every poll state', async () => {
     for (const userId of [owner, member]) {
       await asRole('authenticated', userId, async () => {
         for (const poll of Object.values(polls)) {
-          const result = await selfRead('get_poll_with_summary', '$1', [poll.id]);
+          const result = await selfRead('get_poll_detail', '$1', [poll.id]);
           assert.equal(result.poll.id, poll.id);
           assert.equal(result.poll.status, poll.status);
           assert.equal(result.time_options[0].id, options[poll.id].id);
@@ -288,27 +296,31 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     }
   });
 
-  await t.test('unrelated callers cannot read even active summaries, and missing polls have the same denial', async () => {
+  await t.test('unrelated callers cannot read even active poll detail or responses, and missing polls have the same denial', async () => {
     await asRole('authenticated', unrelated, async () => {
       for (const pollId of [...Object.values(polls).map(poll => poll.id), missing, null]) {
-        await assert.rejects(selfRead('get_poll_with_summary', '$1', [pollId]),
-          error => deny(error) && error.message === 'Poll access denied');
+        for (const name of ['get_poll_detail', 'list_poll_responses']) {
+          await assert.rejects(selfRead(name, '$1', [pollId]),
+            error => deny(error) && error.message === 'Poll access denied', name);
+        }
       }
     });
     await asRole('authenticated', null, async () => {
-      await assert.rejects(selfRead('get_poll_with_summary', '$1', [polls.active.id]), deny);
+      await assert.rejects(selfRead('get_poll_detail', '$1', [polls.active.id]), deny);
+      await assert.rejects(selfRead('list_poll_responses', '$1', [polls.active.id]), deny);
     });
   });
 
-  await t.test('revoked membership immediately removes closed-poll list, preview and summary access', async () => {
+  await t.test('revoked membership immediately removes closed-poll list, preview, detail and response access', async () => {
     const membership = memberships[polls.archived.id];
     await db.query('DELETE FROM public.poll_participants WHERE id=$1', [membership.id]);
     try {
       await asRole('authenticated', member, async () => {
         assert.equal(await selfRead('is_poll_participant', '$1,$2', [polls.archived.id, member]), false);
-        await assert.rejects(selfRead('get_poll_with_summary', '$1', [polls.archived.id]), deny);
+        await assert.rejects(selfRead('get_poll_detail', '$1', [polls.archived.id]), deny);
+        await assert.rejects(selfRead('list_poll_responses', '$1', [polls.archived.id]), deny);
         assert.deepEqual((await db.query('SELECT * FROM public.get_poll_by_code($1)', [polls.archived.share_code])).rows, []);
-        assert.equal((await selfRead('get_user_participated_polls')).joined_polls.some(poll => poll.id === polls.archived.id), false);
+        assert.equal((await summaryIds('member')).includes(polls.archived.id), false);
       });
     } finally {
       await db.query('INSERT INTO public.poll_participants(id,poll_id,user_id) VALUES ($1,$2,$3)',
@@ -316,20 +328,51 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     }
   });
 
-  await t.test('authorized summary includes only same-poll responses and omits guest emails/capabilities', async () => {
+  await t.test('authorized detail and response pages include only same-poll responses and omit guest emails/capabilities', async () => {
     await asRole('authenticated', member, async () => {
-      const result = await selfRead('get_poll_with_summary', '$1', [polls.closed.id]);
-      assert.deepEqual(result.time_options[0].responses, { available: 1, maybe: 1, unavailable: 0, total: 2 });
-      const payload = JSON.stringify(result);
+      const detail = await selfRead('get_poll_detail', '$1', [polls.closed.id]);
+      const page = await selfRead('list_poll_responses', '$1', [polls.closed.id]);
+      assert.equal(page.total_count, 2);
+      assert.deepEqual(page.items.map(item => item.status).sort(), ['available', 'maybe']);
+      const payload = JSON.stringify({ detail, page });
       assert.ok(payload.includes('Authorized member note'));
       assert.ok(payload.includes('Authorized guest note'));
       // After F03 the email is stored privately and access_token is a non-secret
-      // alias of the participant id, which the summary legitimately returns.
+      // alias of the participant id, which the detail legitimately returns.
       const capability = guest.access_token === guest.id ? [] : [guest.access_token];
       for (const secret of ['Foreign participant note', 'Foreign option note', 'private-guest@example.test', ...capability]) {
         assert.equal(payload.includes(secret), false, secret);
       }
     });
+  });
+
+  await t.test('the retired read RPCs no longer exist and no API role can execute them', async () => {
+    const remaining = (await db.query(`SELECT n.nspname||'.'||p.proname AS name FROM pg_proc p
+      JOIN pg_namespace n ON n.oid=p.pronamespace WHERE p.proname=ANY($1::text[])`, [retiredFunctions])).rows;
+    assert.deepEqual(remaining, []);
+    const calls = {
+      get_user_participated_polls: ['', []],
+      get_poll_with_summary: ['$1', [polls.closed.id]],
+      get_guest_poll_detail: ['$1,$2', [guest.id, '0'.repeat(64)]],
+    };
+    for (const [role, userId] of [['anon', null], ['authenticated', owner], ['service_role', null]]) {
+      await asRole(role, userId, async () => {
+        for (const name of retiredFunctions) {
+          for (const schema of ['public', 'poll_private']) {
+            const [args, params] = calls[name];
+            // 42883 undefined_function: the signature is gone, not merely revoked.
+            await assert.rejects(scalar(`SELECT ${schema}.${name}(${args}) AS result`, params),
+              error => error.code === '42883', `${role} ${schema}.${name}`);
+          }
+        }
+      });
+    }
+    // The bounded replacements and the private builders they use remain.
+    const replacements = (await db.query(`SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+      WHERE (n.nspname='public' AND p.proname IN ('list_poll_summaries','get_poll_detail','list_poll_responses',
+        'get_poll_detail_as_guest','list_poll_responses_as_guest'))
+        OR (n.nspname='poll_private' AND p.proname IN ('bounded_poll_detail','poll_response_page','guest_poll'))`)).rows;
+    assert.equal(replacements.length, 8);
   });
 
   await t.test('legacy and private membership helpers answer only for the current caller', async () => {
@@ -438,7 +481,8 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
     await asRole('authenticated', unrelated, async () => {
       await db.exec('SET search_path = hostile, public, pg_temp');
       assert.equal(await selfRead('is_poll_participant', '$1,$2', [otherPoll.id, unrelated]), false);
-      await assert.rejects(selfRead('get_poll_with_summary', '$1', [otherPoll.id]), deny);
+      await assert.rejects(selfRead('get_poll_detail', '$1', [otherPoll.id]), deny);
+      await assert.rejects(selfRead('list_poll_responses', '$1', [otherPoll.id]), deny);
       assert.equal((await db.query('SELECT * FROM public.get_poll_by_code($1)', [polls.active.share_code])).rows[0].id, polls.active.id);
     });
   });

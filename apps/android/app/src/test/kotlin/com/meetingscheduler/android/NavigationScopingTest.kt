@@ -18,9 +18,17 @@ import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollCreationPolls
 import com.meetingscheduler.android.services.PollDetailCalendar
 import com.meetingscheduler.android.services.PollDetailPolls
+import com.meetingscheduler.android.services.PollListPolls
+import com.meetingscheduler.android.services.PollResponsesPolls
 import com.meetingscheduler.android.ui.CreationFormDraft
 import com.meetingscheduler.android.ui.PollCreationModel
 import com.meetingscheduler.android.ui.PollCreationStore
+import com.meetingscheduler.android.ui.PollListModel
+import com.meetingscheduler.android.ui.PollListView
+import com.meetingscheduler.android.ui.TimeOptionResponsesModel
+import com.meetingscheduler.android.ui.TimeOptionResponsesView
+import com.meetingscheduler.android.ui.timeOptionResponsesHolder
+import com.meetingscheduler.android.ui.pollListHolder
 import com.meetingscheduler.android.ui.PollDetailModel
 import com.meetingscheduler.android.ui.RefreshOnReturn
 import com.meetingscheduler.android.ui.ScreenModelViewModel
@@ -94,12 +102,49 @@ class NavigationScopingTest {
         override suspend fun createPoll(request: PollCreationRequest) = send()
     }
 
+    private class ListPolls(val load: suspend () -> Unit) : PollListPolls {
+        var generation = 1
+        override val creationAccountId = "account"
+        override val creationAccountKey get() = "account:$generation"
+        override val myPolls = emptyList<Poll>()
+        override val createdPolls = emptyList<Poll>()
+        override val joinedPolls = emptyList<Poll>()
+        override val isLoading = false
+        override val isLoadingMore = false
+        override val listLoadError: String? = null
+        override val listTotalCount: Int? = null
+        override val hasMorePolls = false
+        override val pollParticipantCounts = emptyMap<String, Int>()
+        override val pollTimeRanges = emptyMap<String, Pair<Instant, Instant>>()
+        override fun formatTimeRange(earliest: Instant, latest: Instant) = ""
+        var loads = 0
+        override suspend fun loadMyPolls() { loads += 1; load() }
+        override suspend fun loadMorePolls() {}
+        override suspend fun retryPollLoad() {}
+        override suspend fun loadPollByCode(code: String): PollLookupResponse? = null
+    }
+
+    private class ResponsePolls(val load: suspend () -> PollDetail) : PollResponsesPolls {
+        override val creationAccountId = "account"
+        override val creationAccountKey = "account:1"
+        var loads = 0
+        override suspend fun loadPollDetail(pollId: String): PollDetail { loads += 1; return load() }
+    }
+
     private val generation = mutableStateOf(1L)
     private lateinit var nav: NavHostController
     private var detailHolder: ScreenModelViewModel<PollDetailModel>? = null
     private var creationHolder: ScreenModelViewModel<PollCreationModel>? = null
+    private var listHolder: ScreenModelViewModel<PollListModel>? = null
+    private var responsesHolder: ScreenModelViewModel<TimeOptionResponsesModel>? = null
 
-    private fun host(detailPolls: DetailPolls, creationPolls: CreationPolls, draft: MemoryStore = MemoryStore()) {
+    private fun host(
+        detailPolls: DetailPolls,
+        creationPolls: CreationPolls,
+        draft: MemoryStore = MemoryStore(),
+        listPolls: ListPolls = ListPolls {},
+        responsePolls: ResponsePolls = ResponsePolls { detail },
+    ) {
         rule.setContent {
             val stores = viewModel<SessionViewModelStores>(
                 factory = SessionViewModelStores.Factory { generation.value },
@@ -115,6 +160,20 @@ class NavigationScopingTest {
                         TextButton(onClick = { holder.coverWithChild(); nav.navigate("child") }) { Text("Open child") }
                     }
                     composable("child") { Text("Child") }
+                    composable("polls") {
+                        // The real screen: it resolves its holder from the entry's store.
+                        PollListView(
+                            pollService = listPolls,
+                            onNavigateToPoll = { nav.navigate("child") },
+                            onNavigateToCreatePoll = { nav.navigate("create") },
+                            onNavigateToPaywall = {},
+                        )
+                        listHolder = pollListHolder(listPolls)
+                    }
+                    composable("responses") {
+                        TimeOptionResponsesView("poll", "first", responsePolls, onNavigateBack = { nav.popBackStack() })
+                        responsesHolder = timeOptionResponsesHolder("poll", "first", responsePolls)
+                    }
                     composable("create") {
                         creationHolder = pollCreationHolder(creationPolls, { draft }, clock)
                         Text("Creating")
@@ -220,5 +279,80 @@ class NavigationScopingTest {
 
         assertEquals(2, detailPolls.loads)
         assertEquals(poll, detailHolder!!.opened.getOrThrow().poll)
+    }
+
+    @Test fun thePollListLoadsOnceWhenItsEntryOpensAndReloadsWhenItReturnsFromAChild() {
+        val listPolls = ListPolls {}
+        host(DetailPolls { detail }, CreationPolls { error("unexpected") }, listPolls = listPolls)
+        navigate("polls")
+        assertEquals(1, listPolls.loads)
+        val first = listHolder!!
+
+        navigate("child")
+        assertEquals(1, listPolls.loads)
+        pop()
+
+        assertEquals(2, listPolls.loads)
+        assertSame(first, listHolder)
+    }
+
+    @Test fun thePollListKeepsItsJoinSheetAcrossAChildScreen() {
+        host(DetailPolls { detail }, CreationPolls { error("unexpected") })
+        navigate("polls")
+        rule.runOnUiThread { listHolder!!.opened.getOrThrow().showJoinSheet() }
+        rule.waitForIdle()
+        rule.onNodeWithText("Join by Code").assertExists()
+        val model = listHolder!!.opened.getOrThrow()
+
+        navigate("child")
+        pop()
+
+        assertSame(model, listHolder!!.opened.getOrThrow())
+        assertTrue(model.showJoinByCode)
+    }
+
+    @Test fun aNewIdentityGenerationCancelsThePollListsLoad() {
+        var cancelled = false
+        val listPolls = ListPolls { try { CompletableDeferred<Unit>().await() } finally { cancelled = true } }
+        host(DetailPolls { detail }, CreationPolls { error("unexpected") }, listPolls = listPolls)
+        navigate("polls")
+        assertFalse(cancelled)
+
+        rule.runOnUiThread { generation.value = 2 }
+        rule.waitForIdle()
+
+        assertTrue(cancelled)
+    }
+
+    @Test fun aPushedResponsesScreenLoadsOnceAndIsClearedWhenItIsPopped() {
+        var cancelled = false
+        val reply = CompletableDeferred<PollDetail>()
+        val responsePolls = ResponsePolls { try { reply.await() } finally { cancelled = true } }
+        host(DetailPolls { detail }, CreationPolls { error("unexpected") }, responsePolls = responsePolls)
+        navigate("polls")
+        navigate("responses")
+        assertEquals(1, responsePolls.loads)
+        val first = responsesHolder!!.opened.getOrThrow()
+        assertTrue(first.isLoading)
+
+        pop()
+        assertTrue(cancelled)
+
+        navigate("responses")
+        assertEquals(2, responsePolls.loads)
+        assertNotSame(first, responsesHolder!!.opened.getOrThrow())
+    }
+
+    @Test fun aNewIdentityGenerationCancelsAPushedResponsesLoad() {
+        var cancelled = false
+        val responsePolls = ResponsePolls { try { CompletableDeferred<PollDetail>().await() } finally { cancelled = true } }
+        host(DetailPolls { detail }, CreationPolls { error("unexpected") }, responsePolls = responsePolls)
+        navigate("responses")
+        assertFalse(cancelled)
+
+        rule.runOnUiThread { generation.value = 2 }
+        rule.waitForIdle()
+
+        assertTrue(cancelled)
     }
 }

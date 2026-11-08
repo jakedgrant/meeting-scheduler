@@ -2,22 +2,8 @@ name: iOS package regressions
 
 on:
   pull_request:
-    paths:
-      - 'apps/mobile/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/ios-package-regressions.yml'
-      - 'scripts/ci/ios-package-regressions.sh'
-      - 'scripts/ci/check-ios-environment-keys.sh'
   push:
     branches: [main]
-    paths:
-      - 'apps/mobile/**'
-      - 'packages/shared-config/date-time-fixtures.json'
-      - 'packages/shared-config/entitlements.json'
-      - '.github/workflows/ios-package-regressions.yml'
-      - 'scripts/ci/ios-package-regressions.sh'
-      - 'scripts/ci/check-ios-environment-keys.sh'
   workflow_dispatch:
 
 permissions:
@@ -28,7 +14,35 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ios-changes:
+    # Always runs, so the jobs below can be skipped (which counts as passing for a required
+    # check) instead of the whole workflow being filtered out (which leaves it pending).
+    # Relevant: the iOS packages and app wrapper, the shared fixtures, this workflow and the scripts it runs.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: paths
+        run: >-
+          bash scripts/ci/changed-paths.sh
+          'apps/mobile'
+          'packages/shared-config/date-time-fixtures.json'
+          'packages/shared-config/entitlements.json'
+          '.github/workflows/ios-package-regressions.yml'
+          'scripts/ci/ios-package-regressions.sh'
+          'scripts/ci/check-ios-environment-keys.sh'
+          'scripts/ci/ios-app-launch.sh'
+          'scripts/ci/changed-paths.sh'
+
   package-regressions:
+    needs: ios-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.ios-changes.result != 'success' || needs.ios-changes.outputs.relevant == 'true') }}
     # Official runner inventory: macos-26 is arm64 and includes Xcode 26.6.
     # https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md
     runs-on: macos-26
@@ -36,7 +50,7 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Check that services stay in ServiceSet
         run: bash scripts/ci/check-ios-environment-keys.sh
       - name: Build package and app wrapper; run provider, lifecycle and command regressions
@@ -45,7 +59,7 @@ jobs:
         run: bash scripts/ci/ios-package-regressions.sh
       - name: Upload build logs and test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ios-package-regressions-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -53,4 +67,31 @@ jobs:
             ${{ runner.temp }}/ios-package-regressions/*.txt
             ${{ runner.temp }}/ios-package-regressions/*.json
             ${{ runner.temp }}/ios-package-regressions/Regressions.xcresult
+          if-no-files-found: warn
+
+  app-launch:
+    needs: ios-changes
+    # Run when the paths changed, and also if the gate itself failed.
+    if: ${{ !cancelled() && (needs.ios-changes.result != 'success' || needs.ios-changes.outputs.relevant == 'true') }}
+    # Launches the signed-out app wrapper on a fresh simulator. Needs no account, secret or test
+    # backend: see scripts/ci/ios-app-launch.sh.
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Build the app wrapper, launch it and check it stays running
+        env:
+          IOS_CI_OUTPUT: ${{ runner.temp }}/ios-app-launch
+        run: bash scripts/ci/ios-app-launch.sh
+      - name: Upload build log and launch screenshot
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-app-launch-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ios-app-launch/*.log
+            ${{ runner.temp }}/ios-app-launch/*.txt
+            ${{ runner.temp }}/ios-app-launch/*.png
           if-no-files-found: warn

@@ -39,7 +39,8 @@ fun ContentView(
                 screens = screens,
             )
         }
-        else -> AuthView(authService)
+        // The signed-out screen gets the store of the current generation too, so signing in or out ends its model.
+        else -> SessionScope(sessionStores, authService.identityGeneration) { AuthView(authService) }
     }
 }
 

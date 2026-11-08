@@ -15,12 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
-import com.meetingscheduler.android.models.AvailabilityResponse
-import com.meetingscheduler.android.models.AvailabilityStatus
 import com.meetingscheduler.android.models.PollDates
-import com.meetingscheduler.android.models.PollParticipant
-import com.meetingscheduler.android.models.PollTimeOption
-import com.meetingscheduler.android.services.PollService
+import com.meetingscheduler.android.services.PollResponsesPolls
 import kotlinx.datetime.Instant
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,74 +26,21 @@ private fun Instant.toJavaInstant(): java.time.Instant {
     return java.time.Instant.ofEpochMilli(this.toEpochMilliseconds())
 }
 
-data class ResponseItem(
-    val id: String,
-    val participantName: String,
-    val status: AvailabilityStatus,
-    val note: String?
-)
-
-data class GroupedResponses(
-    val available: List<ResponseItem>,
-    val maybe: List<ResponseItem>,
-    val unavailable: List<ResponseItem>
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimeOptionResponsesView(
     pollId: String,
     timeOptionId: String,
-    pollService: PollService,
+    pollService: PollResponsesPolls,
     onNavigateBack: () -> Unit
 ) {
-    val accountKey = pollService.creationAccountKey
-    var loadError by remember(pollId, accountKey) { mutableStateOf<String?>(null) }
-    var loadRevision by remember(pollId, accountKey) { mutableStateOf(0) }
-    var timeOption by remember(pollId, accountKey) { mutableStateOf<PollTimeOption?>(null) }
-    var pollTimeZone by remember(pollId, accountKey) { mutableStateOf("UTC") }
-    var participants by remember(pollId, accountKey) { mutableStateOf<List<PollParticipant>>(emptyList()) }
-    var responses by remember(pollId, accountKey) { mutableStateOf<List<AvailabilityResponse>>(emptyList()) }
-    var isLoading by remember(pollId, accountKey) { mutableStateOf(true) }
-
-    val groupedResponses = remember(responses, participants) {
-        val optionResponses = responses.filter { it.timeOptionId == timeOptionId }
-
-        val items = optionResponses.mapNotNull { response ->
-            val participant = participants.firstOrNull { it.id == response.participantId }
-            participant?.let {
-                ResponseItem(
-                    id = response.id,
-                    participantName = it.displayName,
-                    status = response.status,
-                    note = response.note
-                )
-            }
-        }
-
-        val sortedItems = items.sortedBy { it.participantName }
-
-        GroupedResponses(
-            available = sortedItems.filter { it.status == AvailabilityStatus.AVAILABLE },
-            maybe = sortedItems.filter { it.status == AvailabilityStatus.MAYBE },
-            unavailable = sortedItems.filter { it.status == AvailabilityStatus.UNAVAILABLE }
-        )
-    }
-
-    LaunchedEffect(pollId, timeOptionId, accountKey, loadRevision) {
-        isLoading = true
-        loadError = null
-        participants = emptyList(); responses = emptyList(); timeOption = null
-        try {
-            val detail = pollService.loadPollDetail(pollId)
-            timeOption = detail.timeOptions.firstOrNull { it.id == timeOptionId }
-            pollTimeZone = detail.poll.timezone
-            participants = detail.participants
-            responses = detail.responses
-        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
-        catch (error: Exception) { loadError = "Responses could not be loaded completely. Please retry." }
-        finally { isLoading = false }
-    }
+    // The holder is kept by the navigation entry's store, so the load outlasts the Activity.
+    val holder = timeOptionResponsesHolder(pollId, timeOptionId, pollService)
+    val model = holder.opened.getOrThrow()
+    val groupedResponses = model.grouped
+    val timeOption = model.timeOption
+    val pollTimeZone = model.pollTimeZone
+    val loadError = model.loadError
 
     Scaffold(
         topBar = {
@@ -111,7 +54,7 @@ fun TimeOptionResponsesView(
             )
         }
     ) { padding ->
-        if (isLoading) {
+        if (model.isLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -122,8 +65,8 @@ fun TimeOptionResponsesView(
             }
         } else if (loadError != null) {
             Column(Modifier.padding(padding).padding(24.dp)) {
-                Text(loadError!!)
-                TextButton(onClick = { loadRevision += 1 }) { Text("Retry") }
+                Text(loadError)
+                TextButton(onClick = { holder.launch { load() } }) { Text("Retry") }
             }
         } else {
             LazyColumn(
