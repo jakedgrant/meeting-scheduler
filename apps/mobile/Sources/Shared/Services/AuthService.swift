@@ -101,10 +101,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                     guard session == auth.currentSession else { throw CancellationError() }
                     return session
                 },
-                loadProfile: { id in
-                    try await client.from("profiles").select().eq("id", value: id.uuidString).single()
-                        .execute().value
-                }, signOut: { try await auth.signOut(scope: .local) },
+                loadProfile: { id in try await AuthService.fetchProfile(of: id, from: client) },
+                signOut: { try await auth.signOut(scope: .local) },
                 accountChanged: accountChanged, refreshCalendar: refreshCalendar,
                 refreshProviderIdentity: refreshProviderIdentity,
                 isStoredSession: { $0 == auth.currentSession })
@@ -448,6 +446,16 @@ public final class AuthService: NSObject, AuthServiceProtocol {
 
     // MARK: - Profile Updates
 
+    /// Reads `userId`'s own profile. The Data API exposes only `id`, `display_name` and
+    /// `avatar_url` of a profile, so the full row, email included, comes from `get_my_profile`.
+    /// That function answers for the request's credentials, so another account's row is
+    /// treated as a session change.
+    private static func fetchProfile(of userId: UUID, from client: SupabaseClient) async throws -> Profile {
+        let profile: Profile = try await client.rpc("get_my_profile").single().execute().value
+        guard profile.id == userId else { throw CancellationError() }
+        return profile
+    }
+
     public func updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) async throws {
         let credentials = AccountRequestCredentials(
             accountId: currentUserId, generation: sessionGeneration, accessToken: currentSession?.accessToken)
@@ -472,15 +480,13 @@ public final class AuthService: NSObject, AuthServiceProtocol {
 
             let response: Profile
             do {
-                response =
-                    try await supabase
+                // Returning the updated row would select email, which the Data API denies.
+                try await supabase
                     .from("profiles")
-                    .update(updates)
+                    .update(updates, returning: .minimal)
                     .eq("id", value: userId.uuidString)
-                    .select()
-                    .single()
                     .execute()
-                    .value
+                response = try await Self.fetchProfile(of: userId, from: supabase)
             } catch {
                 guard generation == sessionGeneration, currentUserId == userId, !Task.isCancelled else {
                     throw CancellationError()
