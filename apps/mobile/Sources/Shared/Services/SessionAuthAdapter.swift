@@ -117,6 +117,13 @@ final class RevisionedAuthStorage: AuthLocalStorage, Sendable {
         else { return nil }
         return access + "|" + refresh
     }
+    /// The owner of the value stored under `key`, if any. The SDK's keychain storage throws
+    /// `errSecItemNotFound` for a key it has never written, so a failed read means no owner:
+    /// otherwise the first PKCE verifier and the first session could never be stored.
+    private func storedOwner(_ key: String) -> String? {
+        guard let data = try? underlying.retrieve(key: key) else { return nil }
+        return Self.owner(data)
+    }
     private static func owner(_ data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         guard let owner = ((json["user"] as? [String: Any])?["id"] ?? json["id"]) as? String else { return nil }
@@ -131,7 +138,7 @@ final class RevisionedAuthStorage: AuthLocalStorage, Sendable {
                 state.refreshTicket = nil
                 guard ticket.revision == state.revision else { throw CancellationError() }
             }
-            let previous = try underlying.retrieve(key: key).flatMap(Self.owner)
+            let previous = storedOwner(key)
             try underlying.store(key: key, value: value)
             if let owner = Self.owner(value), owner != previous { state.revision &+= 1 }
         }
@@ -141,8 +148,13 @@ final class RevisionedAuthStorage: AuthLocalStorage, Sendable {
         try state.withLock { state in
             if let intent = AuthAttemptContext.intentId, intent != state.intentId { throw CancellationError() }
             if let attempt = AuthAttemptContext.revision, attempt != state.revision { throw CancellationError() }
-            let hadOwner = try underlying.retrieve(key: key).flatMap(Self.owner) != nil
-            try underlying.remove(key: key)
+            let hadOwner = storedOwner(key) != nil
+            do {
+                try underlying.remove(key: key)
+            } catch where (try? underlying.retrieve(key: key)) == nil {
+                // Deleting a key the keychain never stored also throws errSecItemNotFound.
+                // Nothing readable remains under the key, so the removal has its effect.
+            }
             if hadOwner { state.revision &+= 1 }
         }
     }
