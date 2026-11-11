@@ -176,6 +176,12 @@ export function initAuth() {
   }
 }
 
+// The Data API exposes only id, display_name and avatar_url of a profile, so a
+// select('*') on profiles is denied. The owner's full row, email included,
+// comes from get_my_profile, which answers for the request's credentials, so
+// callers check the returned id; see docs/profile-access.md.
+const readOwnProfile = (signal: AbortSignal) => supabase.rpc('get_my_profile').abortSignal(signal).single()
+
 async function loadProfile(userId: string) {
   const scope = captureSession()
   const revision = ++profileRevision
@@ -183,11 +189,10 @@ async function loadProfile(userId: string) {
   const controller = new AbortController()
   profileRequest = controller
   try {
-    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId)
-      .abortSignal(controller.signal).single()
+    const { data, error } = await readOwnProfile(controller.signal)
     if (!scope.isCurrent() || revision !== profileRevision || !owners) return
-    if (error) return
-    profile.set(data as Profile)
+    if (error || data.id !== userId) return
+    profile.set(data)
   } catch { /* Keep a same-account profile during a transient refresh failure. */ }
 }
 
@@ -235,15 +240,18 @@ export async function updateProfile(updates: Partial<Profile>) {
 
   if (!currentUser) throw new Error('Not authenticated')
 
-  const { data, error } = await supabase
+  // Returning the updated row would select email, so read it back instead.
+  const { error } = await supabase
     .from('profiles')
     .update(updates)
     .abortSignal(scope.signal)
     .eq('id', currentUser.id)
-    .select()
-    .single()
-
   if (!scope.isCurrent() || revision !== profileRevision) throw new Error('Session changed')
   if (error) throw error
-  profile.set(data as Profile)
+
+  const { data, error: readError } = await readOwnProfile(scope.signal)
+  if (!scope.isCurrent() || revision !== profileRevision) throw new Error('Session changed')
+  if (readError) throw readError
+  if (data.id !== currentUser.id) throw new Error('Session changed')
+  profile.set(data)
 }

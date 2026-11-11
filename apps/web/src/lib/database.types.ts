@@ -446,6 +446,10 @@ export type Database = {
         }
         Returns: Json
       }
+      get_my_profile: {
+        Args: Record<PropertyKey, never>
+        Returns: Database["public"]["Tables"]["profiles"]["Row"][]
+      }
       get_poll_by_code: {
         Args: {
           code: string | null
