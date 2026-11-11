@@ -12,6 +12,22 @@ struct CreatePollView: View {
     }
 }
 
+/// A button label whose icon follows the button's foreground style. A `Label` inside a `Form`
+/// tints its icon with the accent color, which matches a prominent button's background and
+/// hides the icon.
+private struct ProminentButtonLabel: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .accessibilityHidden(true)
+            Text(title)
+        }
+    }
+}
+
 private struct CreatePollForm: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model: PollCreationModel
@@ -154,8 +170,10 @@ private struct CreatePollForm: View {
 
             MultiDatePicker("Days", selection: $model.selectedDates)
 
-            Button("Add Selected Days", systemImage: "calendar.badge.plus") {
+            Button {
                 model.addSelectedDates()
+            } label: {
+                ProminentButtonLabel(title: "Add Selected Days", systemImage: "calendar.badge.plus")
             }
             .buttonStyle(.borderedProminent)
             .disabled(model.selectedDates.isEmpty)
@@ -179,7 +197,7 @@ private struct CreatePollForm: View {
                 .datePickerStyle(.compact)
 
             Button(action: model.addDateRange) {
-                Label("Add Date Range", systemImage: "calendar.badge.plus")
+                ProminentButtonLabel(title: "Add Date Range", systemImage: "calendar.badge.plus")
             }
             .buttonStyle(.borderedProminent)
         }
