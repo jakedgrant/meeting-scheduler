@@ -27,6 +27,7 @@
 	import { createAvailabilityEditor } from '$lib/availability-editor';
 	import { createPollPageSession } from '$lib/poll-page-session';
 	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
+	import { joinPath } from '$lib/join-by-code';
 	import { allDayDate, formatCalendarDate } from '$lib/date-time';
 
 	const pollId = $derived($page.params.id as string);
@@ -244,9 +245,13 @@
 		}, 2000);
 	}
 
+	// Non-members cannot open this page, so the link carries the share code instead.
+	const shareLink = $derived(
+		typeof window !== 'undefined' && $currentPoll ? window.location.origin + joinPath($currentPoll.share_code) : ''
+	);
+
 	function copyShareLink() {
-		const url = window.location.href;
-		navigator.clipboard.writeText(url);
+		navigator.clipboard.writeText(shareLink);
 		linkCopied = true;
 		setTimeout(() => {
 			linkCopied = false;
@@ -403,7 +408,7 @@
 					</button>
 				</div>
 				<div class="share-row">
-					<input type="text" readonly value={typeof window !== 'undefined' ? window.location.href : ''} />
+					<input type="text" readonly value={shareLink} />
 					<button class="btn secondary" onclick={copyShareLink}>
 						{#if linkCopied}
 							✓ Copied!
