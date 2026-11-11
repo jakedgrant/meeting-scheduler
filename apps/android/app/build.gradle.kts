@@ -194,7 +194,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.3")
 
     // Jetpack Compose
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -267,11 +267,11 @@ dependencies {
     testImplementation("io.ktor:ktor-client-mock:3.3.3")
     // Navigation scoping tests (F13) host a NavHost on the JVM.
     testImplementation("org.robolectric:robolectric:4.14.1")
-    testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    testImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     // AGP pins debugAndroidTestRuntimeClasspath to the versions in debugRuntimeClasspath
     // ("consistent resolution"). Gradle resolves this module through that pin alone and
