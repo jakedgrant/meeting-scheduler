@@ -225,7 +225,7 @@ dependencies {
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
     // Google Calendar API
-    implementation("com.google.api-client:google-api-client-android:2.2.0")
+    implementation("com.google.api-client:google-api-client-android:2.9.2")
     implementation("com.google.apis:google-api-services-calendar:v3-rev20220715-2.0.0")
 
     // Calendar integration
