@@ -36,13 +36,20 @@ class SupabaseAuthGateway(
     private val starts = kotlinx.coroutines.sync.Mutex()
     private val mutations = kotlinx.coroutines.sync.Mutex()
     override val status get() = client.auth.sessionStatus
-    override suspend fun loadProfile(userId: String, credential: String): Profile = accountPostgrest(client, credential).from("profiles").select {
-        filter { eq("id", userId) }
-    }.decodeSingle()
-    override suspend fun updateProfile(userId: String, credential: String, updates: kotlinx.serialization.json.JsonObject): Profile =
+    // The Data API exposes only id, display_name and avatar_url of a profile, so the
+    // caller's full row, email included, comes from get_my_profile. It answers for the
+    // credential, so another account's row is treated as an account change.
+    override suspend fun loadProfile(userId: String, credential: String): Profile =
+        accountPostgrest(client, credential).rpc("get_my_profile").decodeSingle<Profile>().also {
+            if (it.id != userId) throw kotlinx.coroutines.CancellationException("Account changed")
+        }
+    // An update returns no row (Returning.Minimal), so read the profile back.
+    override suspend fun updateProfile(userId: String, credential: String, updates: kotlinx.serialization.json.JsonObject): Profile {
         accountPostgrest(client, credential).from("profiles").update(updates) {
             filter { eq("id", userId) }
-        }.decodeSingle()
+        }
+        return loadProfile(userId, credential)
+    }
     override suspend fun awaitInitialization() = client.auth.awaitInitialization()
     // Do not import until the router verifies that the initiating session still owns it.
     override suspend fun exchangeCode(code: String, isCurrent: () -> Boolean) = starts.withLock {

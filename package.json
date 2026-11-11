@@ -6,6 +6,7 @@
     "test:web": "node scripts/test-web.mjs",
     "test:rpc:db": "node --test tests/rpc-authorization.test.mjs",
     "test:participants:db": "node --test tests/participant-access.test.mjs",
+    "test:profiles:db": "node --test tests/profile-access.test.mjs",
     "test:membership:db": "node --test tests/membership-integrity.test.mjs",
     "test:account-deletion:db": "node --test tests/account-deletion.test.mjs",
     "test:responses:db": "node --test tests/response-commands.test.mjs",
@@ -30,7 +31,7 @@
     "jsonwebtoken": "^9.0.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.11",
+    "@electric-sql/pglite": "0.5.15",
     "pg": "8.23.1"
   }
 }
