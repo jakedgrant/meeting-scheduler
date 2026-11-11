@@ -1,18 +1,9 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { sources } from './helpers/source-files.mjs';
 
 // F27: raw errors can carry URLs, tokens and provider responses, so every client and
 // function keeps them out of logs. See docs/integration-diagnostics.md.
-const root = new URL('../', import.meta.url);
-
-const sources = async (directory, extensions) => {
-  const entries = await readdir(new URL(directory, root), { recursive: true, withFileTypes: true });
-  const files = entries
-    .filter(entry => entry.isFile() && extensions.some(extension => entry.name.endsWith(extension)))
-    .map(entry => `${entry.parentPath}/${entry.name}`);
-  return Promise.all(files.map(async path => ({ path, text: await readFile(path, 'utf8') })));
-};
 
 const violations = (files, pattern) => files.flatMap(({ path, text }) =>
   text.split('\n').flatMap((line, index) => pattern.test(line) ? [`${path}:${index + 1}: ${line.trim()}`] : []));

@@ -888,10 +888,13 @@ final class SessionTransportTests: XCTestCase {
         await settle { read.waiting.count == 1 }
         let update = Task { try await service.updateProfile(displayName: "new", avatarUrl: nil, timezone: nil) }
         await settle { LifecycleURLProtocol.count(path: "/rest/v1/profiles") == 1 }
+        LifecycleURLProtocol.reply(path: "/rest/v1/profiles", status: 204, data: Data())
+        // The edit reads its row back, because the Data API cannot return email.
+        await settle { LifecycleURLProtocol.count(path: "/rest/v1/rpc/get_my_profile") == 1 }
         let changed = Profile(id: a, email: "test@example.invalid", displayName: "new")
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        LifecycleURLProtocol.reply(path: "/rest/v1/profiles", data: try encoder.encode(changed))
+        LifecycleURLProtocol.reply(path: "/rest/v1/rpc/get_my_profile", data: try encoder.encode(changed))
         try await update.value
         XCTAssertEqual(service.profile?.displayName, "new")
         read.release()
