@@ -296,8 +296,9 @@ final class SessionTransportTests: XCTestCase {
             encoder.keyEncodingStrategy = .convertToSnakeCase
             LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try encoder.encode(old))
             _ = await refresh.value
-            // Demonstrates the pinned SDK defect, then the production adapter fix.
-            XCTAssertEqual(auth.currentUser?.id, protected ? b : a)
+            // supabase-swift 2.39 let the late refresh install A over B. 2.55.3 discards a refresh
+            // that outlived its session (supabase-swift #1374); the adapter keeps its own fence.
+            XCTAssertEqual(auth.currentUser?.id, b)
             if protected {
                 let api = SupabaseClient(
                     supabaseURL: URL(string: "https://session-transport.invalid")!, supabaseKey: "test-only",
