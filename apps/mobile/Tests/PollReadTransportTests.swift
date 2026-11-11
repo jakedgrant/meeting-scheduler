@@ -388,4 +388,61 @@ final class PollReadTransportTests: XCTestCase {
             XCTAssertEqual(service.myPolls.map(\.id), [b.id]); XCTAssertFalse(service.isLoadingMore)
         }
     }
+
+    // MARK: - Joining by share code
+
+    private func lookup(_ poll: Poll, status: PollStatus = .active) throws -> Data {
+        let row = PollLookupResponse(id: poll.id, title: poll.title, status: status, creatorId: poll.creatorId,
+                                     createdAt: poll.createdAt, updatedAt: poll.updatedAt, shareCode: "BFZZ7J")
+        return try JSONSerialization.data(withJSONObject: [object(row)])
+    }
+
+    private func rpcName(_ request: URLRequest) -> String? { request.url?.lastPathComponent }
+
+    private func body(_ request: URLRequest) -> [String: Any] {
+        (request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]) ?? [:]
+    }
+
+    func testShareCodeJoinsThePollBeforeItIsOpened() async throws {
+        let account = UUID(); let poll = Poll(creatorId: UUID(), title: "Team lunch")
+        try await withService(account: account) { service, transport, _ in
+            transport.enqueue([.json(try lookup(poll)), .json(try json([
+                "participant": object(PollParticipant(pollId: poll.id, userId: account)), "created": true]))])
+            let joined = try await service.joinPoll(code: "bfzz7j")
+            XCTAssertEqual(joined, poll.id)
+            XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code", "join_poll"])
+            XCTAssertEqual(body(transport.requests[0])["code"] as? String, "BFZZ7J")
+            XCTAssertEqual((body(transport.requests[1])["poll_uuid"] as? String)?.lowercased(), poll.id.uuidString.lowercased())
+        }
+    }
+
+    func testUnknownShareCodeJoinsNothing() async throws {
+        try await withService(account: UUID()) { service, transport, _ in
+            transport.enqueue([.json(Data("[]".utf8))])
+            do { _ = try await service.joinPoll(code: "NOPE42"); XCTFail("An unknown code must not join") }
+            catch PollError.pollNotFound {}
+            XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code"])
+        }
+    }
+
+    func testClosedShareCodeJoinsNothing() async throws {
+        let poll = Poll(creatorId: UUID(), title: "Done")
+        try await withService(account: UUID()) { service, transport, _ in
+            transport.enqueue([.json(try lookup(poll, status: .closed))])
+            do { _ = try await service.joinPoll(code: "BFZZ7J"); XCTFail("A closed poll must not be joined") }
+            catch PollError.notAcceptingParticipants {}
+            XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code"])
+        }
+    }
+
+    func testShareCodePastItsDeadlineReportsTheClosedPoll() async throws {
+        let poll = Poll(creatorId: UUID(), title: "Past due")
+        try await withService(account: UUID()) { service, transport, _ in
+            transport.enqueue([.json(try lookup(poll)), .rejected(403, try json([
+                "code": "42501", "message": "Poll is not accepting participants", "details": NSNull(), "hint": NSNull()]))])
+            do { _ = try await service.joinPoll(code: "BFZZ7J"); XCTFail("The server refused the join") }
+            catch PollError.notAcceptingParticipants {}
+            XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code", "join_poll"])
+        }
+    }
 }

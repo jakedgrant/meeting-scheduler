@@ -61,3 +61,18 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     func saveAvailability(_ request: SaveAvailabilityRequest) async throws -> AvailabilitySnapshot
 
 }
+
+extension PollServiceProtocol {
+    /// Joins the poll a share code names and returns its ID.
+    ///
+    /// Entering a code is the decision to join. Only a poll's creator and participants can read
+    /// its detail, so the join has to happen before the poll is opened; the code lookup returns
+    /// just enough to choose the poll. Joining a poll the account is already in returns the
+    /// existing membership.
+    public func joinPoll(code: String) async throws -> UUID {
+        guard let poll = await loadPollByCode(code) else { throw PollError.pollNotFound }
+        guard poll.status == .active else { throw PollError.notAcceptingParticipants }
+        _ = try await joinPoll(pollId: poll.id, anonymousName: nil)
+        return poll.id
+    }
+}

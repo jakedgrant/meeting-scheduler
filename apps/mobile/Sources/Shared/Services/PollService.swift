@@ -487,7 +487,11 @@ public final class PollService: PollServiceProtocol {
                 return result.participant
             } catch {
                 guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
-                if let error = error as? PostgrestError, error.code == "P0003" { throw PollError.capacityReached }
+                if let error = error as? PostgrestError {
+                    if error.code == "P0003" { throw PollError.capacityReached }
+                    // For a signed-in caller, join_poll's 42501 means the poll is closed or past its deadline.
+                    if error.code == "42501" { throw PollError.notAcceptingParticipants }
+                }
                 throw error
             }
         }
@@ -528,11 +532,13 @@ public enum PollError: Error, LocalizedError {
     case notAuthenticated
     case pollNotFound
     case capacityReached
+    case notAcceptingParticipants
     public var errorDescription: String? {
         switch self {
         case .notAuthenticated: "Sign in to continue."
         case .pollNotFound: "This poll could not be found. Reload your polls and try again."
         case .capacityReached: "This poll has reached its participant limit. Ask the organizer for help."
+        case .notAcceptingParticipants: "This poll is closed and cannot accept new participants."
         }
     }
 }
