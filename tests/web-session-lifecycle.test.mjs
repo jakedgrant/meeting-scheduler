@@ -28,7 +28,8 @@ let sequence = 0;
 const summaryPage = (polls, role) => ({ data: { items: polls.map(poll => ({ poll: pollRow(poll), role, participant_count: 0, time_option_count: 0, earliest_start: null, latest_start: null })), has_more: false, next_cursor: null, total_count: polls.length }, error: null });
 const pollDetail = poll => ({ data: { poll: pollRow(poll), time_options: [], participants: [], time_option_count: 0, participant_count: 0 }, error: null });
 // F19 read RPCs answer for the account that issued the request.
-const defaultRpc = (name, args, account) => name === 'get_poll_detail' ? pollDetail({ id: args.poll_uuid, creator_id: account })
+const defaultRpc = (name, args, account) => name === 'get_my_profile' ? { data: { id: account, display_name: account }, error: null }
+  : name === 'get_poll_detail' ? pollDetail({ id: args.poll_uuid, creator_id: account })
   : name === 'list_poll_responses' || name === 'list_poll_summaries' ? summaryPage([], args?.role_filter)
   : { data: null, error: null };
 
@@ -56,7 +57,7 @@ async function fixture(t, { browser = true } = {}) {
       single() { return this; },
       then(yes, no) {
         state.requests ??= []; state.requests.push(request);
-        const answer = state.query?.(request) ?? { data: table === 'profiles' ? { id: request.eq.id, display_name: request.eq.id } : table === 'subscriptions' ? { user_id: request.eq.user_id } : table === 'polls' ? { id: request.eq.id, creator_id: request.account } : [], error: null };
+        const answer = state.query?.(request) ?? { data: table === 'subscriptions' ? { user_id: request.eq.user_id } : table === 'polls' ? { id: request.eq.id, creator_id: request.account } : [], error: null };
         return Promise.resolve(answer).then(yes, no);
       }
     };
@@ -77,7 +78,7 @@ async function fixture(t, { browser = true } = {}) {
       const request = { name, args, account: state.account, signal: null };
       (state.rpcRequests ??= []).push(request);
       const response = (async () => (await state.rpc?.(name, args)) ?? defaultRpc(name, args, request.account))();
-      return Object.assign(response, { abortSignal(signal) { request.signal = signal; return this; } });
+      return Object.assign(response, { abortSignal(signal) { request.signal = signal; return this; }, single() { return this; } });
     },
     functions: { invoke(name, options) { sdk(`function:${name}`); return state.invoke?.(name, options) ?? Promise.resolve({ data: status(state.account), error: null }); } },
     channel(name) { sdk('channel'); const channel = { name, handlers: [], on(...args) { this.handlers.push(args.at(-1)); return this; }, subscribe() { return this; } }; state.channels.push(channel); return channel; },
@@ -172,11 +173,11 @@ test('combined auth composition holds no dependent SDK work under lock; repeated
   await flush();
   await actual.polls.loadPoll('poll-A');
   const before = actual.get(actual.scope.sessionIdentity);
-  const profileReads = state.calls.filter(call => call === 'table:profiles').length;
+  const profileReads = state.calls.filter(call => call === 'rpc:get_my_profile').length;
   for (let index = 0; index < 4; index++) state.emit('TOKEN_REFRESHED', sessionFor(accountA));
   await flush();
   assert.deepEqual(actual.get(actual.scope.sessionIdentity), before);
-  assert.equal(state.calls.filter(call => call === 'table:profiles').length, profileReads);
+  assert.equal(state.calls.filter(call => call === 'rpc:get_my_profile').length, profileReads);
   await actual.auth.updateProfile({ display_name: 'Updated A' });
   assert.equal(actual.get(actual.auth.profile).id, accountA);
   state.emit('USER_UPDATED', sessionFor(accountA));
@@ -198,10 +199,14 @@ for (const path of ['A-B', 'A-logout-A', 'A-B-A']) for (const outcome of ['succe
     const { actual, state, mount } = await fixture(t);
     const profile = deferred(), subscription = deferred(), calendar = deferred();
     let firstProfile = true, firstSubscription = true, firstCalendar = true;
+    state.rpc = (name, args) => {
+      if (name !== 'get_my_profile') return undefined;
+      if (firstProfile) { firstProfile = false; return profile.promise; }
+      return { data: { id: state.account, display_name: 'current' }, error: null };
+    };
     state.query = request => {
-      if (request.table === 'profiles' && firstProfile) { firstProfile = false; return profile.promise; }
       if (request.table === 'subscriptions' && firstSubscription) { firstSubscription = false; return subscription.promise; }
-      return { data: request.table === 'profiles' ? { id: request.eq.id, display_name: 'current' } : { user_id: request.eq.user_id }, error: null };
+      return { data: { user_id: request.eq.user_id }, error: null };
     };
     state.invoke = () => {
       if (firstCalendar) { firstCalendar = false; return calendar.promise; }
@@ -210,7 +215,7 @@ for (const path of ['A-B', 'A-logout-A', 'A-B-A']) for (const outcome of ['succe
     mount();
     state.emit('SIGNED_IN', sessionFor(accountA));
     await flush();
-    const oldRequests = [...state.requests];
+    const oldRequests = [...state.requests, ...state.rpcRequests.filter(request => request.name === 'get_my_profile')];
     state.emit(path === 'A-logout-A' ? 'SIGNED_OUT' : 'SIGNED_IN', path === 'A-logout-A' ? null : sessionFor(accountB));
     assert.equal(actual.get(actual.auth.profile), null);
     assert.equal(actual.get(actual.billing.subscription), null);
@@ -236,12 +241,12 @@ for (const outcome of ['success', 'failure']) test(`late profile edit ${outcome}
   const { actual, state, mount } = await fixture(t);
   mount(); state.emit('SIGNED_IN', sessionFor(accountA)); await flush();
   const pending = deferred();
-  state.query = request => request.update ? pending.promise : { data: request.table === 'profiles' ? { id: request.eq.id, display_name: 'current' } : null, error: null };
+  state.query = request => request.update ? pending.promise : { data: null, error: null };
   const edit = actual.auth.updateProfile({ display_name: 'Old edit' });
   const rejected = assert.rejects(edit, /Session changed/);
   await Promise.resolve();
   state.emit('SIGNED_IN', sessionFor(accountB)); await flush();
-  pending.resolve(outcome === 'success' ? { data: { id: accountA, display_name: 'Old edit' }, error: null } : { data: null, error: Error('old error') });
+  pending.resolve(outcome === 'success' ? { data: null, error: null } : { data: null, error: Error('old error') });
   await rejected;
   assert.equal(actual.get(actual.auth.profile).id, accountB);
 });
@@ -256,6 +261,7 @@ test('offline replacement clears all account-owned visible state before failed n
   actual.calendar.calendarConflicts.set(new Set(['private-option-A']));
   actual.billing.offerings.set([{ identifier: 'old-offering' }]);
   state.query = () => Promise.reject(Error('offline'));
+  state.rpc = () => Promise.reject(Error('offline'));
   state.invoke = () => Promise.reject(Error('offline'));
   state.emit('SIGNED_IN', sessionFor(accountB));
   assert.equal(actual.get(actual.auth.profile), null);
@@ -514,7 +520,7 @@ async function sdkTransport(t, state, actual) {
           return Response.json({ access_token: jwt(accountA), refresh_token: 'refreshed-A', token_type: 'bearer', expires_in: 3600, user: { id: accountA } });
         }
         assert.equal(locked, false, `production dependent request ${url.pathname} ran under SDK auth lock`);
-        if (url.pathname.endsWith('/profiles')) return Response.json({ id: account, display_name: account });
+        if (url.pathname.endsWith('/rpc/get_my_profile')) return Response.json({ id: account, display_name: account });
         if (url.pathname.endsWith('/subscriptions')) return Response.json({ user_id: account });
         if (url.pathname.endsWith('/calendar-connection')) return Response.json(status(account));
         throw Error(`Unexpected SDK request ${url}`);
@@ -526,6 +532,9 @@ async function sdkTransport(t, state, actual) {
   state.supabase.auth = client.auth;
   state.supabase.realtime = client.realtime;
   state.supabase.from = (...args) => client.from(...args);
+  // The profile read is account data, so it uses the real transport; poll RPCs stay scripted.
+  const scriptedRpc = state.supabase.rpc;
+  state.supabase.rpc = (name, ...args) => name === 'get_my_profile' ? client.rpc(name, ...args) : scriptedRpc(name, ...args);
   state.supabase.functions = client.functions;
   t.after(() => { client.auth.stopAutoRefresh(); client.removeAllChannels(); });
   return { client, control, runtime };
@@ -557,7 +566,7 @@ test('real pinned Supabase transport defers dependent reads past auth lock and s
   assert.equal(actual.get(actual.auth.profile).id, accountB);
   assert.equal(actual.get(actual.calendar.calendarAccountEmail), accountB);
   assert.equal(actual.get(actual.billing.subscription).user_id, accountB);
-  assert.ok(control.requests.some(request => request.path.endsWith('/profiles') && request.authorization === `Bearer ${jwt(accountB)}`));
+  assert.ok(control.requests.some(request => request.path.endsWith('/rpc/get_my_profile') && request.authorization === `Bearer ${jwt(accountB)}`));
 });
 
 test('real pinned Supabase transport serializes delayed A refresh before B; SDK credentials and app state agree', async t => {

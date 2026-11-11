@@ -137,7 +137,10 @@ function functionEntry(fn) {
     returns = `{\n${outputs.map(arg => `  ${arg.name}: ${tsType(arg.type)} | null`).join('\n')}\n}`;
     if (fn.returns_set) returns += '[]';
   } else {
-    returns = tsType(fn.return_type) + (fn.returns_set ? '[]' : '');
+    // A function returning a table's row type (get_my_profile) returns that table's Row.
+    const base = tableNames.includes(fn.return_type)
+      ? `Database["public"]["Tables"]["${fn.return_type}"]["Row"]` : tsType(fn.return_type);
+    returns = base + (fn.returns_set ? '[]' : '');
   }
   return [`Args: ${record(args, 'Record<PropertyKey, never>')}`, `Returns: ${returns}`];
 }

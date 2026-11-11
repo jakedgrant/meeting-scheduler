@@ -14,6 +14,8 @@ import io.ktor.http.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
 import org.junit.Test
 import java.lang.reflect.Proxy
@@ -32,6 +34,11 @@ class ReviewedIsolationTest {
     private fun session(id: String, lineage: String, revision: Int = 1) = json.decodeFromString<UserSession>("""{"access_token":"${jwt(id, lineage, revision)}","refresh_token":"refresh-$lineage-$revision","expires_in":3600,"token_type":"bearer","user":{"id":"$id","aud":"authenticated"}}""")
     private fun profile(id: String, name: String = id) = Profile(id, "$id@example.test", displayName = name, createdAt = stamp, updatedAt = stamp)
     private fun profileBody(id: String, name: String = id) = "[" + Json.encodeToString(Profile.serializer(), profile(id, name)) + "]"
+    // get_my_profile answers for the account whose access token sent the request.
+    private fun requestAccount(request: io.ktor.client.request.HttpRequestData): String {
+        val claims = request.headers[HttpHeaders.Authorization]!!.removePrefix("Bearer ").split(".")[1]
+        return json.parseToJsonElement(String(Base64.getUrlDecoder().decode(claims))).jsonObject["sub"]!!.jsonPrimitive.content
+    }
     private fun readBody(kind: String): String = when (kind) {
         "poll" -> "[" + Json.encodeToString(Poll.serializer(), Poll("poll-A", "A", "A title", createdAt = stamp, updatedAt = stamp, shareCode = "ABC123")) + "]"
         "options" -> "[" + Json.encodeToString(PollTimeOption.serializer(), PollTimeOption("option-A", "poll-A", stamp, stamp + kotlin.time.Duration.parse("1h"), createdAt = stamp)) + "]"
@@ -76,8 +83,7 @@ class ReviewedIsolationTest {
             val old = session("A", "old-session"); val replacement = session(newAccount, "fresh-session")
             val persistence = manager()
             val shared = client(MockEngine { request ->
-                val id = request.url.parameters["id"]!!.removePrefix("eq.")
-                respond(profileBody(id), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+                respond(profileBody(requestAccount(request)), headers = headersOf(HttpHeaders.ContentType, "application/json"))
             }, persistence)
             shared.auth.setSessionStatus(SessionStatus.NotAuthenticated())
             val remoteStarted = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>()
@@ -115,7 +121,7 @@ class ReviewedIsolationTest {
     @Test(timeout = 15000) fun screenCancellationCannotAbandonQueuedLogoutOrResurrectItsRefreshedSession() = runBlocking {
         for (replacement in listOf<String?>(null, "B", "A")) {
             val old = session("A", "original"); val persistence = manager()
-            val shared = client(MockEngine { request -> respond(profileBody(request.url.parameters["id"]!!.removePrefix("eq.")), headers = headersOf(HttpHeaders.ContentType, "application/json")) }, persistence)
+            val shared = client(MockEngine { request -> respond(profileBody(requestAccount(request)), headers = headersOf(HttpHeaders.ContentType, "application/json")) }, persistence)
             shared.auth.setSessionStatus(SessionStatus.NotAuthenticated())
             val started = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>(); val closed = CompletableDeferred<Unit>()
             val remote = client(MockEngine { request ->
@@ -189,7 +195,9 @@ class ReviewedIsolationTest {
         var calls = 0
         val shared = client(MockEngine { request ->
             calls++; assertEquals(listOf("Bearer ${jwt("A", "A-session")}"), request.headers.getAll(HttpHeaders.Authorization))
-            respond(profileBody("A", if (request.method == HttpMethod.Patch) "updated-A" else "loaded-A"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            // The update returns no row; the profile is read back through get_my_profile.
+            if (request.method == HttpMethod.Patch) respond("", HttpStatusCode.NoContent)
+            else respond(profileBody("A", "loaded-A"), headers = headersOf(HttpHeaders.ContentType, "application/json"))
         })
         shared.auth.setSessionStatus(SessionStatus.NotAuthenticated())
         shared.auth.importSession(session("B", "B-session"), autoRefresh = false)
@@ -199,7 +207,7 @@ class ReviewedIsolationTest {
         val auth = AuthService(scope, null, object : AuthGateway by gateway { override val status = events }, kotlin.time.Clock.System)
         events.emit(SessionStatus.Authenticated(session("A", "A-session")))
         val update = async(start = CoroutineStart.UNDISPATCHED) { auth.updateProfile("updated-A", null, "UTC") }
-        update.await(); withTimeout(1000) { while (calls != 2) yield() }
+        update.await(); withTimeout(1000) { while (calls != 3) yield() }
         assertEquals("A", auth.profile!!.id)
         auth.dispose(); scope.cancel(); shared.close()
     }
@@ -209,7 +217,7 @@ class ReviewedIsolationTest {
             val old = session("A", "old-lineage"); val fresh = session("A", "fresh-lineage")
             val started = CompletableDeferred<Unit>(); val reply = CompletableDeferred<Unit>(); var exchanges = 0
             val shared = client(MockEngine { request ->
-                if (request.url.encodedPath.endsWith("/profiles")) {
+                if (request.url.encodedPath.endsWith("/rpc/get_my_profile")) {
                     val isOld = request.headers[HttpHeaders.Authorization] == "Bearer ${old.accessToken}"
                     if (isOld) { started.complete(Unit); withContext(NonCancellable) { reply.await() } }
                     if (isOld && fails) respond("{\"message\":\"old profile denied\"}", HttpStatusCode.Forbidden, headersOf(HttpHeaders.ContentType, "application/json"))
