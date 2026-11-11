@@ -23,6 +23,22 @@ private final class LifecycleURLProtocol: URLProtocol {
             $0.filter { $0.request.url?.path == path && (method == nil || $0.request.httpMethod == method) }.count
         }
     }
+    /// The JSON body of the first waiting request to `path`. URL loading moves bodies into a stream.
+    static func jsonBody(path: String) -> [String: Any]? {
+        waiting.withLock { items -> [String: Any]? in
+            guard let request = items.first(where: { $0.request.url?.path == path })?.request else { return nil }
+            var data = request.httpBody ?? Data()
+            if data.isEmpty, let stream = request.httpBodyStream {
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 4096)
+                while case let count = stream.read(&buffer, maxLength: buffer.count), count > 0 {
+                    data.append(buffer, count: count)
+                }
+            }
+            return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        }
+    }
     static func reply(path: String, method: String? = nil, status: Int = 200, data: Data) {
         let item = waiting.withLock { items -> Waiter in
             items.remove(
@@ -37,14 +53,20 @@ private final class LifecycleURLProtocol: URLProtocol {
     }
 }
 
+/// Matches the production `KeychainLocalStorage`, which throws `errSecItemNotFound`
+/// when reading or deleting a key that was never stored, rather than returning nil.
 final class LifecycleAuthStorage: AuthLocalStorage, Sendable {
+    struct ItemNotFound: Error {}
     let values = Mutex<[String: Data]>([:])
     let rejectRemoval = Mutex(false)
     func store(key: String, value: Data) throws { values.withLock { $0[key] = value } }
-    func retrieve(key: String) throws -> Data? { values.withLock { $0[key] } }
+    func retrieve(key: String) throws -> Data? {
+        guard let value = values.withLock({ $0[key] }) else { throw ItemNotFound() }
+        return value
+    }
     func remove(key: String) throws {
         if rejectRemoval.withLock({ $0 }) { throw URLError(.cannotRemoveFile) }
-        values.withLock { $0.removeValue(forKey: key) }
+        guard values.withLock({ $0.removeValue(forKey: key) }) != nil else { throw ItemNotFound() }
     }
 }
 
@@ -1028,5 +1050,88 @@ final class SessionTransportTests: XCTestCase {
             XCTAssertNil(service.googleCalendarAccountEmail)
             XCTAssertNil(service.googleCalendarError)
         }
+    }
+}
+
+// MARK: - First sign-in on keychain storage
+
+/// Each path starts with nothing stored, so the PKCE verifier and the session are
+/// the first values written under their keys. Before the fix the adapter's ownership
+/// read threw on the missing key, the SDK swallowed the failed write, and the device
+/// sent an empty verifier (Google, magic link) or never kept the session (Apple).
+extension SessionTransportTests {
+    private func firstSignInService(
+        _ name: String, launch: (@MainActor (URL) async throws -> URL)? = nil,
+        launchApple: (@MainActor () async throws -> AuthService.AppleCredentials)? = nil
+    ) -> (service: AuthService, adapter: SessionAuthAdapter, intents: AuthCallbackIntentStore, suite: String) {
+        let adapter = adapter()
+        let sdk = client()
+        let suite = "first-\(name)-\(UUID())"
+        let intents = AuthCallbackIntentStore(defaults: UserDefaults(suiteName: suite)!)
+        let service = correlationService(
+            adapter: adapter, sdk: sdk, intents: intents, launch: launch, launchApple: launchApple)
+        return (service, adapter, intents, suite)
+    }
+
+    private func assertTokenRequestCarriesVerifier(code: String, file: StaticString = #filePath, line: UInt = #line) {
+        let body = LifecycleURLProtocol.jsonBody(path: "/auth/v1/token")
+        XCTAssertEqual(body?["auth_code"] as? String, code, file: file, line: line)
+        XCTAssertFalse((body?["code_verifier"] as? String ?? "").isEmpty, "PKCE verifier was not stored", file: file, line: line)
+    }
+
+    func testFirstGoogleSignInSendsItsStoredVerifierAndSignsIn() async throws {
+        let browser = OAuthReplyGate()
+        let (service, adapter, intents, suite) = firstSignInService("google", launch: { try await browser.launch($0) })
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        await service.initialize()
+        let signIn = Task { try await service.signInWithGoogle() }
+        await settle { browser.replies.count == 1 }
+        let intent = try XCTUnwrap(intents.current?.id)
+        browser.replies.removeFirst().resume(returning: callback(intent, code: "google-code"))
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        assertTokenRequestCarriesVerifier(code: "google-code")
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "first-google"))
+        try await signIn.value
+        await settle { service.currentUserId == account }
+        XCTAssertEqual(adapter.auth.currentUser?.id, account)
+        service.dispose()
+    }
+
+    func testFirstMagicLinkSendsItsStoredVerifierAndSignsIn() async throws {
+        let (service, adapter, intents, suite) = firstSignInService("email")
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        await service.initialize()
+        let request = Task { try await service.signInWithMagicLink(email: "first@example.invalid") }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1 }
+        LifecycleURLProtocol.reply(path: "/auth/v1/otp", data: Data("{}".utf8))
+        try await request.value
+        let intent = try XCTUnwrap(intents.current?.id)
+        let link = Task { await service.handleDeepLink(url: self.callback(intent, code: "email-code")) }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        assertTokenRequestCarriesVerifier(code: "email-code")
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "first-email"))
+        await link.value
+        await settle { service.currentUserId == account }
+        XCTAssertEqual(adapter.auth.currentUser?.id, account)
+        service.dispose()
+    }
+
+    func testFirstAppleSignInKeepsTheSessionAndSignsIn() async throws {
+        let apple = AppleReplyGate()
+        let (service, adapter, _, suite) = firstSignInService("apple", launchApple: { try await apple.launch() })
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        await service.initialize()
+        let signIn = Task { try await service.signInWithApple() }
+        await settle { apple.replies.count == 1 }
+        apple.replies.removeFirst().resume(returning: .init(identityToken: "apple-token", nonce: "nonce", displayName: nil))
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "first-apple"))
+        try await signIn.value
+        await settle { service.currentUserId == account }
+        XCTAssertEqual(adapter.auth.currentUser?.id, account)
+        service.dispose()
     }
 }
