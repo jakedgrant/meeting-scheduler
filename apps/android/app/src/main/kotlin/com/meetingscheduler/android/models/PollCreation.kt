@@ -69,6 +69,9 @@ class CreationRejected(val code: String) : Exception(when (code) {
     else -> "Creation was rejected. Your draft is saved."
 })
 
+/** `join_poll` refused a signed-in caller: the poll is closed or past its deadline. */
+class PollNotAccepting : Exception("This poll is closed and cannot accept new participants.")
+
 class PollCapacityReached : Exception("This poll is full. Ask the organizer for help, then retry joining.")
 
 class CreationStorageFailure : Exception("Could not save your retry. Free device storage and try again.")

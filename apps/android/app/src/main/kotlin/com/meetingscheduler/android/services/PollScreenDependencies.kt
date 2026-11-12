@@ -37,6 +37,8 @@ interface PollListPolls : PollAccount {
     suspend fun loadMorePolls()
     suspend fun retryPollLoad()
     suspend fun loadPollByCode(code: String): PollLookupResponse?
+    /** Entering a code is the decision to join: only members can read a poll, so join before opening it. */
+    suspend fun joinPoll(pollId: String): PollParticipant
 }
 
 /** The poll commands the detail screen runs. `PollService` implements it. */

@@ -71,6 +71,14 @@ class RemainingScreenModelsTest {
         override suspend fun retryPollLoad() {}
         var lookup: suspend (String) -> PollLookupResponse? = { null }
         override suspend fun loadPollByCode(code: String) = lookup(code)
+        val joined = mutableListOf<String>()
+        var joinFailure: Exception? = null
+        override suspend fun joinPoll(pollId: String): PollParticipant {
+            joined += pollId
+            joinFailure?.let { throw it }
+            val now = Instant.parse("2026-11-04T00:00:00Z")
+            return PollParticipant("member", pollId, "account", accessToken = "", createdAt = now, updatedAt = now)
+        }
     }
 
     private fun lookup(status: PollStatus) =
@@ -116,6 +124,25 @@ class RemainingScreenModelsTest {
         model.join()
         assertEquals("This poll is closed and cannot accept new participants.", model.joinError)
         assertNull(model.pollToOpen)
+        assertTrue(polls.joined.isEmpty())
+    }
+
+    @Test fun aRefusedJoinShowsWhyAndNeverOpensThePoll() = kotlinx.coroutines.test.runTest {
+        val polls = ListPolls()
+        polls.lookup = { lookup(PollStatus.ACTIVE) }
+        val model = PollListModel(polls)
+        model.editJoinCode("abc123")
+        polls.joinFailure = PollNotAccepting()
+        model.join()
+        assertEquals("This poll is closed and cannot accept new participants.", model.joinError)
+        polls.joinFailure = PollCapacityReached()
+        model.join()
+        assertEquals(PollCapacityReached().message, model.joinError)
+        polls.joinFailure = IllegalStateException("offline")
+        model.join()
+        assertEquals("Failed to join poll. Please try again.", model.joinError)
+        assertNull(model.pollToOpen)
+        assertFalse(model.isJoining)
     }
 
     @Test fun joiningAnOpenPollClosesTheSheetAndAsksToOpenIt() = kotlinx.coroutines.test.runTest {
@@ -126,6 +153,8 @@ class RemainingScreenModelsTest {
         model.editJoinCode("abc123")
         model.join()
         assertEquals("found", model.pollToOpen)
+        assertEquals(listOf("found"), polls.joined)
+        assertEquals(1, polls.loads)
         assertFalse(model.showJoinByCode)
         assertEquals("", model.joinCode)
         model.openedPoll()
