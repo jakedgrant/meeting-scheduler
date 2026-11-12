@@ -32,6 +32,7 @@ private struct CreatePollForm: View {
                 errorSection
                 createPollButtonSection
             }
+            .scrollDismissesKeyboard(.immediately)
             .navigationTitle("New Poll")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
