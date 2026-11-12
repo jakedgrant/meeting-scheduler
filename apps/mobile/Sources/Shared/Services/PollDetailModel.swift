@@ -316,6 +316,11 @@ public final class PollDetailModel {
         if case .finished = calendarAdd { calendarAdd = .idle }
     }
 
+    /// The device calendar events behind a busy option, for the conflict screen.
+    public func calendarConflicts(for option: PollTimeOption) async -> [CalendarConflict] {
+        await calendar.deviceConflicts(for: option, pollTimeZone: poll?.timezone)
+    }
+
     // MARK: - Private
 
     private static var commentTooLong: String {

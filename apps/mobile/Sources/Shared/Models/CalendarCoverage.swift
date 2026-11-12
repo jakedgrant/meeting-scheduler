@@ -8,6 +8,8 @@ public struct CalendarCheckResult: Equatable, Sendable {
     public private(set) var busyIds: Set<UUID> = []
     /// Options that are not busy but that a failed source could not cover.
     public private(set) var uncheckedIds: Set<UUID> = []
+    /// The checked sources that report each busy option.
+    public private(set) var busySources: [UUID: [CalendarSource]] = [:]
     public private(set) var checkedSources: [CalendarSource] = []
     public private(set) var failedSources: [CalendarSource] = []
 
@@ -20,12 +22,33 @@ public struct CalendarCheckResult: Equatable, Sendable {
         for (source, busy) in sources {
             if let busy {
                 checkedSources.append(source)
-                busyIds.formUnion(busy.intersection(optionIds))
+                for id in busy.intersection(optionIds) {
+                    busyIds.insert(id)
+                    busySources[id, default: []].append(source)
+                }
             } else {
                 failedSources.append(source)
             }
         }
         if !failedSources.isEmpty { uncheckedIds = optionIds.subtracting(busyIds) }
+    }
+}
+
+/// A device calendar event that makes a poll option busy.
+public struct CalendarConflict: Identifiable, Hashable, Sendable {
+    public let id = UUID()
+    public let title: String
+    public let calendarName: String
+    public let start: Date
+    public let end: Date
+    public let isAllDay: Bool
+
+    public init(title: String, calendarName: String, start: Date, end: Date, isAllDay: Bool) {
+        self.title = title
+        self.calendarName = calendarName
+        self.start = start
+        self.end = end
+        self.isAllDay = isAllDay
     }
 }
 
@@ -59,9 +82,6 @@ public enum DeviceBusyPeriod: Hashable, Sendable {
     }
 
     /// Option IDs that overlap any busy period.
-    ///
-    /// All-day options and all-day events compare calendar dates; otherwise an all-day event covers
-    /// its dates in the device zone and an all-day option covers its stored interval.
     public static func busyOptionIds(
         _ options: [PollTimeOption],
         pollTimeZone: String?,
@@ -69,17 +89,23 @@ public enum DeviceBusyPeriod: Hashable, Sendable {
         deviceZone: TimeZone
     ) -> Set<UUID> {
         Set(options.filter { option in
-            periods.contains { period in
-                switch period {
-                case let .allDay(first, end) where option.isAllDay:
-                    let date = option.allDayDate(pollTimeZone: pollTimeZone)
-                    return first <= date && date < end
-                case let .allDay(first, end):
-                    return first.start(in: deviceZone) < option.endTime && end.start(in: deviceZone) > option.startTime
-                case let .timed(start, end):
-                    return start < option.endTime && end > option.startTime
-                }
-            }
+            periods.contains { $0.overlaps(option, pollTimeZone: pollTimeZone, deviceZone: deviceZone) }
         }.map(\.id))
+    }
+
+    /// Whether this period overlaps the option.
+    ///
+    /// All-day options and all-day events compare calendar dates; otherwise an all-day event covers
+    /// its dates in the device zone and an all-day option covers its stored interval.
+    public func overlaps(_ option: PollTimeOption, pollTimeZone: String?, deviceZone: TimeZone) -> Bool {
+        switch self {
+        case let .allDay(first, end) where option.isAllDay:
+            let date = option.allDayDate(pollTimeZone: pollTimeZone)
+            return first <= date && date < end
+        case let .allDay(first, end):
+            return first.start(in: deviceZone) < option.endTime && end.start(in: deviceZone) > option.startTime
+        case let .timed(start, end):
+            return start < option.endTime && end > option.startTime
+        }
     }
 }
