@@ -123,6 +123,15 @@ final class CalendarCoverageTests: XCTestCase {
         XCTAssertEqual(CalendarCheckResult(optionIds: [a], sources: []), .none)
     }
 
+    func testBusyOptionsRecordWhichSourcesReportThem() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let result = CalendarCheckResult(
+            optionIds: [a, b, c], sources: [(.appleCalendar, [a, b]), (.googleCalendar, [b, UUID()])])
+        XCTAssertEqual(result.busySources[a], [.appleCalendar])
+        XCTAssertEqual(result.busySources[b], [.appleCalendar, .googleCalendar])
+        XCTAssertNil(result.busySources[c])
+    }
+
     func testGoogleFailuresAndUnrecognizedCoverageAreUncheckedNotConflictFree() async {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [CoverageURLProtocol.self]

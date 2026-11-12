@@ -65,6 +65,10 @@ A source fails when:
 
 On web, a failed retry keeps the last known busy options for the same option set instead of clearing them. On every client, results from a superseded account or connection are discarded under the existing [session contract](session-lifecycle.md).
 
+## Conflict details
+
+On iOS, tapping an option's "Busy" badge opens a sheet that names what clashes. Apple Calendar conflicts list each event's title, time and calendar, matched with the rules above. A Google conflict says the primary calendar is busy and nothing more, because FreeBusy returns no event details and `check-calendar-conflicts` stays unchanged. The sheet reads device events when it opens, so an event deleted since the check shows "no longer on your calendar".
+
 ## Backend response
 
 `check-calendar-conflicts` is unchanged by F16. A successful response is:

@@ -10,6 +10,7 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public var googleCalendarError: String?
     public var googleCalendarAccountEmail: String?
     public var conflictChecker: (@MainActor ([PollTimeOption], String?) async -> CalendarCheckResult)?
+    public var deviceConflictLoader: (@MainActor (PollTimeOption, String?) async -> [CalendarConflict])?
     /// Replaces the default add, which records the event in `addedEvents` and reports success.
     public var eventAdder: (@MainActor (DeviceCalendarEvent) async -> DeviceCalendarAddResult)?
     public private(set) var addedEvents: [DeviceCalendarEvent] = []
@@ -57,6 +58,11 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult {
         if let conflictChecker { return await conflictChecker(timeOptions, pollTimeZone) }
         return .none
+    }
+
+    public func deviceConflicts(for option: PollTimeOption, pollTimeZone: String?) async -> [CalendarConflict] {
+        if let deviceConflictLoader { return await deviceConflictLoader(option, pollTimeZone) }
+        return []
     }
 
     public func addEventToCalendar(_ event: DeviceCalendarEvent) async -> DeviceCalendarAddResult {
