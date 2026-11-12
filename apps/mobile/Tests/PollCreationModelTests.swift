@@ -1,4 +1,7 @@
 import XCTest
+import SwiftUI
+import UIKit
+@testable import MeetingSchedulerApp
 @testable import Shared
 
 @MainActor
@@ -79,6 +82,91 @@ final class PollCreationModelTests: XCTestCase {
         model.addOption()
         model.removeOption(id: model.options[0].id)
         XCTAssertEqual(model.options.count, 1)
+    }
+
+    func testDateRangePickersAndSubmissionKeepSelectedWallTimesOnEveryDay() async throws {
+        let polls = MockPollService()
+        var submitted: [CreatePollRequest] = []
+        polls.creator = { request in
+            submitted.append(request)
+            return PollCreationResult(poll: Poll(creatorId: self.account, title: request.payload.title, status: .active), timeOptions: [])
+        }
+        let model = model(polls: polls)
+        model.title = "Afternoon planning"
+        model.options = []
+        model.rangeStartDate = calendar.date(byAdding: .day, value: 3, to: now)!
+        model.rangeEndDate = calendar.date(byAdding: .day, value: 5, to: now)!
+        model.rangeStartTime = calendar.date(bySettingHour: 14, minute: 15, second: 0, of: now)!
+        model.rangeEndTime = calendar.date(bySettingHour: 16, minute: 45, second: 0, of: now)!
+        model.addDateRange()
+
+        // Render the real option rows: bounds on a time-only picker can clamp its
+        // displayed time even when the model still contains the selected wall time.
+        let rows = VStack {
+            ForEach(model.options.indices, id: \.self) { index in
+                TimeOptionView(option: Binding(
+                    get: { model.options[index] }, set: { model.options[index] = $0 }
+                ), now: self.now, calendar: self.calendar)
+            }
+        }
+        .environment(\.calendar, calendar)
+        .environment(\.timeZone, zone)
+        let host = UIHostingController(rootView: rows)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 440, height: 956))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil }
+        host.view.layoutIfNeeded()
+
+        func pickers(in view: UIView) -> [UIDatePicker] {
+            (view as? UIDatePicker).map { [$0] } ?? view.subviews.flatMap { pickers(in: $0) }
+        }
+        let times = pickers(in: host.view).filter { $0.datePickerMode == .time }
+        XCTAssertEqual(times.count, 6)
+        XCTAssertEqual(times.map { Array(wallTime($0.date).suffix(2)) }, [
+            [14, 15], [16, 45], [14, 15], [16, 45], [14, 15], [16, 45],
+        ])
+
+        await model.create {}?.value
+
+        let options = try XCTUnwrap(submitted.first?.payload.timeOptions)
+        XCTAssertEqual(options.map { wallTime($0.startTime) }, [
+            [2026, 11, 5, 14, 15], [2026, 11, 6, 14, 15], [2026, 11, 7, 14, 15],
+        ])
+        XCTAssertEqual(options.map { wallTime($0.endTime) }, [
+            [2026, 11, 5, 16, 45], [2026, 11, 6, 16, 45], [2026, 11, 7, 16, 45],
+        ])
+        XCTAssertTrue(options.allSatisfy { !$0.isAllDay })
+    }
+
+    func testEditingRangeOptionsStillRejectsEqualAndReversedEndTimesBeforeSubmission() {
+        let model = model()
+        model.title = "Planning"
+        model.options = []
+        model.rangeStartDate = calendar.date(byAdding: .day, value: 3, to: now)!
+        model.rangeEndDate = model.rangeStartDate
+        model.addDateRange()
+
+        for endHour in [9, 8] {
+            model.options[0].endTime = calendar.date(bySettingHour: endHour, minute: 0, second: 0, of: now)!
+            XCTAssertNil(model.create {})
+            XCTAssertEqual(model.errorMessage, CalendarTimeError.endNotAfterStart.localizedDescription)
+        }
+    }
+
+    func testRangeContainingASkippedWallTimeDoesNotSubmit() {
+        let model = model()
+        model.title = "Planning"
+        model.options = []
+        model.rangeStartDate = calendar.date(from: DateComponents(year: 2027, month: 3, day: 13))!
+        model.rangeEndDate = calendar.date(from: DateComponents(year: 2027, month: 3, day: 15))!
+        model.rangeStartTime = calendar.date(bySettingHour: 2, minute: 30, second: 0, of: now)!
+        model.rangeEndTime = calendar.date(bySettingHour: 3, minute: 30, second: 0, of: now)!
+        model.addDateRange()
+
+        XCTAssertEqual(model.options.count, 3)
+        XCTAssertNil(model.create {})
+        XCTAssertEqual(model.errorMessage, CalendarTimeError.nonexistentLocalTime.localizedDescription)
     }
 
     func testCreateSubmitsWallTimesInTheCalendarZoneAndDismissesOnSuccess() async throws {

@@ -199,9 +199,11 @@ struct TimeOptionView: View {
         VStack(alignment: .leading, spacing: 8) {
             DayPicker(title: "Date", selection: $option.date, range: startOfToday()..., calendar: calendar)
 
-            DatePicker("Start", selection: $option.startTime, in: getStartTimeRange(for: option.date), displayedComponents: .hourAndMinute)
+            // These values carry wall times on arbitrary dates. Date bounds would clamp a
+            // range's copied times to another day; the model validates the combined interval.
+            DatePicker("Start", selection: $option.startTime, displayedComponents: .hourAndMinute)
                 .datePickerStyle(.compact)
-            DatePicker("End", selection: $option.endTime, in: getEndTimeRange(for: option.startTime), displayedComponents: .hourAndMinute)
+            DatePicker("End", selection: $option.endTime, displayedComponents: .hourAndMinute)
                 .datePickerStyle(.compact)
         }
     }
@@ -212,34 +214,6 @@ struct TimeOptionView: View {
         calendar.startOfDay(for: now)
     }
 
-    private func getStartTimeRange(for date: Date) -> ClosedRange<Date> {
-        let today = calendar.startOfDay(for: now)
-        let selectedDay = calendar.startOfDay(for: date)
-
-        let dayStart = calendar.startOfDay(for: date)
-        let dayEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: date) ?? date
-
-        if selectedDay == today {
-            let components = calendar.dateComponents([.hour, .minute], from: now)
-            let currentMinutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
-            let roundedMinutes = ((currentMinutes / 15) + 1) * 15
-            let roundedHour = roundedMinutes / 60
-            let roundedMinute = roundedMinutes % 60
-
-            if let roundedTime = calendar.date(bySettingHour: roundedHour, minute: roundedMinute, second: 0, of: date) {
-                return roundedTime...dayEnd
-            }
-        }
-
-        return dayStart...dayEnd
-    }
-
-    private func getEndTimeRange(for startTime: Date) -> ClosedRange<Date> {
-        let minEndTime = calendar.date(byAdding: .minute, value: 15, to: startTime) ?? startTime
-        let dayEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: startTime) ?? startTime
-
-        return minEndTime...dayEnd
-    }
 }
 
 #Preview {
