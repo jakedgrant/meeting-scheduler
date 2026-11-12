@@ -210,20 +210,24 @@ struct PollListView: View {
         }
         isJoining = true
         authService.performSessionTask(
-            operation: { _ in await pollService.loadPollByCode(code) },
-            onSuccess: { poll in
-                guard let poll else {
-                    joinError = "Poll not found. Please check the code."
-                    return
-                }
-                guard poll.status != .closed && poll.status != .archived else {
-                    joinError = "This poll is closed and cannot accept new participants."
-                    return
-                }
+            // Only members can open a poll, so the code joins it first.
+            operation: { _ in
+                let pollId = try await pollService.joinPoll(code: code)
+                await pollService.loadMyPolls()
+                return pollId
+            },
+            onSuccess: { pollId in
                 showJoinByCode = false
                 joinCode = ""
                 joinError = nil
-                navigateToPoll = poll.id
+                navigateToPoll = pollId
+            },
+            onFailure: { error in
+                joinError = switch error {
+                case PollError.pollNotFound: "Poll not found. Please check the code."
+                case let error as PollError: error.errorDescription
+                default: "The poll could not be joined. Please try again."
+                }
             },
             onCompletion: { isJoining = false }
         )

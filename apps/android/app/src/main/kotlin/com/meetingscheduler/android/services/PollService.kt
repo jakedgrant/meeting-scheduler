@@ -378,6 +378,9 @@ class PollService(
             if (error is io.github.jan.supabase.postgrest.exception.PostgrestRestException && error.code == "P0003") {
                 throw PollCapacityReached()
             }
+            if (error is io.github.jan.supabase.postgrest.exception.PostgrestRestException && error.code == "42501") {
+                throw PollNotAccepting()
+            }
             throw error
         }
     }

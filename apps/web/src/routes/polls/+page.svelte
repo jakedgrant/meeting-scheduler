@@ -4,8 +4,9 @@
 	import { user, profile, signOut } from '$lib/stores/auth';
 	import {
 		createdPolls, joinedPolls, pollsLoading, pollsLoadError, pollSummaries, pollListSections,
-		loadMyPolls, loadMorePolls, loadPollByCode
+		loadMyPolls, loadMorePolls, loadPollByCode, joinPoll
 	} from '$lib/stores/polls';
+	import { joinByCode } from '$lib/join-by-code';
 
 	import { createSessionWork } from '$lib/session-scope';
 	const work = createSessionWork();
@@ -62,21 +63,16 @@
 		joinLoading = true;
 
 		try {
-			const poll = await loadPollByCode(code);
+			const outcome = await joinByCode(code, { loadPollByCode, joinPoll });
 			if (!isCurrent()) return;
 
-			if (!poll) {
-				joinError = 'Poll not found. Please check the code.';
+			if (!outcome.ok) {
+				joinError = outcome.message;
 				return;
 			}
 
-			if (poll.status === 'closed' || poll.status === 'archived') {
-				joinError = 'This poll is closed and cannot accept new participants.';
-				return;
-			}
-
-			// Navigate to the poll
-			goto(`/polls/${poll.id}`);
+			// Joining is what lets this account open the poll.
+			goto(`/polls/${outcome.pollId}`);
 		} catch (err) {
 			console.error('Failed to join poll');
 			if (isCurrent()) joinError = 'Failed to join poll. Please try again.';

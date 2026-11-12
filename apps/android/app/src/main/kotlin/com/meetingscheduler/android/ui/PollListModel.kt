@@ -3,8 +3,11 @@ package com.meetingscheduler.android.ui
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.meetingscheduler.android.models.PollCapacityReached
+import com.meetingscheduler.android.models.PollNotAccepting
 import com.meetingscheduler.android.models.PollStatus
 import com.meetingscheduler.android.services.PollListPolls
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * One account's poll list screen: the join-by-code sheet, pull-to-refresh and the list commands.
@@ -76,9 +79,21 @@ class PollListModel(private val polls: PollListPolls) {
                 poll.status == PollStatus.CLOSED || poll.status == PollStatus.ARCHIVED ->
                     joinError = "This poll is closed and cannot accept new participants."
                 else -> {
+                    polls.joinPoll(poll.id)
+                    if (!isCurrent()) return
+                    // Show the joined poll in the list; the join already succeeded if this fails.
+                    try { polls.loadMyPolls() } catch (error: CancellationException) { throw error } catch (_: Exception) {}
+                    if (!isCurrent()) return
                     dismissJoinSheet()
                     pollToOpen = poll.id
                 }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (isCurrent()) {
+                joinError = if (error is PollCapacityReached || error is PollNotAccepting) error.message
+                    else "Failed to join poll. Please try again."
             }
         } finally {
             isJoining = false

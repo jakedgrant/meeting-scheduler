@@ -122,6 +122,7 @@ class NavigationScopingTest {
         override suspend fun loadMorePolls() {}
         override suspend fun retryPollLoad() {}
         override suspend fun loadPollByCode(code: String): PollLookupResponse? = null
+        override suspend fun joinPoll(pollId: String): PollParticipant = error("unused")
     }
 
     private class ResponsePolls(val load: suspend () -> PollDetail) : PollResponsesPolls {
