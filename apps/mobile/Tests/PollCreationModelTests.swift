@@ -31,6 +31,7 @@ final class PollCreationModelTests: XCTestCase {
         let model = PollCreationModel(
             auth: MockAuthService(isAuthenticated: true, currentUserId: account), polls: polls, clock: .fixed(now),
             calendar: { calendar }, editor: PollCreationEditor(store: store))
+        XCTAssertTrue(model.options.isEmpty)
         model.selectCurrentAccount()
         return model
     }
@@ -40,8 +41,10 @@ final class PollCreationModelTests: XCTestCase {
         return [parts.year!, parts.month!, parts.day!, parts.hour!, parts.minute!]
     }
 
-    func testNewFormStartsWithOneOptionTodayFromNineToTen() {
+    func testNewFormStartsWithoutTimeOptionsAndAddsOneOnRequest() {
         let model = model()
+        XCTAssertTrue(model.options.isEmpty)
+        model.addOption()
         XCTAssertEqual(model.options.count, 1)
         XCTAssertEqual(wallTime(model.options[0].startTime), [2026, 11, 2, 9, 0])
         XCTAssertEqual(wallTime(model.options[0].endTime), [2026, 11, 2, 10, 0])
@@ -49,9 +52,22 @@ final class PollCreationModelTests: XCTestCase {
         XCTAssertFalse(model.canSubmit)
     }
 
+    func testTimedPollWithNoOptionsDoesNotSubmit() async {
+        let polls = MockPollService()
+        var dispatched = false
+        polls.creator = { _ in dispatched = true; throw CancellationError() }
+        let model = model(polls: polls)
+        model.title = "Planning"
+
+        await model.create {}?.value
+
+        XCTAssertFalse(dispatched)
+        XCTAssertNotNil(model.errorMessage)
+        XCTAssertTrue(model.options.isEmpty)
+    }
+
     func testDateRangeAddsOneSortedOptionPerDayAndRejectsInvalidRanges() {
         let model = model()
-        model.options = []
         model.rangeStartDate = now.addingTimeInterval(2 * 86_400)
         model.rangeEndDate = now
         model.addDateRange()
@@ -77,6 +93,7 @@ final class PollCreationModelTests: XCTestCase {
 
     func testRemovingTheLastOptionIsIgnored() {
         let model = model()
+        model.addOption()
         model.removeOption(id: model.options[0].id)
         XCTAssertEqual(model.options.count, 1)
         model.addOption()
@@ -93,7 +110,6 @@ final class PollCreationModelTests: XCTestCase {
         }
         let model = model(polls: polls)
         model.title = "Afternoon planning"
-        model.options = []
         model.rangeStartDate = calendar.date(byAdding: .day, value: 3, to: now)!
         model.rangeEndDate = calendar.date(byAdding: .day, value: 5, to: now)!
         model.rangeStartTime = calendar.date(bySettingHour: 14, minute: 15, second: 0, of: now)!
@@ -142,7 +158,6 @@ final class PollCreationModelTests: XCTestCase {
     func testEditingRangeOptionsStillRejectsEqualAndReversedEndTimesBeforeSubmission() {
         let model = model()
         model.title = "Planning"
-        model.options = []
         model.rangeStartDate = calendar.date(byAdding: .day, value: 3, to: now)!
         model.rangeEndDate = model.rangeStartDate
         model.addDateRange()
@@ -157,7 +172,6 @@ final class PollCreationModelTests: XCTestCase {
     func testRangeContainingASkippedWallTimeDoesNotSubmit() {
         let model = model()
         model.title = "Planning"
-        model.options = []
         model.rangeStartDate = calendar.date(from: DateComponents(year: 2027, month: 3, day: 13))!
         model.rangeEndDate = calendar.date(from: DateComponents(year: 2027, month: 3, day: 15))!
         model.rangeStartTime = calendar.date(bySettingHour: 2, minute: 30, second: 0, of: now)!
@@ -181,6 +195,7 @@ final class PollCreationModelTests: XCTestCase {
         model.title = "Planning"
         model.hasDueDate = true
         model.dueDate = now.addingTimeInterval(86_400)
+        model.addOption()
         model.options[0].date = now.addingTimeInterval(3 * 86_400)
         var created = false
 
@@ -245,6 +260,7 @@ final class PollCreationModelTests: XCTestCase {
         let first = model(polls: polls, store: store)
         first.title = "Planning"
         first.location = "Room 4"
+        first.addOption()
         await first.create {}?.value
         XCTAssertTrue(first.mustResolvePending)
         XCTAssertTrue(first.isFormLocked)

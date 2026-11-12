@@ -78,6 +78,28 @@ function editorFor(actual, storage = disk()) {
   return editor;
 }
 
+test('a fresh creation renders no time rows and requires an explicit option before sending', async t => {
+  const { actual, state } = await fixture(t);
+  const editor = actual.createPollCreation({ create: actual.createPoll }, disk());
+  editor.setOwner(member);
+  assert.deepEqual(actual.get(editor).draft.timeOptions, []);
+  state.editor = editor;
+  const { body } = actual.render(actual.Page);
+  assert.match(body, /Add another time/);
+  assert.doesNotMatch(body, /class="time-option(?:\s|")/);
+
+  editor.edit({ title: 'Planning' });
+  assert.equal(await editor.submit(), null);
+  assert.equal(state.calls.length, 0);
+  assert.ok(actual.get(editor).error);
+
+  editor.edit({ timeOptions: [{ id: 'chosen', date: '2030-03-01', startTime: '14:00', endTime: '15:00' }] });
+  assert.match(actual.render(actual.Page).body, /class="time-option(?:\s|")/);
+  assert.deepEqual(await editor.submit(), result);
+  assert.equal(state.calls.length, 1);
+  assert.equal(state.calls[0].args.payload.time_options.length, 1);
+});
+
 test('one creation RPC applies authoritative complete state and never writes tables', async t => {
   const { actual, state } = await fixture(t);
   const storage = disk();

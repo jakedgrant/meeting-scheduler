@@ -54,7 +54,6 @@ public final class PollCreationModel {
         rangeEndDate = initial.date
         rangeStartTime = initial.startTime
         rangeEndTime = initial.endTime
-        options = [initial]
     }
 
     // MARK: - Derived state
@@ -231,7 +230,7 @@ public final class PollCreationModel {
             Option(
                 date: $0.isAllDay ? CalendarDay($0.startTime, in: zone).pickerDate(calendar: calendar) : $0.startTime,
                 startTime: $0.startTime, endTime: $0.endTime)
-        } ?? [newOption()]
+        } ?? []
         selectedDates = isAllDay
             ? Set(options.map { calendar.dateComponents([.calendar, .era, .year, .month, .day], from: $0.date) })
             : []

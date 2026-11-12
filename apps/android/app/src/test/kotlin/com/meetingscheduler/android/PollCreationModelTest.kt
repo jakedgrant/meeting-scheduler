@@ -51,15 +51,14 @@ class PollCreationModelTest {
 
     private val option = TimeOption("one", LocalDate(2026, 11, 10), LocalTime(9, 0), LocalTime(10, 0))
 
-    @Test fun aNewDraftStartsOnTodayInTheDeviceZone() {
+    @Test fun aNewDraftStartsWithoutOptionsAndAddsTodayOnRequest() {
         val store = MemoryStore()
         val model = model(store)
         assertEquals(today, model.today())
-        assertEquals(listOf(today), model.draft.timeOptions.map { it.date })
+        assertTrue(model.draft.timeOptions.isEmpty())
         assertEquals(today, model.draft.rangeStartDate)
         assertEquals(today, model.draft.rangeEndDate)
         assertEquals(0, store.draftWrites)
-        model.edit { it.copy(timeOptions = emptyList()) }
         model.addOption()
         assertEquals(listOf(today), model.draft.timeOptions.map { it.date })
     }
@@ -193,6 +192,16 @@ class PollCreationModelTest {
         assertEquals(CreationRejected("P0001").message, model.errorMessage)
         assertNull(model.pending)
         assertEquals("Planning", store.draft?.title)
+    }
+
+    @Test fun aNewTimedDraftWithoutOptionsIsRefusedWithoutSending() = runBlocking<Unit> {
+        var sent = false
+        val model = model(MemoryStore(), send = { sent = true; result })
+        model.edit { it.copy(title = "Planning") }
+        assertFalse(model.submit())
+        assertFalse(sent)
+        assertNull(model.pending)
+        assertEquals("Enter a title and at least one time option.", model.errorMessage)
     }
 
     @Test fun aBlankTitleIsRefusedWithoutSending() = runBlocking<Unit> {
