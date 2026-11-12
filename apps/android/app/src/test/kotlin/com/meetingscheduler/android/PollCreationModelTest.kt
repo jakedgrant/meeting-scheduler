@@ -106,14 +106,14 @@ class PollCreationModelTest {
 
     @Test fun submittingSendsTheDraftInTheDeviceZoneAndClearsIt() = runBlocking<Unit> {
         val store = MemoryStore(CreationFormDraft(title = "Planning", hasDueDate = true, dueDate = LocalDate(2026, 11, 8),
-            isAllDay = true, selectedDays = setOf(option.date)))
+            isAllDay = true, selectedDays = setOf(LocalDate(2030, 3, 10))))
         var sent: PollCreationRequest? = null
         val model = model(store, send = { sent = it; result })
         assertTrue(model.submit())
         val payload = sent!!.payload
         assertEquals("America/Chicago", payload.timezone)
         assertEquals(PollDates.deadline(LocalDate(2026, 11, 8), chicago), payload.closesAt)
-        assertEquals(listOf(PollDates.allDayOption(option.date, chicago)), payload.timeOptions)
+        assertEquals(listOf(PollDates.allDayOption(LocalDate(2030, 3, 10), chicago)), payload.timeOptions)
         assertNull(store.draft)
         assertNull(store.pending)
         // A late edit, such as a text field's last callback, can't bring the draft back.
@@ -134,11 +134,11 @@ class PollCreationModelTest {
         val store = MemoryStore(CreationFormDraft(title = "Offsite", isAllDay = true))
         var sent: PollCreationRequest? = null
         val model = model(store, send = { sent = it; result })
-        model.toggleDay(LocalDate(2026, 11, 12))
-        model.toggleDay(LocalDate(2026, 11, 5))
+        model.toggleDay(LocalDate(2030, 3, 12))
+        model.toggleDay(LocalDate(2030, 3, 5))
         assertTrue(model.submit())
         assertEquals(
-            listOf(LocalDate(2026, 11, 5), LocalDate(2026, 11, 12)).map { PollDates.allDayOption(it, chicago) },
+            listOf(LocalDate(2030, 3, 5), LocalDate(2030, 3, 12)).map { PollDates.allDayOption(it, chicago) },
             sent!!.payload.timeOptions)
     }
 
