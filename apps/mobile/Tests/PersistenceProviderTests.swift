@@ -107,6 +107,23 @@ final class PersistenceProviderTests: XCTestCase {
 
     // MARK: - Poll Detail (composite)
 
+    func testDiskDetailSurvivesProviderRecreation() throws {
+        let account = UUID()
+        let poll = Poll(creatorId: account, title: "Persisted visit")
+        let option = PollTimeOption(pollId: poll.id, startTime: Date(timeIntervalSince1970: 100),
+                                    endTime: Date(timeIntervalSince1970: 200))
+        do {
+            let first = SwiftDataPersistenceProvider()
+            try first.selectAccount(account)
+            try first.savePollDetail(PollDetail(poll: poll, timeOptions: [option], participants: [], responses: []))
+        }
+        let restored = SwiftDataPersistenceProvider()
+        try restored.selectAccount(account)
+        defer { try? restored.clearAll() }
+        XCTAssertEqual(try restored.fetchPollDetail(id: poll.id)?.poll.title, "Persisted visit")
+        XCTAssertEqual(try restored.fetchPollDetail(id: poll.id)?.timeOptions.map(\.id), [option.id])
+    }
+
     func testSaveAndFetchPollDetail() throws {
         for provider in makeProviders() {
             let pollId = UUID()

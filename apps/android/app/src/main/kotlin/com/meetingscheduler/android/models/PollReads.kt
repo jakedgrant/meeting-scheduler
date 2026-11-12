@@ -57,6 +57,7 @@ internal data class PollDetailPage(
     }
 }
 
+@Serializable
 data class PollDetail(
     val poll: Poll,
     val timeOptions: List<PollTimeOption>,

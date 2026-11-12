@@ -81,6 +81,89 @@ final class PollDetailModelTests: XCTestCase {
             ResponseSummary(available: 0, maybe: 1, unavailable: 0))
     }
 
+    func testReopeningShowsCachedDetailBeforeRefreshCompletes() async {
+        let fixture = fixture()
+        await fixture.model.load()
+        fixture.model.suspend()
+        let reopened = PollDetailModel(pollId: fixture.poll.id, auth: fixture.auth, polls: fixture.polls,
+                                       calendar: fixture.calendar, clock: .fixed(now))
+        XCTAssertFalse(reopened.showsLoading)
+        XCTAssertEqual(reopened.timeOptions.map(\.id), fixture.options.map(\.id))
+        XCTAssertFalse(reopened.canEditAvailability)
+        var release: CheckedContinuation<PollDetail?, Never>?
+        let started = expectation(description: "detail refresh started")
+        fixture.polls.detailLoader = { _ in
+            await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let loading = Task { await reopened.load(forceRefresh: true) }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertFalse(reopened.showsLoading)
+        XCTAssertEqual(reopened.poll?.title, "Planning")
+        XCTAssertFalse(reopened.canMutatePoll)
+        XCTAssertNil(reopened.close())
+        XCTAssertNil(reopened.join())
+        XCTAssertNil(reopened.finalize(with: fixture.options[0]))
+        var updated = fixture.poll
+        updated.title = "Updated planning"
+        release?.resume(returning: PollDetail(poll: updated, timeOptions: fixture.options,
+                                              participants: [fixture.participant], responses: []))
+        await loading.value
+        XCTAssertEqual(reopened.poll?.title, "Updated planning")
+    }
+
+    func testDetailIsVisibleWhileSavedAvailabilityIsLoading() async {
+        let fixture = fixture()
+        var release: CheckedContinuation<AvailabilitySnapshot, Error>?
+        let started = expectation(description: "availability read started")
+        fixture.polls.availabilityLoader = { _, _, _ in
+            try await withCheckedThrowingContinuation { release = $0; started.fulfill() }
+        }
+        let loading = Task { await fixture.model.load() }
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertFalse(fixture.model.showsLoading)
+        XCTAssertTrue(fixture.model.editor.isLoading)
+        XCTAssertFalse(fixture.model.canEditAvailability)
+        release?.resume(returning: AvailabilitySnapshot(participantId: fixture.participant.id,
+            pollId: fixture.poll.id, version: 0, comment: nil, responses: []))
+        await loading.value
+        XCTAssertTrue(fixture.model.canEditAvailability)
+    }
+
+    func testAccountChangeWhileFinalizingCanLoadTheNewAccountsVisit() async {
+        let fixture = fixture(status: .closed, creatorId: account)
+        await fixture.model.load()
+        var release: CheckedContinuation<Poll, Error>?
+        let started = expectation(description: "finalization started")
+        fixture.polls.finalizer = { _, _ in
+            try await withCheckedThrowingContinuation { release = $0; started.fulfill() }
+        }
+        let command = fixture.model.finalize(with: fixture.options[0])
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertTrue(fixture.model.isChangingPoll)
+        fixture.auth.currentUserId = UUID()
+        var newPoll = fixture.poll
+        newPoll.title = "New account visit"
+        fixture.polls.detailLoader = { _ in
+            PollDetail(poll: newPoll, timeOptions: fixture.options, participants: [], responses: [])
+        }
+        await fixture.model.load()
+        XCTAssertFalse(fixture.model.isChangingPoll)
+        XCTAssertTrue(fixture.model.displaysCurrentAccount)
+        release?.resume(returning: fixture.poll)
+        await command?.value
+        XCTAssertEqual(fixture.model.poll?.title, "New account visit")
+    }
+
+    func testUnavailableRefreshRemovesPreviouslyDisplayedDetail() async {
+        let fixture = fixture()
+        await fixture.model.load()
+        fixture.polls.detailLoader = { _ in nil }
+        await fixture.model.load(forceRefresh: true)
+        XCTAssertNil(fixture.model.poll)
+        XCTAssertTrue(fixture.model.timeOptions.isEmpty)
+        XCTAssertFalse(fixture.model.showsLoading)
+    }
+
     func testSignedOutVisitWaitsForTheFirstLoadBeforeShowingContent() async {
         let fixture = fixture()
         fixture.auth.currentUserId = nil
@@ -123,6 +206,7 @@ final class PollDetailModelTests: XCTestCase {
         }
         let loading = Task { await fixture.model.load() }
         await fulfillment(of: [started], timeout: 5)
+        XCTAssertFalse(fixture.model.showsLoading)
         fixture.auth.currentUserId = UUID()
         XCTAssertNotNil(release)
         release?.resume()

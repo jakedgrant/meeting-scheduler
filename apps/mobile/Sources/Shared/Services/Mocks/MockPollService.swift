@@ -24,6 +24,8 @@ public final class MockPollService: PollServiceProtocol {
     public var availabilitySaver: (@MainActor (SaveAvailabilityRequest) async throws -> AvailabilitySnapshot)?
     public var creator: (@MainActor (CreatePollRequest) async throws -> PollCreationResult)?
     public var finalizer: (@MainActor (UUID, UUID) async throws -> Poll)?
+    public var cachedDetails: [UUID: PollDetail] = [:]
+    public var detailLoader: (@MainActor (UUID) async -> PollDetail?)?
     private var responseVersion: Int64 = 0
 
     /// Derived from sampleParticipants — matches what PollService populates during loadMyPolls().
@@ -180,13 +182,18 @@ public final class MockPollService: PollServiceProtocol {
         nil
     }
 
-    public func loadPollDetail(id: UUID) async -> PollDetail? {
+    public func cachedPollDetail(id: UUID) -> PollDetail? { cachedDetails[id] }
+
+    public func loadPollDetail(id: UUID, forceRefresh: Bool = false) async -> PollDetail? {
+        if let detailLoader { return await detailLoader(id) }
         guard let poll = myPolls.first(where: { $0.id == id }) else { return nil }
         let timeOptions = sampleTimeOptions.filter { $0.pollId == id }
         let participants = sampleParticipants.filter { $0.pollId == id }
         let participantIds = Set(participants.map { $0.id })
         let responses = sampleResponses.filter { participantIds.contains($0.participantId) }
-        return PollDetail(poll: poll, timeOptions: timeOptions, participants: participants, responses: responses)
+        let detail = PollDetail(poll: poll, timeOptions: timeOptions, participants: participants, responses: responses)
+        cachedDetails[id] = detail
+        return detail
     }
 
     public func createPoll(_ request: CreatePollRequest) async throws -> PollCreationResult {

@@ -2,6 +2,12 @@
 
 This is the Android port of the Meeting Scheduler iOS app, translated from Swift/SwiftUI to Kotlin/Jetpack Compose.
 
+## Poll detail caching
+
+Previously opened polls show the current account's complete cached detail before loading saved availability or checking calendars. Detail stays fresh for five minutes; reopening during that window reuses it without another detail request. Older snapshots stay visible while a complete refresh runs. A transport failure keeps the cached detail with an out-of-date notice. Denied or incomplete reads do not use that fallback.
+
+`AppContainer` supplies `PollDetailCache` with app-private preferences and the application clock. Its versioned envelope retains up to 20 complete polls per account across process recreation. Use the poll toolbar's refresh button to force a refresh. Saves, joins, status changes and finalization invalidate detail before dispatch and on completion; account changes clear the previous account's snapshots. Saved availability must load before editing is enabled. This cache does not queue offline writes.
+
 ## Architecture
 
 - **Composition root**: `AppContainer`, created by `MeetingSchedulerApplication`, builds the Supabase client, the auth, poll, calendar and purchase services, the clock that auth and the screen models read, and the factory for each account's creation-draft store once per process. Services that need a context or a long-lived scope get the Application context or the application coroutine scope, never an Activity (see docs/android-lifetimes.md). `MainActivity` passes them down to the screens.

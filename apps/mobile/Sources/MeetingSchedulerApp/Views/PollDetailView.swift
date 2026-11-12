@@ -123,6 +123,9 @@ private struct PollDetailScreen: View {
     @ViewBuilder
     private func pollContent(_ poll: Poll) -> some View {
         List {
+            if let error = model.loadError {
+                Text(error).font(.caption).foregroundStyle(.secondary)
+            }
             if let error = model.calendarError {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
@@ -139,6 +142,7 @@ private struct PollDetailScreen: View {
             closePollButtonSection(poll)
         }
         .scrollDismissesKeyboard(.immediately)
+        .refreshable { await model.load(forceRefresh: true) }
     }
 
     // MARK: - Sections
@@ -257,7 +261,7 @@ private struct PollDetailScreen: View {
                 FinalDateSelectionView(
                     sortedTimeOptions: model.rankedTimeOptions,
                     pollTimeZone: poll.timezone,
-                    isSelectingFinalDate: model.isSelectingFinalDate,
+                    isSelectingFinalDate: model.isSelectingFinalDate || !model.canMutatePoll,
                     responsesForOption: model.responseSummary(for:),
                     onSelectOption: { option in
                         finalTimeOption = option
@@ -403,6 +407,7 @@ private struct PollDetailScreen: View {
                 Button("Join This Poll") {
                     model.join()
                 }
+                .disabled(!model.canMutatePoll)
                 .frame(maxWidth: .infinity)
             }
         }
@@ -436,6 +441,7 @@ private struct PollDetailScreen: View {
                         Spacer()
                     }
                 }
+                .disabled(!model.canMutatePoll)
             }
         }
     }

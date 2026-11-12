@@ -70,6 +70,7 @@ class PollDetailModel(
     /** Throws when the saved retry for this poll can't be read, so the screen can say so. */
     private val saveSession = polls.availabilitySession(pollId)
     private var loadGeneration = 0
+    private var hasAvailabilityDraft = false
 
     var poll by mutableStateOf<Poll?>(null)
         private set
@@ -106,6 +107,10 @@ class PollDetailModel(
         private set
     var joinError by mutableStateOf<String?>(null)
         private set
+    private var isClosingPoll by mutableStateOf(false)
+    val isMutatingPoll: Boolean get() = isSaving || isJoining || isSelectingFinalDate || isClosingPoll
+    val canMutatePoll: Boolean get() = !isLoading && !isMutatingPoll && isCurrentAccount()
+
     var isSelectingFinalDate by mutableStateOf(false)
         private set
     var calendarCheck by mutableStateOf(CalendarCheck.NONE)
@@ -116,9 +121,9 @@ class PollDetailModel(
     val calendarError: String? get() = calendar.calendarError
     val isCreator: Boolean get() = poll?.creatorId == accountId
     val canRespond: Boolean
-        get() = myParticipant != null && poll?.status == PollStatus.ACTIVE && availabilityLoaded && !isSaving
+        get() = myParticipant != null && poll?.status == PollStatus.ACTIVE && availabilityLoaded && !isLoading && !isMutatingPoll
     val canSave: Boolean
-        get() = !isSaving && availabilityLoaded && !hasVersionConflict && commentError.isEmpty()
+        get() = !isLoading && !isMutatingPoll && availabilityLoaded && !hasVersionConflict && commentError.isEmpty()
 
     /** Time options with the most available, then most maybe, responses first. */
     val rankedTimeOptions: List<PollTimeOption>
@@ -168,53 +173,84 @@ class PollDetailModel(
 
     private fun isCurrentAccount() = polls.creationAccountKey == accountKey
 
-    /** Loads the poll, then the participant's saved availability, then checks the calendars. */
-    suspend fun load() {
-        val generation = ++loadGeneration
-        fun isCurrent() = generation == loadGeneration && isCurrentAccount()
-        isLoading = true
-        availabilityLoaded = false
-        localResponses = emptyMap()
-        localComment = ""
-        myParticipant = null
-        poll = null; timeOptions = emptyList(); participants = emptyList(); responses = emptyList()
-        detailError = null
-        val detail = try {
-            polls.loadPollDetail(pollId)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            if (isCurrent()) {
-                detailError = "This poll could not be loaded completely. Please retry."
-                isLoading = false
-            }
-            return
-        }
-        if (!isCurrent()) return
+    init { polls.cachedPollDetail(pollId)?.let(::applyDetail) }
+
+    private fun applyDetail(detail: PollDetail) {
         poll = detail.poll
         timeOptions = detail.timeOptions
         participants = detail.participants
         responses = detail.responses
         myParticipant = participants.firstOrNull { it.userId == accountId }
+    }
 
-        if (myParticipant != null) loadSavedAvailability()
-        if (!isCurrent()) return
-        // Refresh safe connection metadata, then check all slots in one call.
-        calendar.refreshGoogleCalendarConnection()
-        if (!isCurrent()) return
-        checkCalendar()
-        if (isCurrent()) isLoading = false
+    /** Shows persisted detail before refreshing stale data, saved availability and calendars. */
+    suspend fun load(forceRefresh: Boolean = false) {
+        if (isMutatingPoll) return
+        val generation = ++loadGeneration
+        fun isCurrent() = generation == loadGeneration && isCurrentAccount()
+        val saved = saveSession.snapshot
+        val preserveDraft = hasAvailabilityDraft && saved != null &&
+            (saveSession.pendingDraft != null || localResponses != saved.responses.associate { it.timeOptionId to it.status } ||
+                localComment.trim().ifEmpty { null } != saved.comment)
+        isLoading = true
+        calendarCheck = CalendarCheck.NONE
+        isCheckingCalendar = false
+        try {
+            availabilityLoaded = false
+            if (!hasAvailabilityDraft) {
+                localResponses = emptyMap()
+                localComment = ""
+            }
+            myParticipant = null
+            poll = null; timeOptions = emptyList(); participants = emptyList(); responses = emptyList()
+            detailError = null
+            polls.cachedPollDetail(pollId)?.let(::applyDetail)
+            val detail = try {
+                if (forceRefresh) polls.refreshPollDetail(pollId) else polls.loadPollDetail(pollId)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (isCurrent()) {
+                    // A denial evicts the cache in the service; never keep displaying revoked detail.
+                    val cached = polls.cachedPollDetail(pollId)
+                    if (error is java.io.IOException && cached != null) {
+                        applyDetail(cached)
+                        detailError = "This poll could not be refreshed. Displayed results may be out of date."
+                    } else {
+                        poll = null; timeOptions = emptyList(); participants = emptyList(); responses = emptyList()
+                        myParticipant = null
+                        detailError = "This poll could not be loaded completely. Please retry."
+                    }
+                }
+                return
+            }
+            if (!isCurrent()) return
+            applyDetail(detail)
+
+            if (preserveDraft && saved?.participantId == myParticipant?.id) {
+                // Keep the original save version so a remote edit still produces a conflict.
+                availabilityLoaded = true
+            } else if (myParticipant != null) loadSavedAvailability()
+            if (!isCurrent()) return
+            // Refresh safe connection metadata, then check all slots in one call.
+            calendar.refreshGoogleCalendarConnection()
+            if (!isCurrent()) return
+            checkCalendar()
+        } finally {
+            if (isCurrent()) isLoading = false
+        }
     }
 
     /** Only busy options become unavailable suggestions; unchecked options are left alone (F16). */
     suspend fun checkCalendar() {
+        val generation = loadGeneration
         val currentPoll = poll ?: return
         // The service returns an empty result when no source is enabled, which clears a stale banner on retry.
         if (timeOptions.isEmpty() || isCheckingCalendar) return
         isCheckingCalendar = true
         try {
             val check = calendar.checkPollConflicts(timeOptions, currentPoll.timezone)
-            if (!isCurrentAccount()) return
+            if (generation != loadGeneration || !isCurrentAccount()) return
             calendarCheck = check
             check.busy.forEach { conflictId ->
                 if (saveSession.pendingDraft == null && !localResponses.containsKey(conflictId)) {
@@ -222,15 +258,17 @@ class PollDetailModel(
                 }
             }
         } finally {
-            isCheckingCalendar = false
+            if (generation == loadGeneration) isCheckingCalendar = false
         }
     }
 
     suspend fun loadSavedAvailability() {
+        val generation = loadGeneration
+        fun isCurrent() = generation == loadGeneration && isCurrentAccount()
         try {
             val saved = saveSession.loadIfCurrent(
                 load = { polls.getAvailability(pollId) },
-                isCurrent = ::isCurrentAccount,
+                isCurrent = ::isCurrent,
             ) ?: return
             applySavedAvailability(saved)
             availabilityLoaded = true
@@ -238,12 +276,12 @@ class PollDetailModel(
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            if (isCurrentAccount()) saveError = "Could not load your saved availability. Retry before editing."
+            if (isCurrent()) saveError = "Could not load your saved availability. Retry before editing."
         }
     }
 
     suspend fun join() {
-        if (isJoining) return
+        if (!canMutatePoll) return
         isJoining = true
         joinError = null
         try {
@@ -344,6 +382,8 @@ class PollDetailModel(
     }
 
     suspend fun close() {
+        if (!canMutatePoll) return
+        isClosingPoll = true
         try {
             polls.updatePollStatus(pollId, PollStatus.CLOSED)
             if (isCurrentAccount()) poll = poll?.copy(status = PollStatus.CLOSED)
@@ -351,11 +391,11 @@ class PollDetailModel(
             throw error
         } catch (error: Exception) {
             FailureLog.record("PollDetailModel", "Failed to update status", error)
-        }
+        } finally { isClosingPoll = false }
     }
 
     suspend fun finalize(option: PollTimeOption) {
-        if (isSelectingFinalDate) return
+        if (!canMutatePoll) return
         isSelectingFinalDate = true
         try {
             val finalized = polls.finalizePoll(pollId, option.id)
@@ -370,6 +410,7 @@ class PollDetailModel(
     }
 
     private fun applySavedAvailability(saved: AvailabilitySnapshot) {
+        hasAvailabilityDraft = true
         responses = responses.filter { it.participantId != saved.participantId } + saved.responseRows()
         participants = participants.map { if (it.id == saved.participantId) it.copy(comment = saved.comment) else it }
         myParticipant = participants.firstOrNull { it.id == saved.participantId }
