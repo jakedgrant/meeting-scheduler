@@ -57,7 +57,7 @@ export function emptyCreationDraft(): CreationDraft {
 	return {
 		title: '', description: '', location: '', dueDate: '', isAllDay: false, useEventPass: false,
 		timezone: currentZone(),
-		timeOptions: [{ id: crypto.randomUUID(), date: '', startTime: '09:00', endTime: '10:00' }]
+		timeOptions: []
 	}
 }
 

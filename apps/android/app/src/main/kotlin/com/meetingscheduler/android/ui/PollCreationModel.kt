@@ -35,7 +35,7 @@ data class CreationFormDraft(
     val title: String = "", val description: String = "", val location: String = "",
     val hasDueDate: Boolean = false, val dueDate: LocalDate? = null,
     val isAllDay: Boolean = false, val useDateRange: Boolean = false,
-    val timeOptions: List<TimeOption> = listOf(TimeOption()),
+    val timeOptions: List<TimeOption> = emptyList(),
     /** The days tapped on the all-day calendar. While [isAllDay] is on, these are the poll's options. */
     val selectedDays: Set<LocalDate> = emptySet(),
     val rangeStartDate: LocalDate = currentSystemDate,
@@ -44,9 +44,9 @@ data class CreationFormDraft(
     val useEventPass: Boolean = false,
 ) {
     companion object {
-        /** An empty form whose first option and date range start on [today]. */
+        /** An empty form whose date range starts on [today]. */
         fun starting(today: LocalDate) =
-            CreationFormDraft(timeOptions = listOf(TimeOption(date = today)), rangeStartDate = today)
+            CreationFormDraft(rangeStartDate = today)
     }
 }
 
