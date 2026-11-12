@@ -23,6 +23,7 @@ struct PollDetailView: View {
 
 private struct PollDetailScreen: View {
     @State private var model: PollDetailModel
+    @FocusState private var isCommentFocused: Bool
     @State private var showClosePollAlert = false
     @State private var showSelectFinalDateAlert = false
     @State private var finalTimeOption: PollTimeOption?
@@ -138,6 +139,8 @@ private struct PollDetailScreen: View {
             participantsSection
             closePollButtonSection(poll)
         }
+        .scrollDismissesKeyboard(.immediately)
+        .onTapGesture { isCommentFocused = false }
     }
 
     // MARK: - Sections
@@ -339,6 +342,7 @@ private struct PollDetailScreen: View {
                         text: Binding(get: { editor.comment }, set: { model.updateComment($0) }),
                         axis: .vertical
                     )
+                    .focused($isCommentFocused)
                     .lineLimit(2...4)
                     .disabled(!model.canEditAvailability)
                     if let commentError = model.commentError {
