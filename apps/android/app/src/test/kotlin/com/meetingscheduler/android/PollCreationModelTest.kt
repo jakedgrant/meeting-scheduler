@@ -11,10 +11,13 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlin.time.Clock
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -103,7 +106,7 @@ class PollCreationModelTest {
 
     @Test fun submittingSendsTheDraftInTheDeviceZoneAndClearsIt() = runBlocking<Unit> {
         val store = MemoryStore(CreationFormDraft(title = "Planning", hasDueDate = true, dueDate = LocalDate(2026, 11, 8),
-            isAllDay = true, timeOptions = listOf(option)))
+            isAllDay = true, selectedDays = setOf(option.date)))
         var sent: PollCreationRequest? = null
         val model = model(store, send = { sent = it; result })
         assertTrue(model.submit())
@@ -116,6 +119,44 @@ class PollCreationModelTest {
         // A late edit, such as a text field's last callback, can't bring the draft back.
         model.edit { it.copy(title = "After") }
         assertNull(store.draft)
+    }
+
+    @Test fun tappingADayTwiceSelectsThenDeselectsIt() {
+        val model = model(MemoryStore())
+        model.toggleDay(LocalDate(2026, 11, 12))
+        model.toggleDay(LocalDate(2026, 11, 5))
+        assertEquals(setOf(LocalDate(2026, 11, 5), LocalDate(2026, 11, 12)), model.draft.selectedDays)
+        model.toggleDay(LocalDate(2026, 11, 5))
+        assertEquals(setOf(LocalDate(2026, 11, 12)), model.draft.selectedDays)
+    }
+
+    @Test fun tappedAllDayDaysAreSentAsSortedAllDayOptions() = runBlocking<Unit> {
+        val store = MemoryStore(CreationFormDraft(title = "Offsite", isAllDay = true))
+        var sent: PollCreationRequest? = null
+        val model = model(store, send = { sent = it; result })
+        model.toggleDay(LocalDate(2026, 11, 12))
+        model.toggleDay(LocalDate(2026, 11, 5))
+        assertTrue(model.submit())
+        assertEquals(
+            listOf(LocalDate(2026, 11, 5), LocalDate(2026, 11, 12)).map { PollDates.allDayOption(it, chicago) },
+            sent!!.payload.timeOptions)
+    }
+
+    @Test fun aSelectedDayThatHasPassedIsNotSent() = runBlocking<Unit> {
+        val store = MemoryStore(CreationFormDraft(title = "Offsite", isAllDay = true,
+            selectedDays = setOf(today.minus(1, DateTimeUnit.DAY), today.plus(1, DateTimeUnit.DAY))))
+        var sent: PollCreationRequest? = null
+        val model = model(store, send = { sent = it; result })
+        assertTrue(model.submit())
+        assertEquals(listOf(PollDates.allDayOption(today.plus(1, DateTimeUnit.DAY), chicago)), sent!!.payload.timeOptions)
+    }
+
+    @Test fun anAllDayPollWithNoDaysSelectedExplainsAndSendsNothing() = runBlocking<Unit> {
+        var sent = false
+        val model = model(MemoryStore(CreationFormDraft(title = "Offsite", isAllDay = true)), send = { sent = true; result })
+        assertFalse(model.submit())
+        assertEquals("Select at least one day.", model.errorMessage)
+        assertFalse(sent)
     }
 
     @Test fun aLostReplyKeepsTheRequestAndTheRetrySendsItAgain() = runBlocking<Unit> {

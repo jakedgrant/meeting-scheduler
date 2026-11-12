@@ -418,7 +418,16 @@ private fun CreationForm(
                 Text("Time Options", style = MaterialTheme.typography.titleMedium)
             }
 
-            if (!draft.isAllDay) {
+            if (draft.isAllDay) {
+                item {
+                    DayCalendar(
+                        selected = draft.selectedDays,
+                        today = model.today(),
+                        enabled = !isLoading,
+                        onToggle = model::toggleDay,
+                    )
+                }
+            } else {
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -526,51 +535,51 @@ private fun CreationForm(
                 }
             }
 
-            itemsIndexed(timeOptions) { index, option ->
-                Card(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+            if (!draft.isAllDay) {
+                itemsIndexed(timeOptions) { index, option ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("Time Option ${index + 1}", style = MaterialTheme.typography.labelLarge)
-                            if (timeOptions.size > 1) {
-                                IconButton(
-                                    onClick = {
-                                        model.removeOption(index)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Time Option ${index + 1}", style = MaterialTheme.typography.labelLarge)
+                                if (timeOptions.size > 1) {
+                                    IconButton(
+                                        onClick = {
+                                            model.removeOption(index)
+                                        }
+                                    ) {
+                                        Icon(Icons.Default.Delete, "Delete")
                                     }
-                                ) {
-                                    Icon(Icons.Default.Delete, "Delete")
                                 }
                             }
-                        }
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    editingOptionIndex = index
-                                    showDatePicker = true
-                                },
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Date: ${option.date}")
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Edit date",
-                                modifier = Modifier.size(18.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        editingOptionIndex = index
+                                        showDatePicker = true
+                                    },
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Date: ${option.date}")
+                                Icon(
+                                    Icons.Default.Edit,
+                                    contentDescription = "Edit date",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
 
-                        if (!draft.isAllDay) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -611,16 +620,16 @@ private fun CreationForm(
                         }
                     }
                 }
-            }
 
-            item {
-                Button(
-                    onClick = model::addOption,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add Time Option")
+                item {
+                    Button(
+                        onClick = model::addOption,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Add Time Option")
+                    }
                 }
             }
 
