@@ -174,7 +174,13 @@ private struct CreatePollForm: View {
                 .datePickerStyle(.compact)
 
             Button(action: model.addDateRange) {
-                Label("Add Date Range", systemImage: "calendar.badge.plus")
+                // Not a `Label`: inside a `Form` it tints the icon with the accent color, which
+                // matches the prominent button's background and hides the icon.
+                HStack(spacing: 8) {
+                    Image(systemName: "calendar.badge.plus")
+                        .accessibilityHidden(true)
+                    Text("Add Date Range")
+                }
             }
             .buttonStyle(.borderedProminent)
         }
