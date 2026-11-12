@@ -190,16 +190,12 @@ private struct PollDetailScreen: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Button(action: {
+                            CopyButton {
                                 #if os(iOS)
                                 let pollURL = "\(Config.webURL)/polls/\(poll.id)"
                                 UIPasteboard.general.string = pollURL
                                 #endif
-                            }) {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.caption)
                             }
-                            .buttonStyle(.bordered)
                         }
 
                         Text("\(Config.webURL)/polls/\(poll.id)")
@@ -220,15 +216,11 @@ private struct PollDetailScreen: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            Button(action: {
+                            CopyButton {
                                 #if os(iOS)
                                 UIPasteboard.general.string = poll.shareCode
                                 #endif
-                            }) {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.caption)
                             }
-                            .buttonStyle(.bordered)
                         }
 
                         Text(poll.shareCode)
