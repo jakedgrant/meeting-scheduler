@@ -29,6 +29,7 @@ public final class PollCreationModel {
     public var rangeEndDate: Date
     public var rangeStartTime: Date
     public var rangeEndTime: Date
+    /// The days tapped on the all-day calendar. While `isAllDay` is on, these are the poll's options.
     public var selectedDates = Set<DateComponents>()
     public private(set) var formError: String?
 
@@ -91,23 +92,6 @@ public final class PollCreationModel {
         options.removeAll { $0.id == id }
     }
 
-    /// Adds an all-day option for each selected day and clears the selection.
-    public func addSelectedDates() {
-        let calendar = currentCalendar()
-        for dateComponents in selectedDates {
-            if let date = calendar.date(from: dateComponents) {
-                options.append(Option(
-                    date: date,
-                    startTime: calendar.date(bySettingHour: 0, minute: 0, second: 0, of: date) ?? date,
-                    endTime: calendar.date(bySettingHour: 23, minute: 59, second: 0, of: date) ?? date
-                ))
-            }
-        }
-        sortOptions()
-        selectedDates.removeAll()
-        formError = nil
-    }
-
     /// Adds one option per day in the range, each with the range's wall times.
     public func addDateRange() {
         let calendar = currentCalendar()
@@ -149,6 +133,10 @@ public final class PollCreationModel {
     @discardableResult
     public func create(onCreated: @escaping @MainActor () -> Void) -> Task<Void, Never>? {
         formError = nil
+        if isAllDay && selectedDates.isEmpty && !editor.mustResolvePending {
+            formError = "Select at least one day."
+            return nil
+        }
         let payload: PollCreationPayload?
         if editor.mustResolvePending {
             payload = editor.pending?.payload
@@ -215,9 +203,12 @@ public final class PollCreationModel {
     /// Each option's picked date and wall times, resolved in `zone`.
     private func makeOptions(in zone: TimeZone) throws(CalendarTimeError) -> [PollCreationOption] {
         let calendar = currentCalendar()
+        if isAllDay {
+            return selectedDates.compactMap { calendar.date(from: $0) }.sorted()
+                .map { .allDay(on: CalendarDay($0, in: calendar.timeZone), in: zone) }
+        }
         return try options.map { option throws(CalendarTimeError) in
             let day = CalendarDay(option.date, in: calendar.timeZone)
-            if isAllDay { return .allDay(on: day, in: zone) }
             let start = calendar.dateComponents([.hour, .minute], from: option.startTime)
             let end = calendar.dateComponents([.hour, .minute], from: option.endTime)
             return try .timed(
@@ -241,6 +232,9 @@ public final class PollCreationModel {
                 date: $0.isAllDay ? CalendarDay($0.startTime, in: zone).pickerDate(calendar: calendar) : $0.startTime,
                 startTime: $0.startTime, endTime: $0.endTime)
         } ?? [newOption()]
+        selectedDates = isAllDay
+            ? Set(options.map { calendar.dateComponents([.calendar, .era, .year, .month, .day], from: $0.date) })
+            : []
         formError = nil
     }
 }

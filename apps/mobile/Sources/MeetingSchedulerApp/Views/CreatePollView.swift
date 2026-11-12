@@ -68,11 +68,10 @@ private struct CreatePollForm: View {
 
             Toggle("Set response deadline", isOn: $model.hasDueDate)
             if model.hasDueDate {
-                DatePicker("Due Date", selection: Binding(
+                DayPicker(title: "Due Date", selection: Binding(
                     get: { model.dueDate ?? model.now },
                     set: { model.dueDate = $0 }
-                ), in: model.now..., displayedComponents: .date)
-                .datePickerStyle(.compact)
+                ), range: model.now..., calendar: model.calendar)
             }
 
             Toggle("All-day events", isOn: $model.isAllDay)
@@ -90,21 +89,23 @@ private struct CreatePollForm: View {
                 }
             }
 
-            ForEach($model.options) { $option in
-                TimeOptionView(option: $option, isAllDay: model.isAllDay, now: model.now, calendar: model.calendar)
-                    .swipeActions(edge: .trailing) {
-                        if model.options.count > 1 {
-                            Button(role: .destructive) {
-                                model.removeOption(id: option.id)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+            if !model.isAllDay {
+                ForEach($model.options) { $option in
+                    TimeOptionView(option: $option, now: model.now, calendar: model.calendar)
+                        .swipeActions(edge: .trailing) {
+                            if model.options.count > 1 {
+                                Button(role: .destructive) {
+                                    model.removeOption(id: option.id)
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
                         }
-                    }
-            }
+                }
 
-            Button(action: model.addOption) {
-                Label("Add Time Option", systemImage: "plus.circle")
+                Button(action: model.addOption) {
+                    Label("Add Time Option", systemImage: "plus.circle")
+                }
             }
         }
     }
@@ -152,13 +153,7 @@ private struct CreatePollForm: View {
             Text("Select Days")
                 .font(.headline)
 
-            MultiDatePicker("Days", selection: $model.selectedDates)
-
-            Button("Add Selected Days", systemImage: "calendar.badge.plus") {
-                model.addSelectedDates()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(model.selectedDates.isEmpty)
+            MultiDatePicker("Days", selection: $model.selectedDates, in: model.startOfToday...)
         }
         .padding(.vertical, 8)
     }
@@ -168,9 +163,9 @@ private struct CreatePollForm: View {
             Text("Add Date Range")
                 .font(.headline)
 
-            DatePicker("Start Date", selection: $model.rangeStartDate, in: model.startOfToday..., displayedComponents: .date)
+            DayPicker(title: "Start Date", selection: $model.rangeStartDate, range: model.startOfToday..., calendar: model.calendar)
 
-            DatePicker("End Date", selection: $model.rangeEndDate, in: model.startOfToday..., displayedComponents: .date)
+            DayPicker(title: "End Date", selection: $model.rangeEndDate, range: model.startOfToday..., calendar: model.calendar)
 
             DatePicker("Start Time", selection: $model.rangeStartTime, displayedComponents: .hourAndMinute)
                 .datePickerStyle(.compact)
@@ -191,20 +186,17 @@ private struct CreatePollForm: View {
 
 struct TimeOptionView: View {
     @Binding var option: PollCreationModel.Option
-    let isAllDay: Bool
     let now: Date
     let calendar: Calendar
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            DatePicker("Date", selection: $option.date, in: startOfToday()..., displayedComponents: .date)
+            DayPicker(title: "Date", selection: $option.date, range: startOfToday()..., calendar: calendar)
 
-            if !isAllDay {
-                DatePicker("Start", selection: $option.startTime, in: getStartTimeRange(for: option.date), displayedComponents: .hourAndMinute)
-                    .datePickerStyle(.compact)
-                DatePicker("End", selection: $option.endTime, in: getEndTimeRange(for: option.startTime), displayedComponents: .hourAndMinute)
-                    .datePickerStyle(.compact)
-            }
+            DatePicker("Start", selection: $option.startTime, in: getStartTimeRange(for: option.date), displayedComponents: .hourAndMinute)
+                .datePickerStyle(.compact)
+            DatePicker("End", selection: $option.endTime, in: getEndTimeRange(for: option.startTime), displayedComponents: .hourAndMinute)
+                .datePickerStyle(.compact)
         }
     }
 

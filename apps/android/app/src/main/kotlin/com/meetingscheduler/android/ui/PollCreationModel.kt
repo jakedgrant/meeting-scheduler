@@ -36,6 +36,8 @@ data class CreationFormDraft(
     val hasDueDate: Boolean = false, val dueDate: LocalDate? = null,
     val isAllDay: Boolean = false, val useDateRange: Boolean = false,
     val timeOptions: List<TimeOption> = listOf(TimeOption()),
+    /** The days tapped on the all-day calendar. While [isAllDay] is on, these are the poll's options. */
+    val selectedDays: Set<LocalDate> = emptySet(),
     val rangeStartDate: LocalDate = currentSystemDate,
     val rangeEndDate: LocalDate = rangeStartDate,
     val rangeStartTime: LocalTime = LocalTime(9, 0), val rangeEndTime: LocalTime = LocalTime(10, 0),
@@ -143,6 +145,11 @@ class PollCreationModel(
         it.copy(timeOptions = it.timeOptions.filterIndexed { i, _ -> i != index })
     }
 
+    /** Selects the day on the all-day calendar, or deselects it when it was already selected. */
+    fun toggleDay(day: LocalDate) = edit {
+        it.copy(selectedDays = if (day in it.selectedDays) it.selectedDays - day else it.selectedDays + day)
+    }
+
     /** Adds an option the day after the last one, at the same times. */
     fun addOption() = edit {
         val last = it.timeOptions.lastOrNull()
@@ -181,18 +188,21 @@ class PollCreationModel(
             val form = draft
             // Picker values are wall times in the device zone, which the poll records.
             val zone = zone()
-            val payload = session.pending?.payload ?: PollCreationPayload(
-                title = form.title,
-                description = form.description.ifBlank { null },
-                location = form.location.ifBlank { null },
-                timezone = zone.id,
-                closesAt = if (form.hasDueDate) form.dueDate?.let { PollDates.deadline(it, zone) } else null,
-                timeOptions = form.timeOptions.map { option ->
-                    if (form.isAllDay) PollDates.allDayOption(option.date, zone)
-                    else PollDates.timedOption(option.date, option.startTime, option.endTime, zone)
-                },
-                useEventPass = form.useEventPass,
-            )
+            val payload = session.pending?.payload ?: run {
+                // A day chosen in an earlier visit may have passed since; it is not sent.
+                val days = form.selectedDays.filter { it >= today() }.sorted()
+                require(!form.isAllDay || days.isNotEmpty()) { "Select at least one day." }
+                PollCreationPayload(
+                    title = form.title,
+                    description = form.description.ifBlank { null },
+                    location = form.location.ifBlank { null },
+                    timezone = zone.id,
+                    closesAt = if (form.hasDueDate) form.dueDate?.let { PollDates.deadline(it, zone) } else null,
+                    timeOptions = if (form.isAllDay) days.map { PollDates.allDayOption(it, zone) }
+                        else form.timeOptions.map { PollDates.timedOption(it.date, it.startTime, it.endTime, zone) },
+                    useEventPass = form.useEventPass,
+                )
+            }
             require(payload.title.isNotBlank() && payload.timeOptions.isNotEmpty()) { "Enter a title and at least one time option." }
             session.submit(payload, send = polls::createPoll, isCurrent = ::isCurrentAccount) ?: return false
             completed = true

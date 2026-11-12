@@ -109,6 +109,43 @@ final class PollCreationModelTests: XCTestCase {
         XCTAssertEqual(wallTime(payload.timeOptions[0].endTime), [2026, 11, 5, 10, 0])
     }
 
+    func testTappedAllDayDatesAreSubmittedAsSortedAllDayOptionsWithoutAnExtraStep() async throws {
+        let polls = MockPollService()
+        var submitted: [CreatePollRequest] = []
+        polls.creator = { request in
+            submitted.append(request)
+            return PollCreationResult(poll: Poll(creatorId: self.account, title: "x", status: .active), timeOptions: [])
+        }
+        let model = model(polls: polls)
+        model.title = "Offsite"
+        model.isAllDay = true
+        model.selectedDates = [
+            DateComponents(calendar: calendar, year: 2026, month: 11, day: 12),
+            DateComponents(calendar: calendar, year: 2026, month: 11, day: 5),
+        ]
+
+        await model.create {}?.value
+
+        let options = try XCTUnwrap(submitted.first?.payload.timeOptions)
+        XCTAssertEqual(options.map { wallTime($0.startTime) }, [[2026, 11, 5, 0, 0], [2026, 11, 12, 0, 0]])
+        XCTAssertTrue(options.allSatisfy(\.isAllDay))
+    }
+
+    func testAllDayWithNoDaysSelectedExplainsAndDoesNotSubmit() async {
+        let polls = MockPollService()
+        var dispatched = false
+        polls.creator = { _ in dispatched = true; throw CancellationError() }
+        let model = model(polls: polls)
+        model.title = "Offsite"
+        model.isAllDay = true
+
+        let task = model.create {}
+
+        XCTAssertNil(task)
+        XCTAssertEqual(model.errorMessage, "Select at least one day.")
+        XCTAssertFalse(dispatched)
+    }
+
     func testUnresolvedSubmissionIsRestoredAndRetriedUnchanged() async throws {
         let store = MemoryDraftStore()
         let polls = MockPollService()
@@ -134,5 +171,21 @@ final class PollCreationModelTests: XCTestCase {
         XCTAssertEqual(submitted.count, 2)
         XCTAssertEqual(submitted[0].operationId, submitted[1].operationId)
         XCTAssertEqual(submitted[1].payload.title, "Planning")
+    }
+
+    func testUnresolvedAllDaySubmissionRestoresItsDaysOnTheCalendar() async {
+        let store = MemoryDraftStore()
+        let polls = MockPollService()
+        polls.creator = { _ in throw PollCreationError.transport }
+        let first = model(polls: polls, store: store)
+        first.title = "Offsite"
+        first.isAllDay = true
+        first.selectedDates = [DateComponents(calendar: calendar, year: 2026, month: 11, day: 5)]
+        await first.create {}?.value
+
+        let restored = model(polls: polls, store: store)
+
+        XCTAssertTrue(restored.isAllDay)
+        XCTAssertEqual(restored.selectedDates.compactMap { calendar.date(from: $0) }, [calendar.date(from: DateComponents(year: 2026, month: 11, day: 5))])
     }
 }
