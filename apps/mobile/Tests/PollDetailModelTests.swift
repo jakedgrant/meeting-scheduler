@@ -193,6 +193,22 @@ final class PollDetailModelTests: XCTestCase {
         XCTAssertNil(fixture.model.editor.responses[fixture.options[2].id])
     }
 
+    func testCalendarConflictsAreLoadedForOneOptionInThePollZone() async {
+        let fixture = fixture()
+        let conflict = CalendarConflict(
+            title: "Dentist", calendarName: "Home", start: Date(), end: Date().addingTimeInterval(3600), isAllDay: false)
+        fixture.calendar.deviceConflictLoader = { option, zone in
+            XCTAssertEqual(option.id, fixture.options[1].id)
+            XCTAssertEqual(zone, "America/Chicago")
+            return [conflict]
+        }
+        await fixture.model.load()
+
+        let conflicts = await fixture.model.calendarConflicts(for: fixture.options[1])
+
+        XCTAssertEqual(conflicts, [conflict])
+    }
+
     func testCalendarResultAfterAnAccountChangeIsDropped() async {
         let fixture = fixture()
         var release: CheckedContinuation<Void, Never>?

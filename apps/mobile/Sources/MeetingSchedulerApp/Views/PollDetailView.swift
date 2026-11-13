@@ -27,6 +27,7 @@ private struct PollDetailScreen: View {
     @State private var showSelectFinalDateAlert = false
     @State private var finalTimeOption: PollTimeOption?
     @State private var selectedTimeOption: PollTimeOption?
+    @State private var conflictOption: PollTimeOption?
 
     init(model: PollDetailModel) {
         _model = State(initialValue: model)
@@ -112,6 +113,14 @@ private struct PollDetailScreen: View {
             }
         } message: {
             Text("Set \(formattedSelectedOption) as the final meeting time? This closes responses for the poll.")
+        }
+        .sheet(item: $conflictOption) { option in
+            CalendarConflictsView(
+                option: option,
+                pollTimeZone: poll?.timezone ?? "UTC",
+                sources: model.calendarCheck.busySources[option.id] ?? [],
+                loadConflicts: { await model.calendarConflicts(for: option) }
+            )
         }
         .navigationDestination(item: $selectedTimeOption) { timeOption in
             TimeOptionResponsesView(pollId: pollId, timeOption: timeOption, pollTimeZone: poll?.timezone ?? "UTC")
@@ -314,6 +323,7 @@ private struct PollDetailScreen: View {
                         myResponse: editor.responses[option.id],
                         hasCalendarConflict: model.calendarCheck.busyIds.contains(option.id),
                         calendarUnchecked: model.calendarCheck.uncheckedIds.contains(option.id),
+                        onShowConflicts: { conflictOption = option },
                         canRespond: model.canEditAvailability,
                         onResponseChange: { status in
                             model.setResponse(status, for: option.id)
@@ -696,6 +706,7 @@ struct TimeOptionRow: View {
     let myResponse: AvailabilityStatus?
     let hasCalendarConflict: Bool
     let calendarUnchecked: Bool
+    let onShowConflicts: () -> Void
     let canRespond: Bool
     let onResponseChange: (AvailabilityStatus) -> Void
 
@@ -717,13 +728,20 @@ struct TimeOptionRow: View {
                         .font(.headline)
 
                     if hasCalendarConflict {
-                        Label("Busy", systemImage: "calendar.badge.exclamationmark")
+                        Button(action: onShowConflicts) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "calendar.badge.exclamationmark")
+                                Text("Busy")
+                            }
                             .font(.caption2)
                             .foregroundStyle(.orange)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.orange.opacity(0.15))
                             .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Shows what conflicts with this time")
                     } else if calendarUnchecked {
                         Label("Couldn't check", systemImage: "questionmark.circle")
                             .font(.caption2)

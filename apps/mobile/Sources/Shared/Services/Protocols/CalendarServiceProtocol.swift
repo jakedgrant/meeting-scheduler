@@ -21,6 +21,7 @@ public protocol CalendarServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Conflict Checking
 
     func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult
+    func deviceConflicts(for option: PollTimeOption, pollTimeZone: String?) async -> [CalendarConflict]
 
     // MARK: - Add to Calendar
 

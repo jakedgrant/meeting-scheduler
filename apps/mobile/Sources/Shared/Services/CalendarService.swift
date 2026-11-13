@@ -321,34 +321,37 @@ public final class CalendarService: CalendarServiceProtocol {
         }
     }
 
-    /// Get conflicting events for a specific time range (Apple Calendar only)
-    /// - Parameters:
-    ///   - start: Start time for the range
-    ///   - end: End time for the range
-    /// - Returns: Array of conflicting events
-    public func getConflictingEvents(start: Date, end: Date) async -> [EKEvent] {
-        let credentials = AccountRequestContext.credentials ?? requestCredentials()
-        return await AccountRequestContext.$credentials.withValue(credentials) {
-            guard appleCalendarEnabled else { return [] }
+    /// The device calendar events that make one option busy (Apple Calendar only).
+    ///
+    /// Google FreeBusy reports no event details, so Google conflicts have none to list.
+    public func deviceConflicts(for option: PollTimeOption, pollTimeZone: String?) async -> [CalendarConflict] {
+        guard appleCalendarEnabled else { return [] }
+        updateAuthorizationStatus()
+        guard authorizationStatus == .fullAccess else { return [] }
 
-            updateAuthorizationStatus()
-
-            guard authorizationStatus == .fullAccess else {
-                await setAppleCalendarEnabled(false)
-                return []
+        // Pad the window as the check does, so all-day events in other zones are not missed.
+        let padding: TimeInterval = 2 * 86_400
+        let predicate = eventStore.predicateForEvents(
+            withStart: option.startTime.addingTimeInterval(-padding),
+            end: option.endTime.addingTimeInterval(padding),
+            calendars: nil
+        )
+        let deviceZone = TimeZone.current
+        return eventStore.events(matching: predicate)
+            .filter { event in
+                busyPeriod(of: event, in: deviceZone)?
+                    .overlaps(option, pollTimeZone: pollTimeZone, deviceZone: deviceZone) ?? false
             }
-
-            let predicate = eventStore.predicateForEvents(
-                withStart: start,
-                end: end,
-                calendars: nil
-            )
-
-            let events = eventStore.events(matching: predicate)
-
-            let deviceZone = TimeZone.current
-            return events.filter { busyPeriod(of: $0, in: deviceZone) != nil }
-        }
+            .map { event in
+                CalendarConflict(
+                    title: event.title ?? "",
+                    calendarName: event.calendar.title,
+                    start: event.startDate,
+                    end: event.endDate,
+                    isAllDay: event.isAllDay
+                )
+            }
+            .sorted { $0.start < $1.start }
     }
 
     // MARK: - Add to Calendar
