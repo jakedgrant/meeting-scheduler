@@ -14,6 +14,8 @@ public final class PollCreationModel {
         public var date: Date
         public var startTime: Date
         public var endTime: Date
+        /// Whole days from `date` to the day the option ends; 0 for a same-day option.
+        public var endDayOffset = 0
     }
 
     public var title = ""
@@ -211,7 +213,8 @@ public final class PollCreationModel {
             let start = calendar.dateComponents([.hour, .minute], from: option.startTime)
             let end = calendar.dateComponents([.hour, .minute], from: option.endTime)
             return try .timed(
-                on: day, start: (start.hour ?? 9, start.minute ?? 0), end: (end.hour ?? 10, end.minute ?? 0), in: zone)
+                on: day, start: (start.hour ?? 9, start.minute ?? 0),
+                endingOn: day.adding(days: option.endDayOffset), end: (end.hour ?? 10, end.minute ?? 0), in: zone)
         }
     }
 
@@ -227,9 +230,11 @@ public final class PollCreationModel {
         useEventPass = payload?.useEventPass ?? false
         isAllDay = payload?.timeOptions.first?.isAllDay ?? false
         options = payload?.timeOptions.map {
-            Option(
+            let endDayOffset = $0.isAllDay ? 0 : calendar.dateComponents(
+                [.day], from: calendar.startOfDay(for: $0.startTime), to: calendar.startOfDay(for: $0.endTime)).day ?? 0
+            return Option(
                 date: $0.isAllDay ? CalendarDay($0.startTime, in: zone).pickerDate(calendar: calendar) : $0.startTime,
-                startTime: $0.startTime, endTime: $0.endTime)
+                startTime: $0.startTime, endTime: $0.endTime, endDayOffset: endDayOffset)
         } ?? []
         selectedDates = isAllDay
             ? Set(options.map { calendar.dateComponents([.calendar, .era, .year, .month, .day], from: $0.date) })
