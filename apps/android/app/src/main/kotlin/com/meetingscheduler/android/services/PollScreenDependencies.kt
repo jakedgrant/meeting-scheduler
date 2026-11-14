@@ -17,7 +17,9 @@ interface PollCreationPolls : PollAccount {
 
 /** The poll read the responses screen runs. `PollService` implements it. */
 interface PollResponsesPolls : PollAccount {
+    fun cachedPollDetail(pollId: String): PollDetail? = null
     suspend fun loadPollDetail(pollId: String): PollDetail
+    suspend fun refreshPollDetail(pollId: String): PollDetail = loadPollDetail(pollId)
 }
 
 /** The list state the poll list shows and the list commands it runs. `PollService` implements it. */

@@ -67,7 +67,16 @@ class AppContainer(
             }
         })
 
-    val pollService = PollService(authService, supabase)
+    private val pollCachePreferences = application.getSharedPreferences("poll_details_v1", 0)
+    val pollService = PollService(authService, supabase,
+        detailCache = com.meetingscheduler.android.services.PollDetailCache(
+            read = { pollCachePreferences.getString(it, null) },
+            write = { key, value ->
+                val edit = pollCachePreferences.edit()
+                if (value == null) edit.remove(key) else edit.putString(key, value)
+                edit.apply()
+            }, clock = clock,
+        ))
 
     val calendarService = CalendarService(application, authService, applicationScope, supabase)
 

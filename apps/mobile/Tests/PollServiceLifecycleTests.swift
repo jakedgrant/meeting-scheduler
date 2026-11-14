@@ -26,6 +26,45 @@ final class PollServiceLifecycleTests: XCTestCase {
     }
     private enum Failure: Error { case offline }
 
+    func testFreshDetailAvoidsRepeatNetworkReadAndForcedRefreshUpdatesCache() async throws {
+        let account = UUID()
+        let cache = SwiftDataPersistenceProvider(inMemory: true)
+        var calls = 0
+        let poll = Poll(creatorId: account, title: "Cached")
+        let service = PollService(persistence: cache, currentUserId: { account }, detailLoader: { _ in
+            calls += 1
+            var updated = poll
+            updated.title = "Read \(calls)"
+            return PollDetail(poll: updated, timeOptions: [], participants: [], responses: [])
+        })
+        XCTAssertNil(service.cachedPollDetail(id: poll.id))
+        _ = await service.loadPollDetail(id: poll.id)
+        XCTAssertEqual(service.cachedPollDetail(id: poll.id)?.poll.title, "Read 1")
+        _ = await service.loadPollDetail(id: poll.id)
+        XCTAssertEqual(calls, 1)
+        _ = await service.loadPollDetail(id: poll.id, forceRefresh: true)
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(service.cachedPollDetail(id: poll.id)?.poll.title, "Read 2")
+    }
+
+    func testOfflineRefreshRetainsCompleteDetailAndAccountSwitchHidesIt() async throws {
+        let identity = Identity(UUID())
+        let cache = SwiftDataPersistenceProvider(inMemory: true)
+        let poll = Poll(creatorId: identity.id!, title: "Offline")
+        var offline = false
+        let service = PollService(persistence: cache, currentUserId: { identity.id }, detailLoader: { _ in
+            if offline { throw Failure.offline }
+            return PollDetail(poll: poll, timeOptions: [], participants: [], responses: [])
+        })
+        _ = await service.loadPollDetail(id: poll.id)
+        offline = true
+        let retained = await service.loadPollDetail(id: poll.id, forceRefresh: true)
+        XCTAssertEqual(retained?.poll.id, poll.id)
+        XCTAssertNotNil(service.pollDetailErrors[poll.id])
+        identity.id = UUID()
+        XCTAssertNil(service.cachedPollDetail(id: poll.id))
+    }
+
     func testSignOutThenOtherAccountNetworkFailureCannotShowPreviousAccount() async throws {
         let accountA = UUID()
         let identity = Identity(accountA)

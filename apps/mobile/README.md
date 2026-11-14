@@ -1,5 +1,11 @@
 # Meeting Scheduler - iOS App
 
+## Poll detail caching
+
+Previously opened polls show the current account's complete cached detail before loading saved availability or checking calendars. Detail stays fresh for five minutes; reopening during that window reuses it without another detail request. Older snapshots stay visible while a complete refresh runs. A transport failure keeps the cached detail with an out-of-date notice. Denied or incomplete reads do not use that fallback.
+
+The existing SwiftData account store supplies persistence across app launches. Pull down on poll content to force a refresh. Successful saves, joins, status changes and finalization invalidate cached detail; subsequent loads revalidate with the backend. Account transitions clear the previous account's cache. This cache does not queue offline writes.
+
 ## Service composition
 
 The app wrapper calls `AppServices.live()` once at launch, and `AppRootView(services:)` places the services in the SwiftUI environment through `appServices(_:)`. Views read them through `@Environment(\.authService)` and its siblings. There are no service singletons.

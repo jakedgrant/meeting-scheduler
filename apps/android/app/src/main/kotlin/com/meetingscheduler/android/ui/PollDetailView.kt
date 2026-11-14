@@ -81,6 +81,9 @@ fun PollDetailView(
                     }
                 },
                 actions = {
+                    IconButton(enabled = !model.isLoading && !model.isMutatingPoll, onClick = {
+                        holder.launch { load(forceRefresh = true) }
+                    }) { Icon(Icons.Default.Refresh, "Refresh poll") }
                     if (poll?.status == PollStatus.ACTIVE) {
                         IconButton(onClick = {
                             poll?.let {
@@ -108,7 +111,7 @@ fun PollDetailView(
             )
         }
     ) { padding ->
-        if (model.isLoading) {
+        if (model.isLoading && poll == null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -137,6 +140,9 @@ fun PollDetailView(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
+                model.detailError?.let { message ->
+                    item { Text(message, style = MaterialTheme.typography.bodySmall) }
+                }
                 if (model.calendarCheck.failedSources.isNotEmpty()) {
                     item {
                         Column {
@@ -325,7 +331,7 @@ fun PollDetailView(
                                 holder.launch { join() }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            enabled = !model.isJoining
+                            enabled = model.canMutatePoll
                         ) {
                             Text(if (model.isJoining) "Joining…" else "Join This Poll")
                         }
@@ -363,7 +369,7 @@ fun PollDetailView(
                                         onClick = {
                                             finalTimeOption = option
                                         },
-                                        enabled = !model.isSelectingFinalDate
+                                        enabled = model.canMutatePoll
                                     )
                                 }
                             }
@@ -502,6 +508,7 @@ fun PollDetailView(
                         Spacer(modifier = Modifier.height(16.dp))
                         Button(
                             onClick = { showClosePollDialog = true },
+                            enabled = model.canMutatePoll,
                             modifier = Modifier.fillMaxWidth(),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.errorContainer,

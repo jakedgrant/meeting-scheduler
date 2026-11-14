@@ -26,7 +26,7 @@ public enum CalendarAddState: Equatable, Sendable {
 /// account's availability, checks the device and Google calendars, runs the join, save, close
 /// and finalize commands, and adds the final time to the device calendar.
 ///
-/// Each `load()` starts a new visit and `suspend()` ends one. A result applies only while the
+/// A load that proceeds starts a new visit and `suspend()` ends one. A result applies only while the
 /// visit and account that started it are still current, so a reply that arrives after the
 /// account changes or the screen leaves is dropped.
 @MainActor
@@ -47,6 +47,7 @@ public final class PollDetailModel {
     public private(set) var isCheckingCalendar = false
     public private(set) var isLoading = true
     public private(set) var isSelectingFinalDate = false
+    public private(set) var isChangingPoll = false
 
     private let auth: any AuthServiceProtocol
     private let polls: any PollServiceProtocol
@@ -54,7 +55,7 @@ public final class PollDetailModel {
     private let clock: AppClock
     private var generation: UInt64 = 0
     private var myParticipantId: UUID?
-    /// The account the displayed data belongs to; nil until the first load starts.
+    /// The account the displayed data belongs to; nil until cached detail is restored or a load starts.
     private var displayed: Visit?
 
     private struct Visit {
@@ -70,6 +71,10 @@ public final class PollDetailModel {
         self.polls = polls
         self.calendar = calendar
         self.clock = clock
+        if let cached = polls.cachedPollDetail(id: pollId) {
+            displayed = Visit(accountId: auth.currentUserId)
+            applyDetail(cached)
+        }
     }
 
     // MARK: - Derived state
@@ -84,7 +89,7 @@ public final class PollDetailModel {
     }
 
     /// Whether the screen should show its loading state rather than poll content.
-    public var showsLoading: Bool { isLoading || !displaysCurrentAccount }
+    public var showsLoading: Bool { (isLoading && poll == nil) || !displaysCurrentAccount }
 
     public var loadError: String? { polls.pollDetailErrors[pollId] }
     public var calendarError: String? { calendar.googleCalendarError }
@@ -112,8 +117,10 @@ public final class PollDetailModel {
 
     /// Whether the signed-in participant can change their draft now.
     public var canEditAvailability: Bool {
-        myParticipant != nil && editor.saved != nil && acceptsResponses && !editor.isSaving && !editor.isLoading
+        myParticipant != nil && editor.saved != nil && acceptsResponses && !isChangingPoll && !isLoading && !editor.isSaving && !editor.isLoading
     }
+
+    public var canMutatePoll: Bool { !isLoading && !isChangingPoll && !editor.isSaving && displaysCurrentAccount }
 
     public var canSave: Bool {
         canEditAvailability && !editor.needsConflictReview
@@ -155,9 +162,11 @@ public final class PollDetailModel {
 
     // MARK: - Visit lifecycle
 
-    /// Starts a new visit for the signed-in account: clears what was shown, loads the poll and
-    /// the participant's saved availability, then checks calendars.
-    public func load() async {
+    /// Shows the account's complete persisted detail immediately, then refreshes stale data,
+    /// loads saved availability and checks calendars without hiding the poll.
+    public func load(forceRefresh: Bool = false) async {
+        guard !displaysCurrentAccount || (!isChangingPoll && !editor.isSaving) else { return }
+        isChangingPoll = false
         generation &+= 1
         let generation = generation
         let account = auth.currentUserId
@@ -167,14 +176,17 @@ public final class PollDetailModel {
         calendarCheck = .none; isCheckingCalendar = false; actionError = nil; commentError = nil
         calendarAdd = .idle
         isSelectingFinalDate = false
+        if let cached = polls.cachedPollDetail(id: pollId) { applyDetail(cached) }
         isLoading = true
         defer { if generation == self.generation { isLoading = false } }
-        guard let detail = await polls.loadPollDetail(id: pollId), isCurrent(generation, account) else { return }
-        poll = detail.poll
-        timeOptions = detail.timeOptions
-        participants = detail.participants
-        responses = detail.responses
-        if let account { myParticipantId = participants.first { $0.userId == account }?.id }
+        let detail = await polls.loadPollDetail(id: pollId, forceRefresh: forceRefresh)
+        guard isCurrent(generation, account) else { return }
+        guard let detail else {
+            poll = nil; timeOptions = []; participants = []; responses = []; myParticipantId = nil
+            return
+        }
+        applyDetail(detail)
+        isLoading = false
         if let participant = myParticipant {
             await editor.load(pollId: pollId, participantId: participant.id, using: polls)
             guard isCurrent(generation, account) else { return }
@@ -185,8 +197,19 @@ public final class PollDetailModel {
         await checkCalendar(generation: generation, account: account)
     }
 
+    private func applyDetail(_ detail: PollDetail) {
+        poll = detail.poll
+        timeOptions = detail.timeOptions
+        participants = detail.participants
+        responses = detail.responses
+        myParticipantId = auth.currentUserId.flatMap { account in
+            participants.first { $0.userId == account }?.id
+        }
+    }
+
     /// Ends the visit. The editor keeps its draft for the next one.
     public func suspend() {
+        isChangingPoll = false
         editor.suspend()
         generation &+= 1
     }
@@ -230,6 +253,8 @@ public final class PollDetailModel {
 
     @discardableResult
     public func join() -> Task<Void, Never>? {
+        guard canMutatePoll else { return nil }
+        isChangingPoll = true
         let generation = generation
         return auth.performSessionTask(
             operation: { scope in
@@ -246,13 +271,14 @@ public final class PollDetailModel {
                 self.actionError = nil
             },
             onFailure: { _ in self.actionError = "The poll could not be joined. Reload the poll and try again." },
+            onCompletion: { self.isChangingPoll = false },
             isCurrent: { generation == self.generation }
         )
     }
 
     @discardableResult
     public func save() -> Task<Void, Never>? {
-        guard let participant = myParticipant, validateComment(), acceptsResponses else { return nil }
+        guard canSave, let participant = myParticipant, validateComment(), acceptsResponses else { return nil }
         let generation = generation
         return auth.performSessionTask(
             operation: { _ in
@@ -265,6 +291,8 @@ public final class PollDetailModel {
 
     @discardableResult
     public func close() -> Task<Void, Never>? {
+        guard canMutatePoll else { return nil }
+        isChangingPoll = true
         let generation = generation
         return auth.performSessionTask(
             operation: { _ in try await self.polls.updatePollStatus(pollId: self.pollId, status: .closed) },
@@ -273,13 +301,15 @@ public final class PollDetailModel {
                 self.actionError = nil
             },
             onFailure: { _ in self.actionError = "The poll status could not be changed. Try again." },
+            onCompletion: { self.isChangingPoll = false },
             isCurrent: { generation == self.generation }
         )
     }
 
     @discardableResult
     public func finalize(with option: PollTimeOption) -> Task<Void, Never>? {
-        guard !isSelectingFinalDate else { return nil }
+        guard canMutatePoll, !isSelectingFinalDate else { return nil }
+        isChangingPoll = true
         let generation = generation
         isSelectingFinalDate = true
         return auth.performSessionTask(
@@ -291,7 +321,7 @@ public final class PollDetailModel {
             onFailure: { _ in
                 self.actionError = "The final time could not be confirmed. Reload the poll and try again."
             },
-            onCompletion: { self.isSelectingFinalDate = false },
+            onCompletion: { self.isSelectingFinalDate = false; self.isChangingPoll = false },
             isCurrent: { generation == self.generation }
         )
     }

@@ -33,8 +33,10 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     func loadPoll(id: UUID) async -> Poll?
     func loadPollByCode(_ code: String) async -> PollLookupResponse?
 
+    /// The last complete snapshot for the current account, available before network work starts.
+    func cachedPollDetail(id: UUID) -> PollDetail?
     /// Loads complete metadata and all response pages before publishing or caching detail.
-    func loadPollDetail(id: UUID) async -> PollDetail?
+    func loadPollDetail(id: UUID, forceRefresh: Bool) async -> PollDetail?
 
     // MARK: - Create Poll
 
@@ -63,6 +65,10 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
 }
 
 extension PollServiceProtocol {
+    public func loadPollDetail(id: UUID) async -> PollDetail? {
+        await loadPollDetail(id: id, forceRefresh: false)
+    }
+
     /// Joins the poll a share code names and returns its ID.
     ///
     /// Entering a code is the decision to join. Only a poll's creator and participants can read

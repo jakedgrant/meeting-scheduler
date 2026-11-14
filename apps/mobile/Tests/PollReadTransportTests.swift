@@ -327,7 +327,7 @@ final class PollReadTransportTests: XCTestCase {
             now = now.addingTimeInterval(600)
             transport.enqueue([.failure])
             let result = await service.loadPollDetail(id: f.poll.id)
-            XCTAssertEqual(result?.responses.count, 2); XCTAssertNil(service.pollDetailErrors[f.poll.id])
+            XCTAssertEqual(result?.responses.count, 2); XCTAssertNotNil(service.pollDetailErrors[f.poll.id])
         }
     }
 

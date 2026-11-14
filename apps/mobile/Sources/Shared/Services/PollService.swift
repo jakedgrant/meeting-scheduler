@@ -259,16 +259,22 @@ public final class PollService: PollServiceProtocol {
         }
     }
 
+    public func cachedPollDetail(id: UUID) -> PollDetail? {
+        let generation = beginRequest()
+        guard accountId != nil, isCurrent(generation) else { return nil }
+        return try? persistence.fetchPollDetail(id: id)
+    }
+
     /// Reads bounded metadata and traverses response pages before saving a complete detail.
     /// Transport failures may use an existing complete cache; invalid payloads never do.
-    public func loadPollDetail(id: UUID) async -> PollDetail? {
+    public func loadPollDetail(id: UUID, forceRefresh: Bool = false) async -> PollDetail? {
         let credentials = AccountRequestContext.credentials ?? requestCredentials()
         return await AccountRequestContext.$credentials.withValue(credentials) {
             let generation = beginRequest()
             detailGenerations[id, default: 0] &+= 1
             let detailGeneration = detailGenerations[id, default: 0]
             pollDetailErrors[id] = nil
-            if persistence.isDetailFresh(id, maxAge: 300),
+            if !forceRefresh, persistence.isDetailFresh(id, maxAge: 300),
                 let cached = try? persistence.fetchPollDetail(id: id) { return cached }
             do {
                 let detail: PollDetail
@@ -297,7 +303,10 @@ public final class PollService: PollServiceProtocol {
                     pollDetailErrors[id] = String(localized: "This poll could not be loaded completely. Please retry.")
                     return nil
                 }
-                if let cached = try? persistence.fetchPollDetail(id: id) { return cached }
+                if let cached = try? persistence.fetchPollDetail(id: id) {
+                    pollDetailErrors[id] = String(localized: "This poll could not be refreshed. Displayed results may be out of date.")
+                    return cached
+                }
                 pollDetailErrors[id] = String(localized: "This poll could not be loaded. Please retry.")
                 return nil
             }
