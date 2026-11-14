@@ -110,12 +110,15 @@ public enum CalendarTimeError: Error, Equatable, LocalizedError {
 }
 
 public extension PollCreationOption {
-    /// A timed option on a calendar date, resolved in zone.
-    static func timed(on day: CalendarDay, start: (hour: Int, minute: Int), end: (hour: Int, minute: Int),
+    /// A timed option from a wall time on one calendar date to a wall time on the same or a later date, resolved in zone.
+    static func timed(on day: CalendarDay, start: (hour: Int, minute: Int),
+                      endingOn endDay: CalendarDay, end: (hour: Int, minute: Int),
                       in zone: TimeZone) throws(CalendarTimeError) -> PollCreationOption {
-        guard end.hour * 60 + end.minute > start.hour * 60 + start.minute else { throw .endNotAfterStart }
-        return PollCreationOption(startTime: try day.instant(hour: start.hour, minute: start.minute, in: zone),
-                                  endTime: try day.instant(hour: end.hour, minute: end.minute, in: zone), isAllDay: false)
+        if endDay == day { guard end.hour * 60 + end.minute > start.hour * 60 + start.minute else { throw .endNotAfterStart } }
+        let startTime = try day.instant(hour: start.hour, minute: start.minute, in: zone)
+        let endTime = try endDay.instant(hour: end.hour, minute: end.minute, in: zone)
+        guard endTime > startTime else { throw .endNotAfterStart }
+        return PollCreationOption(startTime: startTime, endTime: endTime, isAllDay: false)
     }
 
     static func allDay(on day: CalendarDay, in zone: TimeZone) -> PollCreationOption {

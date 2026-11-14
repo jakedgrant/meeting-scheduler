@@ -43,7 +43,7 @@ final class DateTimeContractTests: XCTestCase {
     func testTimedOptionsRejectGapsAndUseFirstRepeatedTime() {
         for c in Self.fixtures.timed_options {
             let result = Result { () throws(CalendarTimeError) in
-                try PollCreationOption.timed(on: day(c.date), start: hm(c.start), end: hm(c.end), in: zone(c.zone))
+                try PollCreationOption.timed(on: day(c.date), start: hm(c.start), endingOn: day(c.date), end: hm(c.end), in: zone(c.zone))
             }
             switch (result, c.error) {
             case let (.success(option), nil):
