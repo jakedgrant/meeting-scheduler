@@ -3,6 +3,7 @@ package com.meetingscheduler.android
 import com.meetingscheduler.android.models.*
 import com.meetingscheduler.android.services.PollCreationPolls
 import com.meetingscheduler.android.ui.CreationFormDraft
+import com.meetingscheduler.android.ui.CreationStep
 import com.meetingscheduler.android.ui.PollCreationModel
 import com.meetingscheduler.android.ui.PollCreationStore
 import com.meetingscheduler.android.ui.TimeOption
@@ -233,5 +234,126 @@ class PollCreationModelTest {
         assertThrows(IllegalStateException::class.java) {
             PollCreationModel(FakePolls({ "account:1" }) { result }, store, clock)
         }
+    }
+
+    @Test fun theFlowStartsOnDetailsAndNeedsANonBlankTitleToContinue() {
+        val model = model(MemoryStore())
+        assertEquals(CreationStep.DETAILS, model.step)
+        assertEquals(1, model.step.number)
+        assertFalse(model.canGoBack)
+        assertFalse(model.canAdvance)
+        model.advance()
+        assertEquals(CreationStep.DETAILS, model.step)
+        model.edit { it.copy(title = "   ") }
+        assertFalse(model.canAdvance)
+        model.edit { it.copy(title = "Planning") }
+        assertTrue(model.canAdvance)
+        model.advance()
+        assertEquals(CreationStep.TIME_OPTIONS, model.step)
+    }
+
+    @Test fun stepsRunInOrderAndTheOptionStepNeedsAnOption() {
+        val model = model(MemoryStore(CreationFormDraft(title = "Planning")))
+        model.advance()
+        assertFalse(model.canAdvance)
+        model.advance()
+        assertEquals(CreationStep.TIME_OPTIONS, model.step)
+        model.addOption()
+        assertTrue(model.canAdvance)
+        model.advance()
+        assertEquals(CreationStep.DEADLINE, model.step)
+        assertTrue(model.canAdvance)
+        model.advance()
+        assertEquals(CreationStep.EVENT_PASS, model.step)
+        // Creating the poll, not advancing, leaves the last form step.
+        assertFalse(model.canAdvance)
+        model.advance()
+        assertEquals(CreationStep.EVENT_PASS, model.step)
+        assertEquals(listOf(1, 2, 3, 4, 5), CreationStep.entries.map { it.number })
+    }
+
+    @Test fun backStepsOneAtATimeAndTheReviewJumpsToAnEarlierStep() {
+        val model = model(MemoryStore(CreationFormDraft(title = "Planning", timeOptions = listOf(option))))
+        repeat(3) { model.advance() }
+        assertEquals(CreationStep.EVENT_PASS, model.step)
+        model.goBack()
+        assertEquals(CreationStep.DEADLINE, model.step)
+        model.advance()
+        model.goTo(CreationStep.DETAILS)
+        assertEquals(CreationStep.DETAILS, model.step)
+        model.goTo(CreationStep.EVENT_PASS)
+        assertEquals("A jump only goes back", CreationStep.DETAILS, model.step)
+        model.goBack()
+        assertEquals(CreationStep.DETAILS, model.step)
+    }
+
+    @Test fun anAllDayPollNeedsADayNotAnOption() {
+        val model = model(MemoryStore(CreationFormDraft(title = "Offsite", isAllDay = true, timeOptions = listOf(option))))
+        model.advance()
+        assertFalse(model.canAdvance)
+        model.toggleDay(LocalDate(2030, 3, 12))
+        assertTrue(model.canAdvance)
+        assertEquals(LocalDate(2030, 3, 12), model.firstOptionDate)
+        model.toggleDay(LocalDate(2030, 3, 12))
+        assertFalse(model.canAdvance)
+        // Turning all-day off falls back to the timed options.
+        model.edit { it.copy(isAllDay = false) }
+        assertTrue(model.canAdvance)
+        assertEquals(option.date, model.firstOptionDate)
+    }
+
+    @Test fun aSuccessfulCreationMovesToShareAndBlocksGoingBack() = runBlocking<Unit> {
+        val model = model(MemoryStore(CreationFormDraft(title = "Planning", timeOptions = listOf(option))))
+        repeat(3) { model.advance() }
+        assertTrue(model.submit())
+        assertEquals(CreationStep.SHARE, model.step)
+        assertEquals("poll", model.createdPoll?.id)
+        assertEquals("ABC123", model.createdPoll?.shareCode)
+        assertTrue(model.created)
+        assertFalse(model.canGoBack)
+        model.goBack()
+        model.goTo(CreationStep.DETAILS)
+        assertEquals(CreationStep.SHARE, model.step)
+        assertFalse(model.canAdvance)
+    }
+
+    @Test fun aFailedCreationStaysOnTheLastStep() = runBlocking<Unit> {
+        val model = model(MemoryStore(CreationFormDraft(title = "Planning", timeOptions = listOf(option))),
+            send = { throw CreationRejected("P0001") })
+        repeat(3) { model.advance() }
+        assertFalse(model.submit())
+        assertEquals(CreationStep.EVENT_PASS, model.step)
+        assertNull(model.createdPoll)
+        assertTrue(model.canGoBack)
+    }
+
+    @Test fun aRetainedSubmissionReopensOnTheLastStepAndReviewsTheSavedRequest() = runBlocking<Unit> {
+        val restored = PollCreationRequest("operation", PollCreationPayload("Earlier", location = "Room 4", timezone = "UTC",
+            closesAt = Instant.parse("2026-11-09T00:00:00Z"),
+            timeOptions = listOf(CreationTimeOption(stamp, stamp), CreationTimeOption(stamp, stamp))))
+        var sent: PollCreationRequest? = null
+        val model = model(MemoryStore(CreationFormDraft(title = "Draft"), restored), send = { sent = it; result })
+        assertEquals(CreationStep.EVENT_PASS, model.step)
+        assertFalse(model.canGoBack)
+        model.goBack()
+        assertEquals(CreationStep.EVENT_PASS, model.step)
+        val review = model.review
+        assertEquals("Earlier", review.title)
+        assertEquals(2, review.optionCount)
+        assertEquals(LocalDate(2026, 11, 8), review.deadline)
+        assertEquals("Room 4", review.location)
+        assertTrue(model.submit())
+        assertEquals(restored, sent)
+        assertEquals(CreationStep.SHARE, model.step)
+    }
+
+    @Test fun theReviewSummarisesTheDraft() {
+        val model = model(MemoryStore(CreationFormDraft(title = " Planning ", location = " ", hasDueDate = true,
+            dueDate = LocalDate(2026, 12, 1), timeOptions = listOf(option, option))))
+        val review = model.review
+        assertEquals("Planning", review.title)
+        assertEquals(2, review.optionCount)
+        assertEquals(LocalDate(2026, 12, 1), review.deadline)
+        assertNull(review.location)
     }
 }
