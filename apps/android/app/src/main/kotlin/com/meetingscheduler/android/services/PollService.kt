@@ -42,6 +42,7 @@ class PollService(
     private val supabase: io.github.jan.supabase.SupabaseClient,
     private val createTransport: (suspend (PollCreationRequest) -> PollCreationResult)? = null,
     private val listTransport: (suspend () -> Pair<List<Poll>, List<Poll>>)? = null,
+    private val detailCache: PollDetailCache = PollDetailCache.inMemory(),
 ) : PollDetailPolls, PollCreationPolls, PollListPolls {
     private val timeRangeFormatter = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
 
@@ -71,12 +72,29 @@ class PollService(
 
     private var creationRevision = 0L
     private var pollStateAccountKey: String? = null
+    private var cacheAccountId: String? = null
+    private val detailRevisions = mutableMapOf<String, Long>()
+
+    private fun invalidateDetail(pollId: String) {
+        detailRevisions[pollId] = (detailRevisions[pollId] ?: 0) + 1
+        creationAccountId?.let { detailCache.remove(it, pollId) }
+    }
+
+    override fun cachedPollDetail(pollId: String): PollDetail? {
+        selectPollAccount()
+        return creationAccountId?.let { detailCache.detail(it, pollId) }
+    }
 
     fun resetSession() { selectPollAccount() }
 
     private fun selectPollAccount() {
         if (pollStateAccountKey == creationAccountKey) return
         pollStateAccountKey = creationAccountKey
+        if (cacheAccountId != creationAccountId) {
+            cacheAccountId?.let(detailCache::clearAccount)
+            cacheAccountId = creationAccountId
+        }
+        detailRevisions.clear()
         creationRevision += 1
         myPolls = emptyList()
         createdPolls = emptyList()
@@ -104,6 +122,16 @@ class PollService(
         } catch (error: Exception) {
             if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             throw error
+        }
+    }
+
+    private suspend fun <T> withDetailMutation(pollId: String, action: suspend () -> T): T = withSession {
+        val key = creationAccountKey
+        invalidateDetail(pollId)
+        try { action() }
+        finally {
+            // A read during an ambiguous command must not restore its pre-command snapshot.
+            if (key == creationAccountKey) invalidateDetail(pollId)
         }
     }
 
@@ -192,7 +220,33 @@ class PollService(
     }
 
     /** Publish only after bounded metadata and the full response traversal pass validation. */
-    override suspend fun loadPollDetail(pollId: String): PollDetail = withSession {
+    override suspend fun loadPollDetail(pollId: String): PollDetail = loadPollDetail(pollId, forceRefresh = false)
+
+    override suspend fun refreshPollDetail(pollId: String): PollDetail = loadPollDetail(pollId, forceRefresh = true)
+
+    private suspend fun loadPollDetail(pollId: String, forceRefresh: Boolean): PollDetail = withSession {
+        selectPollAccount()
+        val account = checkNotNull(creationAccountId)
+        if (!forceRefresh) detailCache.detail(account, pollId, freshOnly = true)?.let { return@withSession it }
+        val key = creationAccountKey
+        val revision = (detailRevisions[pollId] ?: 0) + 1
+        detailRevisions[pollId] = revision
+        try {
+            val detail = readPollDetail(pollId)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (key != creationAccountKey || revision != detailRevisions[pollId])
+                throw kotlinx.coroutines.CancellationException("Poll changed during read")
+            detailCache.save(account, detail)
+            detail
+        } catch (error: Exception) {
+            if (key == creationAccountKey && revision == detailRevisions[pollId] &&
+                error is io.github.jan.supabase.postgrest.exception.PostgrestRestException &&
+                error.code in setOf("42501", "PGRST116")) detailCache.remove(account, pollId)
+            throw error
+        }
+    }
+
+    private suspend fun readPollDetail(pollId: String): PollDetail {
         val header = accountRpc("get_poll_detail", buildJsonObject { put("poll_uuid", pollId) }).decodeAs<PollDetailPage>()
         header.validate(pollId)
         var cursor: String? = null
@@ -217,7 +271,7 @@ class PollService(
         } while (cursor != null)
         if (rows.size != expected) throw IncompletePollRead()
         header.validateResponses(rows)
-        PollDetail(header.poll, header.timeOptions, header.participants, rows)
+        return PollDetail(header.poll, header.timeOptions, header.participants, rows)
     }
 
     suspend fun loadPoll(id: String): Poll? = withSession {
@@ -311,7 +365,7 @@ class PollService(
 
     // MARK: - Poll Status
 
-    override suspend fun updatePollStatus(pollId: String, status: PollStatus): Unit = withSession {
+    override suspend fun updatePollStatus(pollId: String, status: PollStatus): Unit = withDetailMutation(pollId) {
         val key = creationAccountKey
         val credential = requestCredential()
         val update = buildJsonObject {
@@ -334,7 +388,7 @@ class PollService(
         }
     }
 
-    override suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = withSession {
+    override suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = withDetailMutation(pollId) {
         val key = creationAccountKey
         val saved = accountRpc("finalize_poll", buildJsonObject {
             put("poll_uuid", pollId)
@@ -342,7 +396,7 @@ class PollService(
         }).decodeAs<Poll>()
         if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
         myPolls = myPolls.map { if (it.id == pollId) saved else it }
-        return@withSession saved
+        return@withDetailMutation saved
     }
 
     // MARK: - Participants
@@ -364,7 +418,7 @@ class PollService(
         }
     }
 
-    override suspend fun joinPoll(pollId: String): PollParticipant = withSession {
+    override suspend fun joinPoll(pollId: String): PollParticipant = withDetailMutation(pollId) {
         val userId = creationAccountId ?: throw PollError.NotAuthenticated
         val accountKey = creationAccountKey
         try {
@@ -372,7 +426,7 @@ class PollService(
                 .decodeAs<JoinPollResult>().participant
             if (creationAccountKey != accountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             check(participant.pollId == pollId && participant.userId == userId) { "Join returned a different membership." }
-            return@withSession participant
+            return@withDetailMutation participant
         } catch (error: Exception) {
             if (creationAccountKey != accountKey) throw kotlinx.coroutines.CancellationException("Account changed")
             if (error is io.github.jan.supabase.postgrest.exception.PostgrestRestException && error.code == "P0003") {
@@ -412,7 +466,7 @@ class PollService(
         }).decodeAs<AvailabilitySnapshot>()
     }
 
-    override suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot = withSession {
+    override suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot = withDetailMutation(pollId) {
         val params = buildJsonObject {
             put("poll_uuid", pollId)
             put("request_id", request.requestId)
@@ -428,8 +482,11 @@ class PollService(
                 }
             }
         }
-        return@withSession try {
-            accountRpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
+        return@withDetailMutation try {
+            val saved = accountRpc("save_availability", params).decodeAs<AvailabilitySnapshot>()
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            requestCredential()
+            saved
         } catch (error: io.github.jan.supabase.postgrest.exception.PostgrestRestException) {
             if (error.code == "PT409") throw AvailabilityVersionConflict()
             throw error

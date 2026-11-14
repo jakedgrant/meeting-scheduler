@@ -44,6 +44,8 @@ class PollDetailModelTest {
         var join: suspend () -> PollParticipant = { error("unexpected join") }
         var finalize: suspend (String) -> Poll = { error("unexpected finalize") }
         override fun availabilitySession(pollId: String) = session
+        var cached: PollDetail? = null
+        override fun cachedPollDetail(pollId: String) = cached
         override suspend fun loadPollDetail(pollId: String) = detail()
         override suspend fun joinPoll(pollId: String) = join()
         override suspend fun getAvailability(pollId: String) = availability()
@@ -55,10 +57,11 @@ class PollDetailModelTest {
     private class FakeCalendar(var check: CalendarCheck = CalendarCheck.NONE) : PollDetailCalendar {
         override val calendarError: String? = null
         var checks = 0
+        var checker: (suspend () -> CalendarCheck)? = null
         override suspend fun refreshGoogleCalendarConnection() {}
         override suspend fun checkPollConflicts(options: List<PollTimeOption>, pollTimeZone: String): CalendarCheck {
             checks += 1
-            return check
+            return checker?.invoke() ?: check
         }
     }
 
@@ -76,6 +79,110 @@ class PollDetailModelTest {
         assertEquals(mapOf("first" to AvailabilityStatus.MAYBE, "second" to AvailabilityStatus.UNAVAILABLE), model.localResponses)
         assertEquals(listOf("second", "first"), model.rankedTimeOptions.map { it.id })
         assertFalse(model.isCreator)
+    }
+
+    @Test fun cachedDetailIsVisibleBeforeRefreshAndSavedAvailabilityFinish() = runBlocking<Unit> {
+        val reply = CompletableDeferred<PollDetail>()
+        val availability = CompletableDeferred<AvailabilitySnapshot>()
+        val availabilityStarted = CompletableDeferred<Unit>()
+        val polls = FakePolls({ reply.await() }).apply {
+            cached = this@PollDetailModelTest.detail
+            this.availability = { availabilityStarted.complete(Unit); availability.await() }
+        }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        assertEquals(detail.poll, model.poll)
+        assertFalse(model.canRespond)
+        val load = async(start = CoroutineStart.UNDISPATCHED) { model.load() }
+        assertEquals(detail.poll, model.poll)
+        assertFalse(model.canMutatePoll)
+        model.close()
+        assertEquals(PollStatus.ACTIVE, model.poll?.status)
+        reply.complete(detail.copy(poll = poll.copy(title = "Refreshed")))
+        availabilityStarted.await()
+        assertEquals("Refreshed", model.poll?.title)
+        assertTrue(model.isLoading)
+        assertFalse(model.canRespond)
+        availability.complete(savedSnapshot)
+        load.await()
+        assertTrue(model.canRespond)
+    }
+
+    @Test fun refreshingRetainsUnsavedDraftAndItsOriginalSaveVersion() = runBlocking<Unit> {
+        val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load()
+        model.setResponse("first", AvailabilityStatus.AVAILABLE)
+        model.updateComment("Unsaved comment")
+        polls.availability = { error("A dirty draft must keep its original saved version") }
+        model.load(forceRefresh = true)
+        assertEquals(AvailabilityStatus.AVAILABLE, model.localResponses["first"])
+        assertEquals("Unsaved comment", model.localComment)
+        assertEquals(3L, polls.session.snapshot?.version)
+        assertTrue(model.canRespond)
+    }
+
+    @Test fun offlineRefreshThenRetryKeepsUnsavedDraftAndOriginalVersion() = runBlocking<Unit> {
+        val polls = FakePolls({ detail }).apply { availability = { savedSnapshot }; cached = this@PollDetailModelTest.detail }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load()
+        model.setResponse("first", AvailabilityStatus.AVAILABLE)
+        model.updateComment("Retain through retry")
+        polls.detail = { throw java.io.IOException("offline") }
+        model.load(forceRefresh = true)
+        assertFalse(model.availabilityLoaded)
+        polls.detail = { detail }
+        polls.availability = { error("Retry must preserve the draft's original version") }
+        model.load(forceRefresh = true)
+        assertEquals(AvailabilityStatus.AVAILABLE, model.localResponses["first"])
+        assertEquals("Retain through retry", model.localComment)
+        assertEquals(3L, polls.session.snapshot?.version)
+        assertTrue(model.canRespond)
+    }
+
+    @Test fun olderAvailabilityReadCannotReplaceANewerVisitsSavedVersion() = runBlocking<Unit> {
+        val firstReply = CompletableDeferred<AvailabilitySnapshot>()
+        var reads = 0
+        val latest = savedSnapshot.copy(version = 9, comment = "Latest saved")
+        val polls = FakePolls({ detail }).apply {
+            availability = { when (++reads) { 1 -> savedSnapshot; 2 -> firstReply.await(); else -> latest } }
+        }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load()
+        val earlier = async(start = CoroutineStart.UNDISPATCHED) { model.load(forceRefresh = true) }
+        model.load(forceRefresh = true)
+        firstReply.complete(savedSnapshot)
+        earlier.await()
+        assertEquals(9L, polls.session.snapshot?.version)
+        assertEquals("Latest saved", model.localComment)
+        assertFalse(model.isLoading)
+    }
+
+    @Test fun olderCalendarReadCannotReplaceANewerVisitsCheck() = runBlocking<Unit> {
+        val firstReply = CompletableDeferred<CalendarCheck>()
+        var reads = 0
+        val latest = CalendarCheck(busy = setOf("second"), checkedSources = listOf(CalendarSource.GOOGLE_CALENDAR))
+        val polls = FakePolls({ detail }).apply { availability = { savedSnapshot } }
+        val calendar = FakeCalendar().apply { checker = { if (++reads == 1) firstReply.await() else latest } }
+        val model = PollDetailModel("poll", polls, calendar, clock)
+        val earlier = async(start = CoroutineStart.UNDISPATCHED) { model.load(forceRefresh = true) }
+        model.load(forceRefresh = true)
+        firstReply.complete(CalendarCheck(busy = setOf("first")))
+        earlier.await()
+        assertEquals(latest, model.calendarCheck)
+        assertFalse(model.isCheckingCalendar)
+    }
+
+    @Test fun offlineRefreshRetainsCachedDetailButDenialDoesNot() = runBlocking<Unit> {
+        val polls = FakePolls({ throw java.io.IOException("offline") }).apply { cached = this@PollDetailModelTest.detail }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load()
+        assertEquals(detail.poll, model.poll)
+        assertNotNull(model.detailError)
+        assertFalse(model.canRespond)
+        polls.detail = { error("denied") }
+        polls.cached = null
+        model.load()
+        assertNull(model.poll)
     }
 
     @Test fun aDetailThatArrivesAfterTheAccountChangesIsDropped() = runBlocking<Unit> {

@@ -159,6 +159,65 @@ class PollReadTransportTest {
         } finally { client.close() }
     }
 
+    @Test(timeout = 15000) fun reopeningFreshPollUsesPersistentSnapshotAndDenialEvictsStaleSnapshot() = runBlocking {
+        val fixture = Fixture(people = 1, slots = 2)
+        val values = mutableMapOf<String, String>()
+        var now = stamp
+        val clock = object : kotlin.time.Clock { override fun now() = now }
+        fun cache() = PollDetailCache(values::get, { key, value ->
+            if (value == null) values.remove(key) else values[key] = value
+        }, clock)
+        val replies = ArrayDeque(listOf(fixture.header(), page(fixture.rows, fixture.rows.size)))
+        var denied = false
+        var calls = 0
+        val client = client(MockEngine {
+            calls++
+            if (denied) respond("""{"code":"42501","message":"Access denied","details":null,"hint":null}""",
+                status = HttpStatusCode.Forbidden, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+            else respond(replies.removeFirst(), headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        })
+        try {
+            val service = PollService(Identity(), client, detailCache = cache())
+            val loaded = service.loadPollDetail("p")
+            val reopened = PollService(Identity(), client, detailCache = cache())
+            assertEquals(loaded, reopened.cachedPollDetail("p"))
+            assertEquals(loaded, reopened.loadPollDetail("p"))
+            assertEquals(2, calls)
+            now = Instant.fromEpochSeconds(stamp.epochSeconds + 300)
+            denied = true
+            assertTrue(runCatching { reopened.loadPollDetail("p") }.isFailure)
+            assertNull(reopened.cachedPollDetail("p"))
+        } finally { client.close() }
+    }
+
+    @Test(timeout = 15000) fun ambiguousSaveCannotLeaveAnInterveningDetailReadFresh() = runBlocking {
+        val fixture = Fixture(people = 1, slots = 2)
+        val ready = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val client = client(MockEngine { request ->
+            val reply = when (request.url.encodedPath.substringAfterLast('/')) {
+                "save_availability" -> {
+                    ready.complete(Unit); release.await()
+                    throw java.io.IOException("Reply lost after server commit")
+                }
+                "get_poll_detail" -> fixture.header()
+                "list_poll_responses" -> page(fixture.rows, fixture.rows.size)
+                else -> error("Unexpected request")
+            }
+            respond(reply, headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        })
+        try {
+            val service = PollService(Identity(), client)
+            val pending = async { runCatching { service.saveAvailability("p",
+                AvailabilitySaveRequest("request", AvailabilityDraft(emptyMap(), null), 0)) } }
+            withTimeout(5000) { ready.await() }
+            service.loadPollDetail("p")
+            assertNotNull(service.cachedPollDetail("p"))
+            release.complete(Unit)
+            assertTrue(pending.await().isFailure)
+            assertNull(service.cachedPollDetail("p"))
+        } finally { release.complete(Unit); client.close() }
+    }
+
     @Test(timeout = 15000) fun incompleteDuplicateForeignOrMissingCountResponsesFail() = runBlocking {
         val fixture = Fixture(people = 1, slots = 2)
         val foreign = fixture.rows[1].copy(participantId = "foreign")
