@@ -1,11 +1,19 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte';
+	import { onMount, onDestroy, tick } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { get } from 'svelte/store';
 	import { user } from '$lib/stores/auth';
 	import { createPoll } from '$lib/stores/polls';
 	import { createPollCreation } from '$lib/poll-creation';
 	import { createSessionWork } from '$lib/session-scope';
-	import { addDays, currentZone, dateRange, formatCalendarDate, today } from '$lib/date-time';
+	import { addDays, currentZone, today } from '$lib/date-time';
+	import {
+		advance, canAdvance, created, deadlineNote, firstOptionDate, goBack, goTo, initialStep, quickPickDate, quickPicks,
+		reviewRows, stepLabel, type FlowStep
+	} from '$lib/poll-flow';
+	import TimeOptionsStep from '$lib/components/TimeOptionsStep.svelte';
+	import PollShare from '$lib/components/PollShare.svelte';
+
 	const work = createSessionWork();
 	const creation = createPollCreation({ create: createPoll });
 	onMount(() => user.subscribe(value => creation.setOwner(value?.id ?? null)));
@@ -19,758 +27,246 @@
 		}
 	});
 
-	let title = $derived($creation.draft.title);
-	let description = $derived($creation.draft.description);
-	let location = $derived($creation.draft.location);
-	let dueDate = $derived($creation.draft.dueDate);
-	let isAllDay = $derived($creation.draft.isAllDay);
-	let timeOptions = $derived($creation.draft.timeOptions);
-	let useDateRange = $state(false);
+	const zone = currentZone();
+	const firstDate = today(zone);
+
+	// A retained, unresolved submission reopens on the last step so it can be retried.
+	const retained = () => { const state = get(creation); return state.uncertain || state.recoveryRequired; };
+	let step = $state<FlowStep>(initialStep(retained()));
+	let positioned = $state<string | null>(null);
+	// The account's draft arrives after mount; place the flow once per account, and never after creation.
+	$effect(() => {
+		const owner = $creation.ownerId;
+		if (owner === positioned) return;
+		positioned = owner;
+		if (owner && step !== 'share') step = initialStep($creation.uncertain || $creation.recoveryRequired);
+	});
+
+	let draft = $derived($creation.draft);
 	let loading = $derived($creation.saving);
 	let locked = $derived(loading || $creation.uncertain || $creation.recoveryRequired);
 	let error = $state('');
-	type TimeOption = typeof timeOptions[number];
+	let heading = $state<HTMLElement | null>(null);
 
-	// Date range fields
-	let rangeStartDate = $state('');
-	let rangeEndDate = $state('');
-	let rangeStartTime = $state('09:00');
-	let rangeEndTime = $state('10:00');
+	let deadlineOn = $state(get(creation).draft.dueDate !== '');
+	$effect(() => { if (draft.dueDate) deadlineOn = true; });
 
-	function addTimeOption() {
-		creation.edit({ timeOptions: [
-			...timeOptions,
-			{ id: crypto.randomUUID(), date: '', startTime: '09:00', endTime: '10:00' }
-		] });
-	}
+	const titles: Record<FlowStep, [string, string]> = {
+		details: ['Poll details', 'What are you trying to schedule?'],
+		timeOptions: ['Time options', 'Add the times people can vote on.'],
+		deadline: ['Response deadline', 'Choose when voting closes. You can skip this.'],
+		eventPass: ['Event Pass', 'Review your poll, then create it.'],
+		share: ['Poll created', '']
+	};
 
-	function removeTimeOption(id: string) {
-		if (timeOptions.length > 1) {
-			creation.edit({ timeOptions: timeOptions.filter((opt) => opt.id !== id) });
-		}
-	}
-
-	function addDateRange() {
-		if (!rangeStartDate || !rangeEndDate) {
-			error = 'Please select both start and end dates for the range';
-			return;
-		}
-
-		if (rangeStartDate > rangeEndDate) {
-			error = 'Start date must be before or equal to end date';
-			return;
-		}
-
-		// Validate time range if not all-day
-		if (!isAllDay && isInvalidTimeRange(rangeStartTime, rangeEndTime)) {
-			error = 'End time must be after start time';
-			return;
-		}
-
-		// One option per calendar date. Date-only arithmetic keeps clock changes
-		// from skipping or repeating a date.
-		const newOptions: TimeOption[] = dateRange(rangeStartDate, rangeEndDate).map(date => ({
-			id: crypto.randomUUID(),
-			date,
-			startTime: rangeStartTime,
-			endTime: rangeEndTime
-		}));
-
-		// Add all new options to the list and sort by date, then wall time
-		creation.edit({ timeOptions: [...timeOptions.filter(option => option.date), ...newOptions].sort((a, b) =>
-			`${a.date}T${a.startTime}`.localeCompare(`${b.date}T${b.startTime}`)) });
-
-		// Reset the range fields
-		rangeStartDate = '';
-		rangeEndDate = '';
-		rangeStartTime = '09:00';
-		rangeEndTime = '10:00';
+	async function move(next: FlowStep) {
+		if (next === step) return;
+		step = next;
 		error = '';
+		// Hand the new screen to assistive technology.
+		await tick();
+		heading?.focus();
 	}
 
-	function updateTimeOption(id: string, field: keyof TimeOption, value: string) {
-		creation.edit({ timeOptions: timeOptions.map((opt) => {
-			if (opt.id !== id) return opt;
-
-			const updated = { ...opt, [field]: value };
-
-			// Auto-adjust end time if start time is changed to be >= end time
-			if (field === 'startTime' && isInvalidTimeRange(value, updated.endTime)) {
-				updated.endTime = incrementTime(value, 15);
-			}
-
-			return updated;
-		}) });
+	function setDeadline(on: boolean) {
+		deadlineOn = on;
+		creation.edit({ dueDate: on ? addDays(firstDate, 1) : '' });
 	}
 
-	// Helper function to check if end time is before or equal to start time
-	function isInvalidTimeRange(startTime: string, endTime: string): boolean {
-		const [startHour, startMin] = startTime.split(':').map(Number);
-		const [endHour, endMin] = endTime.split(':').map(Number);
-		const startMinutes = startHour * 60 + startMin;
-		const endMinutes = endHour * 60 + endMin;
-		return endMinutes <= startMinutes;
-	}
-
-	// Get valid end time options (only times after the start time)
-	function getValidEndTimeOptions(startTime: string): string[] {
-		return timePickerOptions.filter((time) => !isInvalidTimeRange(startTime, time));
-	}
-
-	async function handleSubmit() {
+	async function create() {
 		const isCurrent = work.capture();
 		error = '';
 		const result = await creation.submit();
-		if (isCurrent() && result) goto(`/polls/${result.poll.id}`);
+		if (isCurrent() && result) await move(created());
 	}
 
-	// Next 14 calendar dates in this browser's zone, the zone new options use
-	const firstDate = today(currentZone());
-	const dateOptions = Array.from({ length: 14 }, (_, i) => {
-		const value = addDays(firstDate, i);
-		return { value, label: formatCalendarDate(value, { weekday: 'short', month: 'short', day: 'numeric' }) };
-	});
-
-	// Generate time options in 15-minute increments
-	function getTimeOptions(): string[] {
-		const options = [];
-		for (let hour = 0; hour < 24; hour++) {
-			for (let minute = 0; minute < 60; minute += 15) {
-				const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-				options.push(timeStr);
-			}
-		}
-		return options;
+	function submit(event: SubmitEvent) {
+		event.preventDefault();
+		if (step === 'eventPass') create();
+		else move(advance(step, draft));
 	}
 
-	const timePickerOptions = getTimeOptions();
-
-	// Helper functions for spinner buttons
-	function incrementTime(time: string, minutes: number): string {
-		const [hours, mins] = time.split(':').map(Number);
-		const totalMinutes = hours * 60 + mins + minutes;
-		const newHours = Math.floor((totalMinutes / 60) % 24);
-		const newMins = totalMinutes % 60;
-		return `${newHours.toString().padStart(2, '0')}:${newMins.toString().padStart(2, '0')}`;
-	}
-
-	function adjustTime(id: string, field: 'startTime' | 'endTime', direction: 'up' | 'down') {
-		const option = timeOptions.find((opt) => opt.id === id);
-		if (!option) return;
-
-		const currentTime = option[field];
-		const minutes = direction === 'up' ? 15 : -15;
-		const newTime = incrementTime(currentTime, minutes);
-
-		// For end time, prevent going to or before start time
-		if (field === 'endTime' && direction === 'down') {
-			if (isInvalidTimeRange(option.startTime, newTime)) {
-				return; // Don't allow adjustment
-			}
-		}
-
-		updateTimeOption(id, field, newTime);
-	}
+	let first = $derived(firstOptionDate(draft));
+	let rows = $derived(reviewRows(draft));
+	let result = $derived($creation.result);
+	let shownError = $derived(error || $creation.error);
 </script>
+
+<svelte:head><title>New poll · Meeting Scheduler</title></svelte:head>
 
 <div class="create-poll">
 	<header>
-		<a href="/polls" class="back-link">&larr; Back to Polls</a>
-		<h1>Create New Poll</h1>
+		<a href="/polls" class="close" aria-label={step === 'share' ? 'Close' : 'Cancel new poll'}>
+			<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M5 5l14 14M19 5L5 19" /></svg>
+		</a>
+		{#if step !== 'share'}<p class="step-label">{stepLabel(step)}</p>{/if}
+		<span class="spacer"></span>
 	</header>
 
-	<form onsubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
-		{#if error || $creation.error}
-			<div class="error" role="alert">{error || $creation.error}</div>
-		{/if}
-
-		<div class="form-section">
-			<h2>Poll Details</h2>
-
-			<div class="form-group">
-				<label for="title">Title *</label>
-				<input
-					id="title"
-					type="text"
-					value={title}
-					oninput={(event) => creation.edit({ title: event.currentTarget.value })}
-					placeholder="e.g., Team Sync Meeting"
-					disabled={locked}
-				/>
-			</div>
-
-			<div class="form-group">
-				<label for="description">Description</label>
-				<textarea
-					id="description"
-					value={description}
-					oninput={(event) => creation.edit({ description: event.currentTarget.value })}
-					placeholder="What's this meeting about?"
-					rows="3"
-					disabled={locked}
-				></textarea>
-			</div>
-
-			<div class="form-group">
-				<label for="location">Location</label>
-				<input
-					id="location"
-					type="text"
-					value={location}
-					oninput={(event) => creation.edit({ location: event.currentTarget.value })}
-					placeholder="e.g., Zoom, Conference Room A"
-					disabled={locked}
-				/>
-			</div>
-
-			<div class="form-group">
-				<label for="due-date">Response Due Date (Optional)</label>
-				<input
-					id="due-date"
-					type="date"
-					value={dueDate}
-					oninput={(event) => creation.edit({ dueDate: event.currentTarget.value })}
-					min={firstDate}
-					disabled={locked}
-				/>
-				<p class="help-text">Participants can respond through the end of this day</p>
-			</div>
-
-			<div class="form-group checkbox-group">
-				<label>
-					<input
-						type="checkbox"
-						checked={$creation.draft.useEventPass}
-						onchange={(event) => creation.edit({ useEventPass: event.currentTarget.checked })}
-						disabled={locked}
-					/>
-					Use an event pass for this poll
-				</label>
-				<p class="help-text">Use your oldest available pass for this poll. If your subscription covers the poll, your pass is kept.</p>
-			</div>
-
-			<div class="form-group checkbox-group">
-				<label>
-					<input
-						type="checkbox"
-						checked={isAllDay}
-						onchange={(event) => creation.edit({ isAllDay: event.currentTarget.checked })}
-						disabled={locked}
-					/>
-					All-day events
-				</label>
-				<p class="help-text">Time options will be for entire days instead of specific time ranges</p>
-			</div>
+	{#if step === 'share' && result}
+		<div class="done">
+			<span class="badge" aria-hidden="true">
+				<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+			</span>
+			<h1 bind:this={heading} tabindex="-1">Poll created</h1>
+			<p class="lead">{result.poll.title} is live. Share it any way you like.</p>
 		</div>
+		<PollShare pollId={result.poll.id} title={result.poll.title} shareCode={result.poll.share_code} />
+		<div class="actions end">
+			<a class="btn-link" href={`/polls/${result.poll.id}`}>Open poll</a>
+		</div>
+	{:else}
+		<form onsubmit={submit}>
+			<h1 bind:this={heading} tabindex="-1">{titles[step][0]}</h1>
+			<p class="lead">{titles[step][1]}</p>
 
-		<div class="form-section">
-			<h2>Time Options</h2>
-			<p class="hint">Add the time slots participants can choose from.</p>
-
-			<div class="form-group checkbox-group">
-				<label>
-					<input
-						type="checkbox"
-						bind:checked={useDateRange}
-						disabled={locked}
-					/>
-					Use date range selector
-				</label>
-				<p class="help-text">Quickly add multiple days with the same time slots</p>
-			</div>
-
-			{#if useDateRange}
-				<div class="date-range-selector">
-					<h3>Add Date Range</h3>
-					<div class="range-inputs">
-						<div class="range-row">
-							<div class="range-field">
-								<label for="range-start-date">Start Date</label>
-								<select
-									id="range-start-date"
-									bind:value={rangeStartDate}
-									disabled={locked}
-								>
-									<option value="">Select start date</option>
-									{#each dateOptions as dateOpt}
-										<option value={dateOpt.value}>{dateOpt.label}</option>
-									{/each}
-								</select>
-							</div>
-							<div class="range-field">
-								<label for="range-end-date">End Date</label>
-								<select
-									id="range-end-date"
-									bind:value={rangeEndDate}
-									disabled={locked}
-								>
-									<option value="">Select end date</option>
-									{#each dateOptions as dateOpt}
-										<option value={dateOpt.value}>{dateOpt.label}</option>
-									{/each}
-								</select>
-							</div>
-						</div>
-
-						{#if !isAllDay}
-							<div class="range-row">
-								<div class="range-field">
-									<label for="range-start-time">Start Time</label>
-									<div class="time-input-group">
-										<button
-											type="button"
-											class="spinner-btn"
-											onclick={() => { rangeStartTime = incrementTime(rangeStartTime, 15); }}
-											disabled={locked}
-											title="Increase start time"
-										>
-											&#9650;
-										</button>
-										<select
-											id="range-start-time"
-											bind:value={rangeStartTime}
-											disabled={locked}
-											class="time-select"
-										>
-											{#each timePickerOptions as timeOpt}
-												<option value={timeOpt}>{timeOpt}</option>
-											{/each}
-										</select>
-										<button
-											type="button"
-											class="spinner-btn"
-											onclick={() => { rangeStartTime = incrementTime(rangeStartTime, -15); }}
-											disabled={locked}
-											title="Decrease start time"
-										>
-											&#9660;
-										</button>
-									</div>
-								</div>
-								<div class="range-field">
-									<label for="range-end-time">End Time</label>
-									<div class="time-input-group">
-										<button
-											type="button"
-											class="spinner-btn"
-											onclick={() => { rangeEndTime = incrementTime(rangeEndTime, 15); }}
-											disabled={locked}
-											title="Increase end time"
-										>
-											&#9650;
-										</button>
-										<select
-											id="range-end-time"
-											bind:value={rangeEndTime}
-											disabled={locked}
-											class="time-select"
-										>
-											{#each getValidEndTimeOptions(rangeStartTime) as timeOpt}
-												<option value={timeOpt}>{timeOpt}</option>
-											{/each}
-										</select>
-										<button
-											type="button"
-											class="spinner-btn"
-											onclick={() => { rangeEndTime = incrementTime(rangeEndTime, -15); }}
-											disabled={locked}
-											title="Decrease end time"
-										>
-											&#9660;
-										</button>
-									</div>
-								</div>
-							</div>
-						{/if}
-
-						<button type="button" class="btn primary add-range-btn" onclick={addDateRange} disabled={locked}>
-							Add Date Range
-						</button>
-					</div>
-				</div>
+			{#if shownError}
+				<div class="error" role="alert">{shownError}</div>
 			{/if}
 
-			<div class="time-options">
-				{#each timeOptions as option (option.id)}
-					<div class="time-option">
-						<select
-							value={option.date}
-							onchange={(e) => updateTimeOption(option.id, 'date', e.currentTarget.value)}
-							disabled={locked}
-						>
-							<option value="">Select date</option>
-							{#each dateOptions as dateOpt}
-								<option value={dateOpt.value}>{dateOpt.label}</option>
-							{/each}
-						</select>
-
-						{#if !isAllDay}
-							<div class="time-input-group">
-								<button
-									type="button"
-									class="spinner-btn"
-									onclick={() => adjustTime(option.id, 'startTime', 'up')}
-									disabled={locked}
-									title="Increase start time"
-								>
-									&#9650;
-								</button>
-								<select
-									value={option.startTime}
-									onchange={(e) => updateTimeOption(option.id, 'startTime', e.currentTarget.value)}
-									disabled={locked}
-									class="time-select"
-								>
-									{#each timePickerOptions as timeOpt}
-										<option value={timeOpt}>{timeOpt}</option>
-									{/each}
-								</select>
-								<button
-									type="button"
-									class="spinner-btn"
-									onclick={() => adjustTime(option.id, 'startTime', 'down')}
-									disabled={locked}
-									title="Decrease start time"
-								>
-									&#9660;
-								</button>
-							</div>
-
-							<span class="time-separator">to</span>
-
-							<div class="time-input-group">
-								<button
-									type="button"
-									class="spinner-btn"
-									onclick={() => adjustTime(option.id, 'endTime', 'up')}
-									disabled={locked}
-									title="Increase end time"
-								>
-									&#9650;
-								</button>
-								<select
-									value={option.endTime}
-									onchange={(e) => updateTimeOption(option.id, 'endTime', e.currentTarget.value)}
-									disabled={locked}
-									class="time-select"
-								>
-									{#each getValidEndTimeOptions(option.startTime) as timeOpt}
-										<option value={timeOpt}>{timeOpt}</option>
-									{/each}
-								</select>
-								<button
-									type="button"
-									class="spinner-btn"
-									onclick={() => adjustTime(option.id, 'endTime', 'down')}
-									disabled={locked}
-									title="Decrease end time"
-								>
-									&#9660;
-								</button>
-							</div>
-						{/if}
-
-						<button
-							type="button"
-							class="remove-btn"
-							onclick={() => removeTimeOption(option.id)}
-							disabled={locked || timeOptions.length <= 1}
-							title="Remove time option"
-						>
-							&times;
-						</button>
+			{#if step === 'details'}
+				<div class="card">
+					<div class="field">
+						<label for="title">Title</label>
+						<input id="title" type="text" required value={draft.title} oninput={(event) => creation.edit({ title: event.currentTarget.value })} placeholder="Give your poll a name" disabled={locked} autocomplete="off" />
 					</div>
-				{/each}
+					<div class="field">
+						<label for="description">Description (optional)</label>
+						<textarea id="description" value={draft.description} oninput={(event) => creation.edit({ description: event.currentTarget.value })} placeholder="Add some context" rows="4" disabled={locked}></textarea>
+					</div>
+					<div class="field">
+						<label for="location">Location (optional)</label>
+						<input id="location" type="text" value={draft.location} oninput={(event) => creation.edit({ location: event.currentTarget.value })} placeholder="Where is it?" disabled={locked} autocomplete="off" />
+					</div>
+				</div>
+				<p class="note">Participants see these details when they open your poll.</p>
+			{:else if step === 'timeOptions'}
+				<TimeOptionsStep
+					isAllDay={draft.isAllDay}
+					timeOptions={draft.timeOptions}
+					today={firstDate}
+					{locked}
+					onedit={(update) => creation.edit(update)}
+					onerror={(message) => (error = message)}
+				/>
+			{:else if step === 'deadline'}
+				<div class="card">
+					<div class="row">
+						<label for="deadline-on">Set response deadline</label>
+						<button id="deadline-on" type="button" role="switch" aria-checked={deadlineOn} class="switch" class:on={deadlineOn} disabled={locked} onclick={() => setDeadline(!deadlineOn)}><span></span></button>
+					</div>
+					{#if deadlineOn}
+						<div class="deadline-body">
+							<div class="field">
+								<label for="due-date">Close responses on</label>
+								<input id="due-date" type="date" value={draft.dueDate} min={firstDate} oninput={(event) => creation.edit({ dueDate: event.currentTarget.value })} disabled={locked} />
+							</div>
+							<div class="field">
+								<span class="label" id="quick-picks">Quick picks</span>
+								<div class="chips" role="group" aria-labelledby="quick-picks">
+									{#each quickPicks as pick}
+										{@const date = quickPickDate(firstDate, pick.days)}
+										<button type="button" class="chip" class:active={draft.dueDate === date} aria-pressed={draft.dueDate === date} disabled={locked} onclick={() => creation.edit({ dueDate: date })}>{pick.label}</button>
+									{/each}
+								</div>
+							</div>
+						</div>
+					{/if}
+				</div>
+				{#if deadlineOn && draft.dueDate}
+					<p class="note" aria-live="polite">{deadlineNote(draft.dueDate, first, zone)}</p>
+				{/if}
+			{:else if step === 'eventPass'}
+				<div class="card">
+					<div class="row">
+						<label for="use-pass">Use an event pass for this poll</label>
+						<button id="use-pass" type="button" role="switch" aria-checked={draft.useEventPass} class="switch" class:on={draft.useEventPass} disabled={locked} onclick={() => creation.edit({ useEventPass: !draft.useEventPass })}><span></span></button>
+					</div>
+				</div>
+				<p class="note">Use your oldest available pass for this poll. If your subscription covers the poll, your pass is kept. Your plan and participant limit are checked when the poll is created.</p>
+
+				<h2 class="section-label">Review</h2>
+				<ul class="card review">
+					{#each rows as row}
+						<li>
+							<button type="button" onclick={() => move(goTo(step, row.step))}>
+								<span class="key">{row.label}</span>
+								<span class="value">{row.value}<span class="chev" aria-hidden="true">&rsaquo;</span></span>
+								<span class="sr">Edit {row.label.toLowerCase()}</span>
+							</button>
+						</li>
+					{/each}
+				</ul>
+			{/if}
+
+			<div class="actions" class:end={step === 'details'}>
+				{#if step !== 'details'}
+					<button type="button" class="circle ghost" aria-label="Back" onclick={() => move(goBack(step))} disabled={loading}>
+						<svg width="14" height="22" viewBox="0 0 14 22" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 3L3 11l8 8" /></svg>
+					</button>
+				{/if}
+				{#if step === 'eventPass'}
+					<button type="submit" class="circle primary" aria-label={loading ? 'Creating poll' : $creation.error ? 'Retry create poll' : 'Create poll'} disabled={loading || !$creation.ownerId || $creation.recoveryRequired}>
+						<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+					</button>
+				{:else}
+					<button type="submit" class="circle primary" aria-label="Continue" disabled={!canAdvance(step, draft)}>
+						<svg width="14" height="22" viewBox="0 0 14 22" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l8 8-8 8" /></svg>
+					</button>
+				{/if}
 			</div>
-
-			<button type="button" class="add-time-btn" onclick={addTimeOption} disabled={locked}>
-				+ Add another time
-			</button>
-		</div>
-
-		<div class="form-actions">
-			<a href="/polls" class="btn secondary">Cancel</a>
-			<button type="submit" class="btn primary" disabled={loading || !$creation.ownerId || $creation.recoveryRequired}>
-				{loading ? 'Creating...' : $creation.error ? 'Retry Create Poll' : 'Create Poll'}
-			</button>
-		</div>
-	</form>
+			{#if step === 'eventPass'}
+				<p class="submit-hint" aria-live="polite">{loading ? 'Creating…' : $creation.error ? 'Retry creating this poll with the check button.' : ''}</p>
+			{/if}
+		</form>
+	{/if}
 </div>
 
 <style>
-	.create-poll {
-		max-width: 600px;
-		margin: 0 auto;
-		padding: 2rem;
-	}
-
-	header {
-		margin-bottom: 2rem;
-	}
-
-	.back-link {
-		color: #666;
-		text-decoration: none;
-		font-size: 0.875rem;
-	}
-
-	.back-link:hover {
-		color: #333;
-	}
-
-	h1 {
-		margin: 0.5rem 0 0;
-	}
-
-	.error {
-		background: #fee;
-		color: #c00;
-		padding: 0.75rem;
-		border-radius: 6px;
-		margin-bottom: 1rem;
-	}
-	.form-section {
-		background: white;
-		border-radius: 8px;
-		padding: 1.5rem;
-		margin-bottom: 1.5rem;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-	}
-
-	.form-section h2 {
-		margin: 0 0 1rem;
-		font-size: 1.125rem;
-	}
-
-	.hint {
-		margin: -0.5rem 0 1rem;
-		font-size: 0.875rem;
-		color: #666;
-	}
-
-	.form-group {
-		margin-bottom: 1rem;
-	}
-
-	label {
-		display: block;
-		margin-bottom: 0.5rem;
-		font-weight: 500;
-	}
-
-	input[type='text'],
-	textarea,
-	select {
-		width: 100%;
-		padding: 0.75rem;
-		border: 1px solid #ddd;
-		border-radius: 6px;
-		font-size: 1rem;
-		font-family: inherit;
-	}
-
-	input:focus,
-	textarea:focus,
-	select:focus {
-		outline: none;
-		border-color: #007bff;
-	}
-
-	.time-options {
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-	}
-
-	.time-option {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-	}
-
-	.time-option > select {
-		flex: 1;
-		min-width: 150px;
-	}
-
-	.time-input-group {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		background: #f8f9fa;
-		border: 1px solid #ddd;
-		border-radius: 6px;
-		padding: 0.25rem;
-	}
-
-	.time-select {
-		width: auto;
-		min-width: 80px;
-		padding: 0.5rem;
-		border: none;
-		background: white;
-		border-radius: 4px;
-	}
-
-	.spinner-btn {
-		background: white;
-		border: 1px solid #ddd;
-		border-radius: 4px;
-		cursor: pointer;
-		padding: 0.25rem 0.5rem;
-		font-size: 0.75rem;
-		color: #666;
-		line-height: 1;
-		transition: all 0.2s;
-	}
-
-	.spinner-btn:hover:not(:disabled) {
-		background: #007bff;
-		color: white;
-		border-color: #007bff;
-	}
-
-	.spinner-btn:disabled {
-		opacity: 0.3;
-		cursor: not-allowed;
-	}
-
-	.time-separator {
-		color: #666;
-	}
-
-	.remove-btn {
-		background: none;
-		border: none;
-		font-size: 1.5rem;
-		color: #999;
-		cursor: pointer;
-		padding: 0 0.5rem;
-		line-height: 1;
-	}
-
-	.remove-btn:hover:not(:disabled) {
-		color: #c00;
-	}
-
-	.remove-btn:disabled {
-		opacity: 0.3;
-		cursor: not-allowed;
-	}
-
-	.add-time-btn {
-		margin-top: 0.75rem;
-		padding: 0.5rem 1rem;
-		background: #f5f5f5;
-		border: 1px dashed #ccc;
-		border-radius: 6px;
-		cursor: pointer;
-		font-size: 0.875rem;
-		color: #666;
-	}
-
-	.add-time-btn:hover:not(:disabled) {
-		background: #eee;
-		border-color: #999;
-	}
-
-	.form-actions {
-		display: flex;
-		justify-content: flex-end;
-		gap: 1rem;
-	}
-
-	.btn {
-		padding: 0.75rem 1.5rem;
-		border-radius: 6px;
-		font-size: 1rem;
-		font-weight: 500;
-		text-decoration: none;
-		cursor: pointer;
-		border: none;
-	}
-
-	.btn.primary {
-		background: #007bff;
-		color: white;
-	}
-
-	.btn.primary:hover:not(:disabled) {
-		background: #0056b3;
-	}
-
-	.btn.secondary {
-		background: #f5f5f5;
-		color: #333;
-	}
-
-	.btn.secondary:hover {
-		background: #e5e5e5;
-	}
-
-	.btn:disabled {
-		opacity: 0.6;
-		cursor: not-allowed;
-	}
-
-	.checkbox-group label {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		cursor: pointer;
-		font-weight: 500;
-	}
-
-	.checkbox-group input[type='checkbox'] {
-		width: auto;
-		cursor: pointer;
-	}
-
-	.help-text {
-		margin: 0.5rem 0 0 1.75rem;
-		font-size: 0.875rem;
-		color: #666;
-	}
-
-	.date-range-selector {
-		background: #f8f9fa;
-		border: 1px solid #e0e0e0;
-		border-radius: 8px;
-		padding: 1rem;
-		margin-bottom: 1rem;
-	}
-
-	.date-range-selector h3 {
-		margin: 0 0 1rem;
-		font-size: 1rem;
-		color: #333;
-	}
-
-	.range-inputs {
-		display: flex;
-		flex-direction: column;
-		gap: 1rem;
-	}
-
-	.range-row {
-		display: flex;
-		gap: 1rem;
-		flex-wrap: wrap;
-	}
-
-	.range-field {
-		flex: 1;
-		min-width: 200px;
-	}
-
-	.range-field label {
-		font-size: 0.875rem;
-		margin-bottom: 0.25rem;
-	}
-
-	.add-range-btn {
-		align-self: flex-start;
-		margin-top: 0.5rem;
-	}
+	:global(body) { background: #f2f2f7; }
+	.create-poll { max-width: 600px; margin: 0 auto; padding: 1rem 1rem 3rem; color: #111114; }
+	header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+	.close, .spacer { width: 44px; height: 44px; }
+	.close { border-radius: 50%; background: #fff; display: flex; align-items: center; justify-content: center; color: #111114; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+	.step-label { margin: 0; font-size: 0.9375rem; font-weight: 600; color: #5c5c61; }
+	h1 { margin: 1rem 0 0; font-size: 1.875rem; line-height: 1.2; letter-spacing: -0.01em; }
+	h1:focus { outline: none; }
+	.lead { margin: 0.375rem 0 1rem; color: #5c5c61; font-size: 1rem; }
+	.error { background: #fee; color: #a00; padding: 0.75rem; border-radius: 10px; margin-bottom: 1rem; }
+	.card { background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); margin-bottom: 0.75rem; list-style: none; padding: 0; }
+	.field { padding: 0.875rem 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
+	.field + .field { border-top: 1px solid #e5e5ea; }
+	.field label, .label { font-size: 0.8125rem; color: #5c5c61; }
+	input[type='text'], textarea, input[type='date'] { font: inherit; font-size: 1.0625rem; border: 0; outline: 0; padding: 0; background: transparent; color: #111114; resize: vertical; }
+	input[type='date'] { background: #efeff4; border-radius: 10px; padding: 0.5rem 0.75rem; min-height: 44px; box-sizing: border-box; align-self: flex-start; }
+	input:focus-visible, textarea:focus-visible { outline: 3px solid #0b63ce; outline-offset: 4px; border-radius: 4px; }
+	.note { margin: 0 1.25rem 0.75rem; font-size: 0.8125rem; line-height: 1.4; color: #5c5c61; }
+	.row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 56px; padding: 0 1.25rem; }
+	.row label { font-size: 1.0625rem; }
+	.switch { flex: none; width: 51px; height: 31px; border-radius: 16px; border: 0; padding: 2px; background: #8e8e93; display: flex; align-items: center; cursor: pointer; }
+	.switch span { width: 27px; height: 27px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+	.switch.on { background: #1f7a3d; }
+	.switch.on span { transform: translateX(20px); }
+	.switch:focus-visible, .chip:focus-visible, .review button:focus-visible, .circle:focus-visible, .close:focus-visible, .btn-link:focus-visible { outline: 3px solid #0b63ce; outline-offset: 2px; }
+	.deadline-body { border-top: 1px solid #e5e5ea; padding: 0.25rem 0 0.75rem; }
+	.chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+	.chip { border: 0; background: #efeff4; border-radius: 22px; padding: 0 1rem; min-height: 44px; font: inherit; font-size: 0.9375rem; color: #111114; cursor: pointer; }
+	.chip.active { background: #0b63ce; color: #fff; font-weight: 600; }
+	.section-label { margin: 1.25rem 1.25rem 0.5rem; font-size: 0.8125rem; font-weight: 400; color: #5c5c61; }
+	.review li + li { border-top: 1px solid #e5e5ea; }
+	.review button { width: 100%; min-height: 56px; padding: 0.75rem 1.25rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; }
+	.key { font-size: 0.9375rem; color: #5c5c61; flex: none; }
+	.value { display: flex; align-items: center; gap: 0.5rem; font-size: 1.0625rem; min-width: 0; overflow-wrap: anywhere; text-align: right; }
+	.chev { color: #5c5c61; font-size: 1.5rem; line-height: 1; }
+	.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+	.actions { display: flex; align-items: center; justify-content: space-between; padding: 1rem 0.25rem 0; }
+	.actions.end { justify-content: flex-end; }
+	.circle { width: 60px; height: 60px; border-radius: 50%; border: 0; padding: 0; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+	.circle.primary { background: linear-gradient(180deg, #2a7de4, #0b63ce); color: #fff; box-shadow: 0 8px 24px rgba(11, 99, 206, 0.35); }
+	.circle.ghost { background: #fff; color: #111114; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14); }
+	.circle:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+	.submit-hint { min-height: 1.25rem; margin: 0.5rem 0 0; text-align: right; font-size: 0.875rem; color: #5c5c61; }
+	.done { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: 0.5rem; }
+	.badge { width: 64px; height: 64px; border-radius: 50%; background: #b85600; display: flex; align-items: center; justify-content: center; }
+	.btn-link { display: inline-flex; align-items: center; min-height: 48px; padding: 0 1.5rem; border-radius: 24px; background: #0b63ce; color: #fff; text-decoration: none; font-weight: 600; }
 </style>
