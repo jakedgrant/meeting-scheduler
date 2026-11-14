@@ -168,15 +168,29 @@ private struct CreatePollForm: View {
             Text("Add Date Range")
                 .font(.headline)
 
-            DayPicker(title: "Start Date", selection: $model.rangeStartDate, range: model.startOfToday..., calendar: model.calendar)
+            HStack(alignment: .top, spacing: 12) {
+                DayPicker(title: "Start", selection: $model.rangeStartDate, range: model.startOfToday..., calendar: model.calendar, layout: .stacked)
 
-            DayPicker(title: "End Date", selection: $model.rangeEndDate, range: model.startOfToday..., calendar: model.calendar)
+                DayPicker(title: "End", selection: $model.rangeEndDate, range: model.startOfToday..., calendar: model.calendar, layout: .stacked)
+            }
 
-            DatePicker("Start Time", selection: $model.rangeStartTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Time")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
-            DatePicker("End Time", selection: $model.rangeEndTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
+                HStack(spacing: 8) {
+                    DatePicker("Start Time", selection: $model.rangeStartTime, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+
+                    Text("-")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+
+                    DatePicker("End Time", selection: $model.rangeEndTime, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                }
+            }
 
             Button(action: model.addDateRange) {
                 // Not a `Label`: inside a `Form` it tints the icon with the accent color, which

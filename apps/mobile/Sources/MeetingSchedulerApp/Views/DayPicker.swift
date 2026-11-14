@@ -17,6 +17,8 @@ struct DayPicker: View {
     enum Layout {
         /// Title on the leading edge, date on the trailing edge.
         case inline
+        /// Subdued title above the date, for placing pickers side by side.
+        case stacked
         /// The date chip alone, for rows where the caller supplies the heading.
         case chip
     }
@@ -25,6 +27,14 @@ struct DayPicker: View {
         switch layout {
         case .inline:
             LabeledContent(title) { dateField }
+        case .stacked:
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                dateField
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .chip:
             dateField
         }
