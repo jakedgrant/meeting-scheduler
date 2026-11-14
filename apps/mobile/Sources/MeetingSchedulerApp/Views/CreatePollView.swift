@@ -218,8 +218,7 @@ struct TimeOptionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Option \(number)")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(.headline)
 
             // These values carry wall times on arbitrary dates. Date bounds would clamp a
             // range's copied times to another day; the model validates the combined interval.
