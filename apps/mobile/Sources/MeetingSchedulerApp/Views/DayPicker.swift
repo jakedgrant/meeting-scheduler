@@ -42,6 +42,8 @@ struct DayPicker: View {
 
     private var dateField: some View {
         Text(Self.label(for: selection, calendar: calendar))
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 8))

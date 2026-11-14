@@ -84,9 +84,11 @@ private struct CreatePollForm: View {
             if model.isAllDay {
                 allDayDatePicker
             } else {
-                Toggle("Use date range selector", isOn: $model.useDateRange)
-                if model.useDateRange {
+                DisclosureGroup(isExpanded: $model.useDateRange) {
                     dateRangePicker
+                } label: {
+                    Text("Add Date Range")
+                        .font(.headline)
                 }
             }
 
@@ -165,9 +167,6 @@ private struct CreatePollForm: View {
 
     private var dateRangePicker: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Add Date Range")
-                .font(.headline)
-
             HStack(alignment: .top, spacing: 12) {
                 DayPicker(title: "Start", selection: $model.rangeStartDate, range: model.startOfToday..., calendar: model.calendar, layout: .stacked)
 
