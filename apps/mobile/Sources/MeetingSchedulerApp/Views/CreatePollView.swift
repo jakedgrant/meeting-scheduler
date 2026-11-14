@@ -92,7 +92,11 @@ private struct CreatePollForm: View {
 
             if !model.isAllDay {
                 ForEach($model.options) { $option in
-                    TimeOptionView(option: $option, now: model.now, calendar: model.calendar)
+                    TimeOptionView(
+                        option: $option,
+                        number: (model.options.firstIndex { $0.id == option.id } ?? 0) + 1,
+                        now: model.now,
+                        calendar: model.calendar)
                         .swipeActions(edge: .trailing) {
                             if model.options.count > 1 {
                                 Button(role: .destructive) {
@@ -193,23 +197,52 @@ private struct CreatePollForm: View {
 
 struct TimeOptionView: View {
     @Binding var option: PollCreationModel.Option
+    let number: Int
     let now: Date
     let calendar: Calendar
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DayPicker(title: "Date", selection: $option.date, range: startOfToday()..., calendar: calendar)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Option \(number)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
             // These values carry wall times on arbitrary dates. Date bounds would clamp a
             // range's copied times to another day; the model validates the combined interval.
-            DatePicker("Start", selection: $option.startTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
-            DatePicker("End", selection: $option.endTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 10) {
+                GridRow {
+                    Text("Starts")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    DayPicker(title: "Start Date", selection: $option.date, range: startOfToday()..., calendar: calendar, layout: .chip)
+                    DatePicker("Start Time", selection: $option.startTime, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                }
+
+                GridRow {
+                    Text("Ends")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    DayPicker(title: "End Date", selection: endDate, range: calendar.startOfDay(for: option.date)..., calendar: calendar, layout: .chip)
+                    DatePicker("End Time", selection: $option.endTime, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                }
+            }
         }
     }
 
     // MARK: - Helpers
+
+    /// The end date, stored as whole days after the start date so moving the start keeps the span.
+    private var endDate: Binding<Date> {
+        Binding(
+            get: { calendar.date(byAdding: .day, value: option.endDayOffset, to: option.date) ?? option.date },
+            set: { newValue in
+                let days = calendar.dateComponents(
+                    [.day], from: calendar.startOfDay(for: option.date), to: calendar.startOfDay(for: newValue)).day
+                option.endDayOffset = max(0, days ?? 0)
+            })
+    }
 
     private func startOfToday() -> Date {
         calendar.startOfDay(for: now)

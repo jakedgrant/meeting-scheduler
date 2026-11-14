@@ -12,21 +12,36 @@ struct DayPicker: View {
     @Binding var selection: Date
     let range: PartialRangeFrom<Date>
     var calendar: Calendar = .current
+    var layout: Layout = .inline
+
+    enum Layout {
+        /// Title on the leading edge, date on the trailing edge.
+        case inline
+        /// The date chip alone, for rows where the caller supplies the heading.
+        case chip
+    }
 
     var body: some View {
-        LabeledContent(title) {
-            Text(Self.label(for: selection, calendar: calendar))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 8))
-                .overlay {
-                    DatePicker(title, selection: $selection, in: range, displayedComponents: .date)
-                        .labelsHidden()
-                        .environment(\.calendar, calendar)
-                        .environment(\.timeZone, calendar.timeZone)
-                        .blendMode(.destinationOver)
-                }
+        switch layout {
+        case .inline:
+            LabeledContent(title) { dateField }
+        case .chip:
+            dateField
         }
+    }
+
+    private var dateField: some View {
+        Text(Self.label(for: selection, calendar: calendar))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                DatePicker(title, selection: $selection, in: range, displayedComponents: .date)
+                    .labelsHidden()
+                    .environment(\.calendar, calendar)
+                    .environment(\.timeZone, calendar.timeZone)
+                    .blendMode(.destinationOver)
+            }
     }
 
     nonisolated static func label(for date: Date, calendar: Calendar) -> String {
