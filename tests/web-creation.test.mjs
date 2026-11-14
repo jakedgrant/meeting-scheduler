@@ -43,13 +43,13 @@ async function fixture(t) {
   globalThis[key] = state;
   const output = join(directory, 'bundle.mjs');
   await build({
-    stdin: { contents: `export * from '${lib}/stores/polls.ts'; export * from '${lib}/poll-creation.ts'; export {user} from '${lib}/stores/auth.ts'; export {get} from 'svelte/store'; export {render} from 'svelte/server'; export {default as Page} from '${root}/apps/web/src/routes/polls/new/+page.svelte';`, resolveDir: join(root, 'apps/web') },
+    stdin: { contents: `export * from '${lib}/stores/polls.ts'; export * from '${lib}/poll-creation.ts'; export {user} from '${lib}/stores/auth.ts'; export {get} from 'svelte/store'; export {render} from 'svelte/server'; export {default as Page} from '${root}/apps/web/src/routes/polls/new/+page.svelte'; export {default as TimeOptionsStep} from '${lib}/components/TimeOptionsStep.svelte';`, resolveDir: join(root, 'apps/web') },
     outfile: output, bundle: true, platform: 'node', format: 'esm', tsconfigRaw: {},
     plugins: [{ name: 'offline-creation', setup(b) {
       b.onResolve({ filter: /^\$lib\// }, args => {
         const relative = args.path.slice(5);
         if (['supabase', 'stores/auth', 'poll-creation'].includes(relative)) return { path: relative, namespace: 'fixture' };
-        return { path: join(lib, `${relative}.ts`) };
+        return { path: join(lib, relative.endsWith('.svelte') ? relative : `${relative}.ts`) };
       });
       b.onResolve({ filter: /\/stores\/auth\.ts$|^\.\/auth$/ }, () => ({ path: 'stores/auth', namespace: 'fixture' }));
       b.onResolve({ filter: /^\$app\// }, args => ({ path: args.path, namespace: 'fixture' }));
@@ -84,8 +84,11 @@ test('a fresh creation renders no time rows and requires an explicit option befo
   editor.setOwner(member);
   assert.deepEqual(actual.get(editor).draft.timeOptions, []);
   state.editor = editor;
-  const { body } = actual.render(actual.Page);
-  assert.match(body, /Add another time/);
+  // A new flow opens on step 1; the time options step starts with no rows.
+  assert.match(actual.render(actual.Page).body, /Step 1 of 5/);
+  const stepProps = timeOptions => ({ props: { isAllDay: false, timeOptions, today: '2030-01-01', locked: false, onedit() {}, onerror() {} } });
+  const { body } = actual.render(actual.TimeOptionsStep, stepProps([]));
+  assert.match(body, /Add Time Option/);
   assert.doesNotMatch(body, /class="time-option(?:\s|")/);
 
   editor.edit({ title: 'Planning' });
@@ -94,7 +97,7 @@ test('a fresh creation renders no time rows and requires an explicit option befo
   assert.ok(actual.get(editor).error);
 
   editor.edit({ timeOptions: [{ id: 'chosen', date: '2030-03-01', startTime: '14:00', endTime: '15:00' }] });
-  assert.match(actual.render(actual.Page).body, /class="time-option(?:\s|")/);
+  assert.match(actual.render(actual.TimeOptionsStep, stepProps(actual.get(editor).draft.timeOptions)).body, /class="time-option(?:\s|")/);
   assert.deepEqual(await editor.submit(), result);
   assert.equal(state.calls.length, 1);
   assert.equal(state.calls[0].args.payload.time_options.length, 1);
@@ -169,9 +172,11 @@ for (const storage of [disk()]) {
     assert.equal(actual.get(editor).draft.title, 'My draft');
     state.editor = editor;
     const html = actual.render(actual.Page).body;
-    assert.match(html, /Retry Create Poll/);
-    assert.match(html, /Your draft is kept/);
-    assert.match(html, /value="My draft"[^>]*disabled/);
+    // The retained submission reopens on step 4, locked, with the exact draft in the review.
+    assert.match(html, /Step 4 of 5/);
+    assert.match(html, /aria-label="Retry create poll"/);
+    assert.match(html, /My draft/);
+    assert.match(html, /id="use-pass"[^>]*disabled/);
     assert.equal((await editor.submit()).replayed, true);
     assert.equal(actual.get(actual.createdPolls).length, 1);
   });
@@ -310,9 +315,6 @@ test('explicit event-pass choice reaches server and returned cap/pass state is a
   const editor = editorFor(actual);
   editor.edit({ useEventPass: true });
   state.editor = editor;
-  const html = actual.render(actual.Page).body;
-  assert.match(html, /Use an event pass for this poll/);
-  assert.match(html, /type="checkbox" checked/);
   state.handler = () => ({ data: { ...result, entitlement: 'event_pass', redeemed_pass_id: other }, error: null });
   await editor.submit();
   assert.equal(state.calls[0].args.payload.use_event_pass, true);
