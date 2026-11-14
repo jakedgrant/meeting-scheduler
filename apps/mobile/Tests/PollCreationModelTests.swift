@@ -122,7 +122,7 @@ final class PollCreationModelTests: XCTestCase {
             ForEach(model.options.indices, id: \.self) { index in
                 TimeOptionView(option: Binding(
                     get: { model.options[index] }, set: { model.options[index] = $0 }
-                ), now: self.now, calendar: self.calendar)
+                ), number: index + 1, now: self.now, calendar: self.calendar)
             }
         }
         .environment(\.calendar, calendar)
@@ -167,6 +167,117 @@ final class PollCreationModelTests: XCTestCase {
             XCTAssertNil(model.create {})
             XCTAssertEqual(model.errorMessage, CalendarTimeError.endNotAfterStart.localizedDescription)
         }
+    }
+
+    func testOptionEndingOnALaterDaySubmitsItsEndOnThatDay() async throws {
+        let polls = MockPollService()
+        var submitted: [CreatePollRequest] = []
+        polls.creator = { request in
+            submitted.append(request)
+            return PollCreationResult(poll: Poll(creatorId: self.account, title: request.payload.title, status: .active), timeOptions: [])
+        }
+        let model = model(polls: polls)
+        model.title = "Overnight"
+        model.addOption()
+        model.options[0].date = now.addingTimeInterval(3 * 86_400)
+        model.options[0].startTime = calendar.date(bySettingHour: 22, minute: 0, second: 0, of: now)!
+        model.options[0].endTime = calendar.date(bySettingHour: 2, minute: 0, second: 0, of: now)!
+
+        XCTAssertNil(model.create {})
+        XCTAssertEqual(model.errorMessage, CalendarTimeError.endNotAfterStart.localizedDescription)
+
+        model.options[0].endDayOffset = 1
+        await model.create {}?.value
+
+        let option = try XCTUnwrap(submitted.first?.payload.timeOptions.first)
+        XCTAssertEqual(wallTime(option.startTime), [2026, 11, 5, 22, 0])
+        XCTAssertEqual(wallTime(option.endTime), [2026, 11, 6, 2, 0])
+    }
+
+    func testStepsAdvanceInOrderAndEachWaitsForItsRequirements() {
+        let model = model()
+        XCTAssertEqual(model.step, .details)
+        model.advance()
+        XCTAssertEqual(model.step, .details, "a title is required")
+
+        model.title = "  "
+        model.advance()
+        XCTAssertEqual(model.step, .details, "a blank title is not a title")
+
+        model.title = "Planning"
+        model.advance()
+        XCTAssertEqual(model.step, .timeOptions)
+        model.advance()
+        XCTAssertEqual(model.step, .timeOptions, "an option is required")
+
+        model.addOption()
+        model.advance()
+        XCTAssertEqual(model.step, .deadline)
+        model.advance()
+        XCTAssertEqual(model.step, .eventPass)
+        model.advance()
+        XCTAssertEqual(model.step, .eventPass, "creating the poll, not advancing, leaves the last step")
+
+        model.goBack()
+        XCTAssertEqual(model.step, .deadline)
+        model.go(to: .details)
+        XCTAssertEqual(model.step, .details)
+        model.go(to: .eventPass)
+        XCTAssertEqual(model.step, .details, "go(to:) only moves backward")
+    }
+
+    func testAllDayStepNeedsADaySelected() {
+        let model = model()
+        model.title = "Planning"
+        model.advance()
+        model.isAllDay = true
+        XCTAssertFalse(model.canAdvance)
+
+        model.selectedDates = [calendar.dateComponents([.calendar, .era, .year, .month, .day], from: now)]
+        XCTAssertTrue(model.canAdvance)
+    }
+
+    func testCreatingThePollMovesToTheSharingStep() async throws {
+        let polls = MockPollService()
+        polls.creator = { request in
+            let poll = Poll(creatorId: self.account, title: request.payload.title, status: .active, shareCode: "K7QX4M")
+            return PollCreationResult(poll: poll, timeOptions: [])
+        }
+        let model = model(polls: polls)
+        model.title = "Planning"
+        model.advance()
+        model.addOption()
+        model.advance()
+        model.advance()
+        XCTAssertEqual(model.step, .eventPass)
+        XCTAssertNil(model.createdPoll)
+
+        await model.create()?.value
+
+        XCTAssertEqual(model.step, .share)
+        let poll = try XCTUnwrap(model.createdPoll)
+        XCTAssertEqual(poll.title, "Planning")
+        XCTAssertEqual(poll.shareCode, "K7QX4M")
+        model.goBack()
+        XCTAssertEqual(model.step, .share, "a created poll can't be edited by going back")
+    }
+
+    func testUnresolvedOvernightSubmissionRestoresItsEndDay() async {
+        let store = MemoryDraftStore()
+        let polls = MockPollService()
+        polls.creator = { _ in throw PollCreationError.transport }
+        let first = model(polls: polls, store: store)
+        first.title = "Overnight"
+        first.addOption()
+        first.options[0].startTime = calendar.date(bySettingHour: 22, minute: 0, second: 0, of: now)!
+        first.options[0].endTime = calendar.date(bySettingHour: 2, minute: 0, second: 0, of: now)!
+        first.options[0].endDayOffset = 1
+        await first.create {}?.value
+
+        let restored = model(polls: polls, store: store)
+
+        XCTAssertEqual(restored.options.count, 1)
+        XCTAssertEqual(restored.options[0].endDayOffset, 1)
     }
 
     func testRangeContainingASkippedWallTimeDoesNotSubmit() {
@@ -267,6 +378,7 @@ final class PollCreationModelTests: XCTestCase {
 
         let restored = model(polls: polls, store: store)
         XCTAssertTrue(restored.mustResolvePending)
+        XCTAssertEqual(restored.step, .eventPass)
         XCTAssertEqual(restored.title, "Planning")
         XCTAssertEqual(restored.location, "Room 4")
         restored.title = "Edited while locked"

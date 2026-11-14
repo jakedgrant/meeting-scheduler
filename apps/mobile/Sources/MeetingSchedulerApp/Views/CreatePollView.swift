@@ -1,52 +1,54 @@
 import SwiftUI
 import Shared
 
+/// The new-poll flow: details, time options, response deadline, then Event Pass and review.
+/// Creating the poll moves to a final screen for sharing it.
 struct CreatePollView: View {
     @Environment(\.pollService) private var pollService
     @Environment(\.authService) private var authService
     @Environment(\.appClock) private var clock
 
+    /// Called with the new poll's ID when the user opens it from the final screen.
+    var onViewPoll: (UUID) -> Void = { _ in }
+
     var body: some View {
-        // The form keeps the first model it receives.
-        CreatePollForm(model: PollCreationModel(auth: authService, polls: pollService, clock: clock))
+        // The flow keeps the first model it receives.
+        CreatePollFlow(
+            model: PollCreationModel(auth: authService, polls: pollService, clock: clock),
+            onViewPoll: onViewPoll)
     }
 }
 
-private struct CreatePollForm: View {
+private struct CreatePollFlow: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model: PollCreationModel
+    let onViewPoll: (UUID) -> Void
 
-    init(model: PollCreationModel) {
+    init(model: PollCreationModel, onViewPoll: @escaping (UUID) -> Void) {
         _model = State(initialValue: model)
+        self.onViewPoll = onViewPoll
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                pollDetailsSection
-                    .disabled(model.isFormLocked)
-                timeOptionsSection
-                    .disabled(model.isFormLocked)
-                eventPassSection
-                    .disabled(model.isFormLocked)
-                errorSection
-                createPollButtonSection
-            }
-            .scrollDismissesKeyboard(.immediately)
-            .navigationTitle("New Poll")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel", systemImage: "xmark") {
-                        dismiss()
+            stepContent
+                .navigationTitle(model.step == .share ? "" : model.step.title)
+                .navigationSubtitle(model.step.stepLabel)
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(model.step == .share ? .inline : .large)
+                #endif
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(model.step == .share ? "Close" : "Cancel", systemImage: "xmark") {
+                            dismiss()
+                        }
+                        .disabled(model.isSubmitting)
                     }
-                    .disabled(model.isSubmitting)
+
+                    bottomBar
                 }
-            }
-            .interactiveDismissDisabled(model.isSubmitting)
         }
+        .interactiveDismissDisabled(model.isSubmitting)
         .task(id: model.currentAccountId) {
             model.selectCurrentAccount()
         }
@@ -58,163 +60,111 @@ private struct CreatePollForm: View {
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Steps
 
-    private var pollDetailsSection: some View {
-        Section("Poll Details") {
-            TextField("Title", text: $model.title)
-            TextField("Description (optional)", text: $model.description, axis: .vertical)
-                .lineLimit(3...6)
-            TextField("Location (optional)", text: $model.location)
-
-            Toggle("Set response deadline", isOn: $model.hasDueDate)
-            if model.hasDueDate {
-                DayPicker(title: "Due Date", selection: Binding(
-                    get: { model.dueDate ?? model.now },
-                    set: { model.dueDate = $0 }
-                ), range: model.now..., calendar: model.calendar)
+    @ViewBuilder
+    private var stepContent: some View {
+        switch model.step {
+        case .details:
+            PollDetailsStep(model: model).disabled(model.isFormLocked)
+        case .timeOptions:
+            TimeOptionsStep(model: model).disabled(model.isFormLocked)
+        case .deadline:
+            DeadlineStep(model: model).disabled(model.isFormLocked)
+        case .eventPass:
+            EventPassStep(model: model).disabled(model.isFormLocked)
+        case .share:
+            if let poll = model.createdPoll {
+                PollSharingStep(poll: poll)
             }
-
-            Toggle("All-day events", isOn: $model.isAllDay)
         }
     }
 
-    private var timeOptionsSection: some View {
-        Section("Time Options") {
-            if model.isAllDay {
-                allDayDatePicker
-            } else {
-                Toggle("Use date range selector", isOn: $model.useDateRange)
-                if model.useDateRange {
-                    dateRangePicker
-                }
-            }
+    // MARK: - Bottom bar
 
-            if !model.isAllDay {
-                ForEach($model.options) { $option in
-                    TimeOptionView(option: $option, now: model.now, calendar: model.calendar)
-                        .swipeActions(edge: .trailing) {
-                            if model.options.count > 1 {
-                                Button(role: .destructive) {
-                                    model.removeOption(id: option.id)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
-                        }
+    /// Toolbar items, not views in a safe-area inset, so the system gives them Liquid Glass: it
+    /// groups them, morphs them as steps swap them, and applies the scroll-edge effect beneath.
+    @ToolbarContentBuilder
+    private var bottomBar: some ToolbarContent {
+        if model.step != .details && model.step != .share {
+            ToolbarItem(placement: .bottomBar) {
+                Button(action: model.goBack) {
+                    Label("Back", systemImage: "chevron.left")
                 }
-
-                Button(action: model.addOption) {
-                    Label("Add Time Option", systemImage: "plus.circle")
-                }
+                .disabled(model.isSubmitting)
             }
+        }
+
+        ToolbarSpacer(.flexible, placement: .bottomBar)
+
+        ToolbarItem(placement: .bottomBar) {
+            forwardButton
         }
     }
 
     @ViewBuilder
-    private var errorSection: some View {
-        if let error = model.errorMessage {
-            Section {
-                Text(error)
-                    .foregroundStyle(.red)
+    private var forwardButton: some View {
+        switch model.step {
+        case .details, .timeOptions, .deadline:
+            Button(action: model.advance) {
+                Label("Continue", systemImage: "chevron.right")
             }
-        }
-    }
-
-    private var createPollButtonSection: some View {
-        Section {
-            Button(action: { model.create { dismiss() } }) {
-                HStack {
-                    Spacer()
-                    if model.isSubmitting {
-                        ProgressView()
-                    } else {
-                        Text(model.mustResolvePending ? "Retry Creation" : "Create Poll")
-                            .fontWeight(.semibold)
-                    }
-                    Spacer()
-                }
-            }
-            .disabled(!model.canSubmit)
-        }
-    }
-
-    private var eventPassSection: some View {
-        Section {
-            Toggle("Use Event Pass", isOn: $model.useEventPass)
-        } footer: {
-            Text("Use the oldest available event pass for this poll. An active Pro or Team subscription takes priority and keeps your pass. Your plan and participant limit are checked when the poll is created.")
-        }
-    }
-
-    // MARK: - Subviews
-
-    private var allDayDatePicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Select Days")
-                .font(.headline)
-
-            MultiDatePicker("Days", selection: $model.selectedDates, in: model.startOfToday...)
-        }
-        .padding(.vertical, 8)
-    }
-
-    private var dateRangePicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Add Date Range")
-                .font(.headline)
-
-            DayPicker(title: "Start Date", selection: $model.rangeStartDate, range: model.startOfToday..., calendar: model.calendar)
-
-            DayPicker(title: "End Date", selection: $model.rangeEndDate, range: model.startOfToday..., calendar: model.calendar)
-
-            DatePicker("Start Time", selection: $model.rangeStartTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
-
-            DatePicker("End Time", selection: $model.rangeEndTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
-
-            Button(action: model.addDateRange) {
-                // Not a `Label`: inside a `Form` it tints the icon with the accent color, which
-                // matches the prominent button's background and hides the icon.
-                HStack(spacing: 8) {
-                    Image(systemName: "calendar.badge.plus")
-                        .accessibilityHidden(true)
-                    Text("Add Date Range")
+            .buttonStyle(.borderedProminent)
+            .disabled(!model.canAdvance)
+        case .eventPass:
+            Button { model.create() } label: {
+                if model.isSubmitting {
+                    ProgressView()
+                } else {
+                    Label(model.mustResolvePending ? "Retry Creation" : "Create Poll", systemImage: "checkmark")
                 }
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!model.canSubmit)
+        case .share:
+            Button {
+                guard let id = model.createdPoll?.id else { return }
+                dismiss()
+                onViewPoll(id)
+            } label: {
+                Label("View Poll", systemImage: "eye")
+            }
         }
-        .padding(.vertical, 8)
     }
 }
 
-// MARK: - TimeOptionView
+// MARK: - Step copy
 
-struct TimeOptionView: View {
-    @Binding var option: PollCreationModel.Option
-    let now: Date
-    let calendar: Calendar
+extension PollCreationModel.Step {
+    /// This step's place in the flow, counting the sharing screen; nil on the sharing screen itself.
+    var position: Int? {
+        self == .share ? nil : rawValue + 1
+    }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            DayPicker(title: "Date", selection: $option.date, range: startOfToday()..., calendar: calendar)
+    var stepLabel: LocalizedStringKey {
+        position.map { "Step \($0) of \(Self.allCases.count)" } ?? ""
+    }
 
-            // These values carry wall times on arbitrary dates. Date bounds would clamp a
-            // range's copied times to another day; the model validates the combined interval.
-            DatePicker("Start", selection: $option.startTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
-            DatePicker("End", selection: $option.endTime, displayedComponents: .hourAndMinute)
-                .datePickerStyle(.compact)
+    var title: LocalizedStringKey {
+        switch self {
+        case .details: "Poll details"
+        case .timeOptions: "Time options"
+        case .deadline: "Response deadline"
+        case .eventPass: "Event Pass"
+        case .share: "Poll created"
         }
     }
 
-    // MARK: - Helpers
-
-    private func startOfToday() -> Date {
-        calendar.startOfDay(for: now)
+    /// A line of guidance shown at the top of the step.
+    var intro: LocalizedStringKey {
+        switch self {
+        case .details: "What are you trying to schedule?"
+        case .timeOptions: "Add the times people can vote on."
+        case .deadline: "Choose when voting closes. You can skip this."
+        case .eventPass: "Review your poll, then create it."
+        case .share: ""
+        }
     }
-
 }
 
 #Preview {
