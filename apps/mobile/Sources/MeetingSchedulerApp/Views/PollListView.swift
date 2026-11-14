@@ -73,7 +73,9 @@ struct PollListView: View {
                 }
             }
             .sheet(isPresented: $showCreatePoll) {
-                CreatePollView()
+                CreatePollView { pollId in
+                    navigateToPoll = pollId
+                }
             }
             .sheet(isPresented: $showJoinByCode) {
                 JoinByCodeSheet(

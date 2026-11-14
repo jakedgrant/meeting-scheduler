@@ -18,6 +18,12 @@ public final class PollCreationModel {
         public var endDayOffset = 0
     }
 
+    /// The screens of the creation flow, in order. `share` follows a successful creation.
+    public enum Step: Int, CaseIterable, Sendable {
+        case details, timeOptions, deadline, eventPass, share
+    }
+
+    public private(set) var step = Step.details
     public var title = ""
     public var description = ""
     public var location = ""
@@ -72,6 +78,47 @@ public final class PollCreationModel {
     public var isFormLocked: Bool { isSubmitting || mustResolvePending }
     public var canSubmit: Bool { !title.isEmpty && !isSubmitting }
     public var errorMessage: String? { formError ?? editor.errorMessage }
+    /// The poll the server created, once creation has succeeded.
+    public var createdPoll: Poll? { editor.result?.poll }
+
+    /// The earliest day among the options so far, for context on the deadline step.
+    public var firstOptionDate: Date? {
+        let calendar = currentCalendar()
+        if isAllDay { return selectedDates.compactMap { calendar.date(from: $0) }.min() }
+        return options.map(\.date).min()
+    }
+
+    /// Whether the current step has what it needs to move on. Creating the poll, not advancing,
+    /// leaves the Event Pass step.
+    public var canAdvance: Bool {
+        switch step {
+        case .details: !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .timeOptions: isAllDay ? !selectedDates.isEmpty : !options.isEmpty
+        case .deadline: true
+        case .eventPass, .share: false
+        }
+    }
+
+    // MARK: - Steps
+
+    public func advance() {
+        guard canAdvance, let next = Step(rawValue: step.rawValue + 1) else { return }
+        formError = nil
+        step = next
+    }
+
+    public func goBack() {
+        guard step != .share, let previous = Step(rawValue: step.rawValue - 1) else { return }
+        formError = nil
+        step = previous
+    }
+
+    /// Jumps back to an earlier step, as the review list does.
+    public func go(to earlier: Step) {
+        guard step != .share, earlier.rawValue < step.rawValue else { return }
+        formError = nil
+        step = earlier
+    }
 
     // MARK: - Account
 
@@ -79,6 +126,8 @@ public final class PollCreationModel {
     public func selectCurrentAccount() {
         editor.selectAccount(auth.currentUserId)
         restoreDraft(editor.pending?.payload)
+        // A retained submission is retried from the last step.
+        if editor.pending != nil { step = .eventPass }
     }
 
     // MARK: - Options
@@ -132,7 +181,7 @@ public final class PollCreationModel {
     /// Submits the form, or retries the unresolved submission unchanged, then calls
     /// `onCreated` once the poll exists.
     @discardableResult
-    public func create(onCreated: @escaping @MainActor () -> Void) -> Task<Void, Never>? {
+    public func create(onCreated: @escaping @MainActor () -> Void = {}) -> Task<Void, Never>? {
         formError = nil
         if isAllDay && selectedDates.isEmpty && !editor.mustResolvePending {
             formError = "Select at least one day."
@@ -152,7 +201,11 @@ public final class PollCreationModel {
         guard let payload else { return nil }
         return auth.performSessionTask(
             operation: { _ in await self.editor.submit(payload, using: self.polls) },
-            onSuccess: { _ in if self.editor.result != nil { onCreated() } }
+            onSuccess: { _ in
+                guard self.editor.result != nil else { return }
+                self.step = .share
+                onCreated()
+            }
         )
     }
 
