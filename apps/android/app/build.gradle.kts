@@ -237,6 +237,9 @@ dependencies {
     // Image Loading
     implementation("io.coil-kt:coil-compose:2.7.0")
 
+    // QR code for the new poll's share screen
+    implementation("com.google.zxing:core:3.5.3")
+
     // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-analytics-ktx")

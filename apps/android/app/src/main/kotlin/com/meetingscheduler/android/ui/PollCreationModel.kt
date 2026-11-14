@@ -91,6 +91,15 @@ class SharedPreferencesCreationStore(
     }
 }
 
+/** The screens of the creation flow, in order. [SHARE] follows a successful creation. */
+enum class CreationStep { DETAILS, TIME_OPTIONS, DEADLINE, EVENT_PASS, SHARE;
+    /** 1-based position, for the "Step N of 5" label. */
+    val number: Int get() = ordinal + 1
+}
+
+/** What the review list on the last step shows. [deadline] is the last day responses are accepted. */
+data class CreationReview(val title: String, val optionCount: Int, val deadline: LocalDate?, val location: String?)
+
 /**
  * One account's poll creation form. It restores and keeps the draft, builds time options, and
  * submits through `PollCreationSession`, which keeps an unconfirmed request for retry.
@@ -117,11 +126,73 @@ class PollCreationModel(
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
-    /** True once the poll is created for this account, so the screen can close even if it was recreated meanwhile. */
-    var created by mutableStateOf(false)
+    /** The poll the server created for this account, once creation has succeeded. */
+    var createdPoll by mutableStateOf<Poll?>(null)
+        private set
+    /** True once the poll is created for this account, so the screen can move on even if it was recreated meanwhile. */
+    val created: Boolean get() = createdPoll != null
+
+    /** The step on show. A retained, unresolved submission is retried from the last form step. */
+    var step by mutableStateOf(if (session.pending != null) CreationStep.EVENT_PASS else CreationStep.DETAILS)
         private set
 
+    /** Whether the current step has what it needs to move on. Creating the poll, not advancing, leaves the last form step. */
+    val canAdvance: Boolean get() = when (step) {
+        CreationStep.DETAILS -> draft.title.isNotBlank()
+        CreationStep.TIME_OPTIONS -> if (draft.isAllDay) draft.selectedDays.isNotEmpty() else draft.timeOptions.isNotEmpty()
+        CreationStep.DEADLINE -> true
+        CreationStep.EVENT_PASS, CreationStep.SHARE -> false
+    }
+
+    /** Steps back are not offered on the first step, after creation, or while a saved submission awaits a retry. */
+    val canGoBack: Boolean get() = step != CreationStep.DETAILS && step != CreationStep.SHARE && pending == null && !isSubmitting
+
+    /** The earliest day among the options so far, for context on the deadline step. */
+    val firstOptionDate: LocalDate? get() =
+        if (draft.isAllDay) draft.selectedDays.minOrNull() else draft.timeOptions.minOfOrNull { it.date }
+
+    /** The review rows: the saved request while one awaits a retry, otherwise the draft. */
+    val review: CreationReview get() {
+        val saved = pending?.payload
+        if (saved != null) {
+            return CreationReview(
+                title = saved.title,
+                optionCount = saved.timeOptions.size,
+                deadline = saved.closesAt?.let { PollDates.dueDate(it, PollDates.zoneOrUtc(saved.timezone)) },
+                location = saved.location,
+            )
+        }
+        val form = draft
+        return CreationReview(
+            title = form.title.trim(),
+            optionCount = if (form.isAllDay) form.selectedDays.size else form.timeOptions.size,
+            deadline = if (form.hasDueDate) form.dueDate else null,
+            location = form.location.trim().ifEmpty { null },
+        )
+    }
+
+    fun advance() {
+        if (!canAdvance) return
+        CreationStep.entries.getOrNull(step.ordinal + 1)?.let { step = it; errorMessage = null }
+    }
+
+    fun goBack() {
+        if (!canGoBack) return
+        step = CreationStep.entries[step.ordinal - 1]
+        errorMessage = null
+    }
+
+    /** Jumps back to an earlier step, as the review list does. */
+    fun goTo(earlier: CreationStep) {
+        if (!canGoBack || earlier.ordinal >= step.ordinal) return
+        step = earlier
+        errorMessage = null
+    }
+
     private fun isCurrentAccount() = polls.creationAccountKey == createdForAccount
+
+    /** The device time zone the poll records, such as `America/Chicago`. */
+    fun zoneId(): String = zone().id
 
     /** Today's date in the device zone, which the poll records. */
     fun today(): LocalDate = clock.todayIn(zone())
@@ -204,10 +275,11 @@ class PollCreationModel(
                 )
             }
             require(payload.title.isNotBlank() && payload.timeOptions.isNotEmpty()) { "Enter a title and at least one time option." }
-            session.submit(payload, send = polls::createPoll, isCurrent = ::isCurrentAccount) ?: return false
+            val result = session.submit(payload, send = polls::createPoll, isCurrent = ::isCurrentAccount) ?: return false
             completed = true
             store.clearDraft()
-            created = true
+            createdPoll = result.poll
+            step = CreationStep.SHARE
             return true
         } catch (error: CancellationException) {
             throw error

@@ -54,7 +54,12 @@ fun PollNavHost(
             CreatePollView(
                 pollService = pollService,
                 screens = screens,
-                onDismiss = { navController.popBackStack() }
+                onDismiss = { navController.popBackStack() },
+                onOpenPoll = { pollId ->
+                    navController.navigate(Screen.PollDetail.createRoute(pollId)) {
+                        popUpTo(Screen.CreatePoll.route) { inclusive = true }
+                    }
+                }
             )
         }
 
