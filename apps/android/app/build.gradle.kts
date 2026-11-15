@@ -269,7 +269,7 @@ dependencies {
     testImplementation("org.json:json:20260719")
     testImplementation("io.ktor:ktor-client-mock:3.3.3")
     // Navigation scoping tests (F13) host a NavHost on the JVM.
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.robolectric:robolectric:4.17")
     testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
     testImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
