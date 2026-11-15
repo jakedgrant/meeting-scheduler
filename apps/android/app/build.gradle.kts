@@ -267,7 +267,7 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
     // 20260719 fixes GHSA-ghc9-756g-vrcv in 20240303. Tests only.
     testImplementation("org.json:json:20260719")
-    testImplementation("io.ktor:ktor-client-mock:3.3.3")
+    testImplementation("io.ktor:ktor-client-mock:3.6.1")
     // Navigation scoping tests (F13) host a NavHost on the JVM.
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
