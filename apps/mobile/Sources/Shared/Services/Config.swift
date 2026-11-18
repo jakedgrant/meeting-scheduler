@@ -11,5 +11,5 @@ public enum Config {
     // MARK: - App
     public static let appName = "Meeting Scheduler"
     public static let appScheme = "meetingscheduler"
-    public static let webURL = "https://meeting-scheduler.app" // TODO: Update with production URL
+    public static let webURL = "https://meetful.app"
 }

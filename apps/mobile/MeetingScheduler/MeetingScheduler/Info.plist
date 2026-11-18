@@ -21,5 +21,7 @@
 	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>We check your calendar to automatically mark times when you're busy, making it easier to find available meeting times.</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>

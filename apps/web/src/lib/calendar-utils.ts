@@ -64,7 +64,7 @@ export function generateICS(params: CalendarEventTimes & {
 		dates.allDay ? `DTSTART;VALUE=DATE:${dates.start}` : `DTSTART:${dates.start}`,
 		dates.allDay ? `DTEND;VALUE=DATE:${dates.end}` : `DTEND:${dates.end}`,
 		`DTSTAMP:${formatICalDate(now)}`,
-		`UID:${Date.now()}@meetingscheduler.app`,
+		`UID:${Date.now()}@meetful.app`,
 		`SUMMARY:${escapeICalText(title)}`,
 		description ? `DESCRIPTION:${escapeICalText(description)}` : null,
 		location ? `LOCATION:${escapeICalText(location)}` : null,
