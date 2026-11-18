@@ -92,7 +92,7 @@
 	let shownError = $derived(error || $creation.error);
 </script>
 
-<svelte:head><title>New poll · Meeting Scheduler</title></svelte:head>
+<svelte:head><title>New poll · Meetful</title></svelte:head>
 
 <div class="create-poll">
 	<header>

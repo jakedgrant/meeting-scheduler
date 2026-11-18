@@ -78,3 +78,6 @@ local.properties
 *.pem
 **/google-services.json
 **/GoogleService-Info.plist
+
+# Xcode Cloud writes TestFlight notes here during archives
+apps/mobile/MeetingScheduler/TestFlight/

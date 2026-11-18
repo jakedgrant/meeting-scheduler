@@ -11,7 +11,7 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Meeting Scheduler</title>
+	<title>Meetful</title>
 </svelte:head>
 
 {#if $authLoading}

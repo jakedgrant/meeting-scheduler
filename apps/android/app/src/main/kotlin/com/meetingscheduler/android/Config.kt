@@ -22,7 +22,7 @@ object Config {
     const val REVENUE_CAT_API_KEY = "appl_IjDPPTTLISbUsrRUeNXXBGrlLMt"
 
     // MARK: - App
-    const val APP_NAME = "Meeting Scheduler"
+    const val APP_NAME = "Meetful"
     const val APP_SCHEME = "meetingscheduler"
     const val WEB_URL = "https://meetful.app"
 }

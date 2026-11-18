@@ -57,7 +57,7 @@ export function generateICS(params: CalendarEventTimes & {
 	const icsContent = [
 		'BEGIN:VCALENDAR',
 		'VERSION:2.0',
-		'PRODID:-//Meeting Scheduler//EN',
+		'PRODID:-//Meetful//EN',
 		'CALSCALE:GREGORIAN',
 		'METHOD:PUBLISH',
 		'BEGIN:VEVENT',
