@@ -100,9 +100,9 @@ This guide will help you take the Meeting Scheduler Android app from development
 - [x] In Firebase Console, click "Add App" and select Android
 - [x] Enter Android package name:
   ```
-  com.meetingscheduler.android
+  com.jacobgrant.MeetingScheduler
   ```
-  **Note:** Find this in `app/build.gradle.kts` under `namespace`
+  **Note:** Find this in `app/build.gradle.kts` under `applicationId` (it differs from `namespace`, which is the Kotlin package)
 
 - [x] Enter app nickname: "Meeting Scheduler Android"
 - [ ] Leave SHA-1 empty for now (we'll add it later)
@@ -159,7 +159,7 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
 **Create Android Client:**
 - [x] Application type: "Android"
 - [x] Name: "Meeting Scheduler Android"
-- [x] Package name: `com.meetingscheduler.android`
+- [x] Package name: `com.jacobgrant.MeetingScheduler`
 - [x] SHA-1: Paste your debug SHA-1 from earlier
 - [x] Click "Create"
 - [ ] **Save the Client ID** (you won't use it directly, but keep it)
@@ -318,7 +318,7 @@ keytool -list -v -keystore debug.keystore -alias androiddebugkey -storepass andr
 - [ ] Select "Android"
 - [ ] Enter:
   - [ ] App Name: "Meeting Scheduler Android"
-  - [ ] Package Name: `com.meetingscheduler.android`
+  - [ ] Package Name: `com.jacobgrant.MeetingScheduler`
 - [ ] Click "Save"
 
 ### Get Google Play Service Credentials
@@ -816,10 +816,10 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 adb logcat
 
 # View logs for your app only
-adb logcat | grep "com.meetingscheduler.android"
+adb logcat | grep "com.jacobgrant.MeetingScheduler"
 
 # Clear app data
-adb shell pm clear com.meetingscheduler.android
+adb shell pm clear com.jacobgrant.MeetingScheduler
 ```
 
 ---

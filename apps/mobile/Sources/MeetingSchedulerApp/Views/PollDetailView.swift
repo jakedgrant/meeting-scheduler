@@ -614,7 +614,7 @@ struct FinalDateDisplay: View {
     private var addResultText: (title: LocalizedStringKey, message: LocalizedStringKey) {
         switch addResult {
         case .added, nil: ("Success", "Event added to your calendar successfully!")
-        case .accessDenied: ("Calendar Access Needed", "Allow calendar access for Meeting Scheduler in Settings, then try again.")
+        case .accessDenied: ("Calendar Access Needed", "Allow calendar access for Meetful in Settings, then try again.")
         case .failed: ("Event Not Added", "The event couldn't be saved to your calendar. Try again.")
         }
     }

@@ -16,7 +16,7 @@ cat > "$target" <<'JSON'
     {
       "client_info": {
         "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
-        "android_client_info": { "package_name": "com.meetingscheduler.android" }
+        "android_client_info": { "package_name": "com.jacobgrant.MeetingScheduler" }
       },
       "oauth_client": [],
       "api_key": [{ "current_key": "CI-PLACEHOLDER-NOT-A-REAL-KEY" }],
@@ -25,7 +25,7 @@ cat > "$target" <<'JSON'
     {
       "client_info": {
         "mobilesdk_app_id": "1:000000000000:android:0000000000000001",
-        "android_client_info": { "package_name": "com.meetingscheduler.android.debug" }
+        "android_client_info": { "package_name": "com.jacobgrant.MeetingScheduler.debug" }
       },
       "oauth_client": [],
       "api_key": [{ "current_key": "CI-PLACEHOLDER-NOT-A-REAL-KEY" }],

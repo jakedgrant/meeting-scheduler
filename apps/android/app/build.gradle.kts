@@ -53,7 +53,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.meetingscheduler.android"
+        applicationId = "com.jacobgrant.MeetingScheduler"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

@@ -11,7 +11,7 @@
 
 <div class="landing">
 	<header>
-		<div class="logo">Meeting Scheduler</div>
+		<div class="logo">Meetful</div>
 		<nav>
 			<a href="/auth">Sign In</a>
 		</nav>
@@ -43,7 +43,7 @@
 	</main>
 
 	<footer>
-		<p>&copy; 2025 Meeting Scheduler</p>
+		<p>&copy; 2026 Meetful</p>
 	</footer>
 </div>
 

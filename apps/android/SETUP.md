@@ -23,7 +23,7 @@ Open in Android Studio: `File > Open > Select android folder`
 
 1. Go to [Firebase Console](https://console.firebase.google.com)
 2. Create a new project or use existing
-3. Add Android app with package name: `com.meetingscheduler.android`
+3. Add Android app with package name: `com.jacobgrant.MeetingScheduler`
 4. Download `google-services.json`
 5. Place it in: `apps/android/app/google-services.json`
 
@@ -129,10 +129,10 @@ adb devices
 adb logcat | grep "MeetingScheduler"
 
 # Clear app data
-adb shell pm clear com.meetingscheduler.android
+adb shell pm clear com.jacobgrant.MeetingScheduler
 
 # Uninstall app
-adb uninstall com.meetingscheduler.android
+adb uninstall com.jacobgrant.MeetingScheduler
 
 # Install APK
 adb install -r app/build/outputs/apk/debug/app-debug.apk

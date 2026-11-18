@@ -75,7 +75,7 @@
 
 <div class="auth-container">
 	<div class="auth-card">
-		<h1>Meeting Scheduler</h1>
+		<h1>Meetful</h1>
 		<p class="subtitle">Find the perfect meeting time for everyone</p>
 
 		{#if errorMessage}
