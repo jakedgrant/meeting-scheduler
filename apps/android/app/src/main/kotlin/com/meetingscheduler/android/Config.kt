@@ -19,7 +19,7 @@ object Config {
     val SUPABASE_ANON_KEY = if (USE_LOCAL_SUPABASE) LOCAL_SUPABASE_ANON_KEY else PROD_SUPABASE_ANON_KEY
 
     // MARK: - RevenueCat
-    const val REVENUE_CAT_API_KEY = "appl_IjDPPTTLISbUsrRUeNXXBGrlLMt"
+    const val REVENUE_CAT_API_KEY = "goog_yaLKmrAazlhNWqnNuWtKkqiXxjT"
 
     // MARK: - App
     const val APP_NAME = "Meetful"
