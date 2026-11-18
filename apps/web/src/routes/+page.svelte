@@ -43,7 +43,7 @@
 	</main>
 
 	<footer>
-		<p>&copy; 2026 Meetful</p>
+		<p>&copy; 2026 Meetful · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
 	</footer>
 </div>
 
@@ -138,5 +138,9 @@
 		text-align: center;
 		border-top: 1px solid #eee;
 		color: #999;
+	}
+
+	footer a {
+		color: inherit;
 	}
 </style>

@@ -49,6 +49,18 @@ test('robots.txt and the favicon stay reachable', async () => {
   assert.equal(await alphaGate(get('/favicon.png'), password), null);
 });
 
+test('the about and privacy pages stay reachable', async () => {
+  for (const path of ['/about', '/privacy']) {
+    assert.equal(await alphaGate(get(path), password), null, path);
+  }
+});
+
+test('opening those pages does not open their neighbours', async () => {
+  for (const path of ['/about/team', '/about/__data.json', '/privacy-settings', '/%61bout', '/about/../polls']) {
+    assert.equal((await alphaGate(get(path), password)).status, 401, path);
+  }
+});
+
 test('the right password sets a long-lived, HttpOnly cookie and returns to the requested page', async () => {
   const response = await alphaGate(unlock({ password, next: '/auth/callback?attempt=a&code=b' }), password);
   assert.equal(response.status, 303);
