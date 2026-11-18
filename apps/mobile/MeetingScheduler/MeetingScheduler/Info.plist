@@ -2,8 +2,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleDisplayName</key>
-	<string>Meetful</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -17,13 +15,9 @@
 			</array>
 		</dict>
 	</array>
-	<key>ITSAppUsesNonExemptEncryption</key>
-	<false/>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>googlechrome</string>
 	</array>
-	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>We check your calendar to automatically mark times when you're busy, making it easier to find available meeting times.</string>
 </dict>
 </plist>
