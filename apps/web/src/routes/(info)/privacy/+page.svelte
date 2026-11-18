@@ -77,7 +77,7 @@
 	<li>
 		<strong>Service providers.</strong> We rely on Supabase to host our database and sign-in,
 		RevenueCat to manage subscriptions, Google and Apple for sign-in, Google for calendar access, Google
-		Firebase for Android usage and crash reports, and a hosting provider to serve the website. We share
+		Firebase for Android usage and crash reports, and Vercel to host the website. We share
 		with each only what it needs to provide its service.
 	</li>
 	<li>
