@@ -7,8 +7,12 @@ export const ALPHA_COOKIE = 'meetful_alpha'
 export const ALPHA_UNLOCK_PATH = '/alpha-unlock'
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 90
 
-/** Paths that must load without the password: crawler rules and the browser's icon request. */
-const OPEN_PATHS = new Set(['/robots.txt', '/favicon.ico', '/favicon.png'])
+/**
+ * Paths that must load without the password: crawler rules, the browser's icon request,
+ * and the about and privacy pages, which app stores and Google's OAuth review must reach.
+ * Built assets under /_app are served before this hook runs, so the open pages' styles load too.
+ */
+const OPEN_PATHS = new Set(['/robots.txt', '/favicon.ico', '/favicon.png', '/about', '/privacy'])
 
 /**
  * Returns the response to send instead of the app, or `null` to serve the app.
