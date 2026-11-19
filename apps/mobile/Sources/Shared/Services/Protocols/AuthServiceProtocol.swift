@@ -26,6 +26,7 @@ public protocol AuthServiceProtocol: AnyObject, Observable, Sendable {
     func signInWithGoogle() async throws
     func signInWithApple() async throws
     func signInWithMagicLink(email: String) async throws
+    func signInWithPassword(email: String, password: String) async throws
 
     // MARK: - Sign Out
 

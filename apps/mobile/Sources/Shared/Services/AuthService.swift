@@ -404,6 +404,24 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         return hashedData.compactMap { String(format: "%02x", $0) }.joined()
     }
 
+    /// Signs in the App Review account, the only account with a password. Like Apple sign-in,
+    /// it supersedes pending browser and email attempts before its first await.
+    public func signInWithPassword(email: String, password: String) async throws {
+        dependencies.callbackIntents?.clear()
+        callbackAttemptId = nil
+        authBrowser.cancel()
+        let intent = UUID()
+        dependencies.beginAuthAttempt(intent)
+        defer { dependencies.endAuthAttempt(intent) }
+        let revision = dependencies.authRevision()
+        let session = try await AuthAttemptContext.$intentId.withValue(intent) {
+            try await AuthAttemptContext.$revision.withValue(revision) {
+                try await auth.signIn(email: email, password: password)
+            }
+        }
+        guard auth.currentSession == session else { throw CancellationError() }
+    }
+
     public func signInWithMagicLink(email: String) async throws {
         guard let intents = dependencies.callbackIntents else { throw AuthError.browserSignInFailed }
         let intent = intents.begin(session: currentSession)
