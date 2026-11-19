@@ -1119,6 +1119,47 @@ extension SessionTransportTests {
         service.dispose()
     }
 
+    func testFirstPasswordSignInKeepsTheSessionAndSignsIn() async throws {
+        let (service, adapter, _, suite) = firstSignInService("password")
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        await service.initialize()
+        let signIn = Task { try await service.signInWithPassword(email: "review@example.invalid", password: "test-only") }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        let request = try XCTUnwrap(LifecycleURLProtocol.requestURLs().first { $0.path == "/auth/v1/token" })
+        XCTAssertTrue(request.query?.contains("grant_type=password") == true)
+        let body = LifecycleURLProtocol.jsonBody(path: "/auth/v1/token")
+        XCTAssertEqual(body?["email"] as? String, "review@example.invalid")
+        XCTAssertEqual(body?["password"] as? String, "test-only")
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "first-password"))
+        try await signIn.value
+        await settle { service.currentUserId == account }
+        XCTAssertEqual(adapter.auth.currentUser?.id, account)
+        service.dispose()
+    }
+
+    func testPasswordSignInSupersedesAPendingEmailLink() async throws {
+        let (service, adapter, intents, suite) = firstSignInService("password-email")
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        await service.initialize()
+        let link = Task { try await service.signInWithMagicLink(email: "old@example.invalid") }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/otp") == 1 }
+        LifecycleURLProtocol.reply(path: "/auth/v1/otp", data: Data("{}".utf8))
+        try await link.value
+        let oldId = try XCTUnwrap(intents.current?.id)
+        let signIn = Task { try await service.signInWithPassword(email: "review@example.invalid", password: "test-only") }
+        await settle { LifecycleURLProtocol.count(path: "/auth/v1/token") == 1 }
+        XCTAssertNil(intents.current)
+        let account = UUID()
+        LifecycleURLProtocol.reply(path: "/auth/v1/token", data: try wireSession(account, token: "current-password"))
+        try await signIn.value
+        await settle { service.currentUserId == account }
+        await service.handleDeepLink(url: callback(oldId))
+        XCTAssertEqual(LifecycleURLProtocol.count(path: "/auth/v1/token"), 0)
+        XCTAssertEqual(adapter.auth.currentUser?.id, account)
+        service.dispose()
+    }
+
     func testFirstAppleSignInKeepsTheSessionAndSignsIn() async throws {
         let apple = AppleReplyGate()
         let (service, adapter, _, suite) = firstSignInService("apple", launchApple: { try await apple.launch() })

@@ -3,12 +3,13 @@ import SwiftUI
 struct CapsuleTextField<ButtonContent: View>: View {
     let placeholder: String
     @Binding var text: String
+    var isSecure = false
     let action: () -> Void
     @ViewBuilder let buttonContent: () -> ButtonContent
 
     var body: some View {
         HStack(spacing: 0) {
-            TextField(placeholder, text: $text)
+            field
                 .padding(.leading, 16)
                 .padding(.vertical, 8)
 
@@ -31,6 +32,15 @@ struct CapsuleTextField<ButtonContent: View>: View {
                 .strokeBorder(.tertiary, lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: text.isEmpty)
+    }
+
+    @ViewBuilder
+    private var field: some View {
+        if isSecure {
+            SecureField(placeholder, text: $text)
+        } else {
+            TextField(placeholder, text: $text)
+        }
     }
 }
 

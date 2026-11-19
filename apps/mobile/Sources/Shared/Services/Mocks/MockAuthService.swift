@@ -71,6 +71,7 @@ public final class MockAuthService: AuthServiceProtocol {
     public func signInWithGoogle() async throws {}
     public func signInWithApple() async throws {}
     public func signInWithMagicLink(email: String) async throws {}
+    public func signInWithPassword(email: String, password: String) async throws {}
     public func signOut() async throws {}
     public func updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) async throws {}
 }
