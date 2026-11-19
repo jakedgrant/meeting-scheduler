@@ -24,6 +24,7 @@ struct PaywallView: View {
                     termsText
                 }
                 .padding(.bottom)
+                .readableWidth()
             }
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)

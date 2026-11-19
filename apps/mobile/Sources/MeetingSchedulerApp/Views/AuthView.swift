@@ -23,6 +23,7 @@ struct AuthView: View {
                 Spacer()
             }
             .padding()
+            .readableWidth()
             .navigationDestination(isPresented: $showMagicLinkSent) {
                 MagicLinkSentView(email: email) {
                     showMagicLinkSent = false

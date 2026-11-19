@@ -84,10 +84,15 @@ private struct PollDetailScreen: View {
                 }
             }
 
-            if model.displaysCurrentAccount, let poll = poll, poll.status == .active {
+            if model.displaysCurrentAccount, let poll = poll, poll.status == .active,
+               let pollURL = URL(string: "\(Config.webURL)/polls/\(poll.id)") {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("Share", systemImage: "square.and.arrow.up") {
-                        sharePoll()
+                    // ShareLink presents the share sheet from whichever window shows this button.
+                    ShareLink(
+                        item: pollURL,
+                        message: Text("Join my poll: \(poll.title)\n\nShare Code: \(poll.shareCode)")
+                    ) {
+                        Label("Share", systemImage: "square.and.arrow.up")
                     }
                 }
             }
@@ -454,45 +459,6 @@ private struct PollDetailScreen: View {
                 .disabled(!model.canMutatePoll)
             }
         }
-    }
-
-    // MARK: - Actions
-
-    private func sharePoll() {
-        guard let poll = poll else { return }
-
-        let pollURLString = "\(Config.webURL)/polls/\(poll.id)"
-        let shareText = """
-        Join my poll: \(poll.title)
-
-        \(pollURLString)
-
-        Share Code: \(poll.shareCode)
-        """
-
-        #if os(iOS)
-        var activityItems: [Any] = [shareText]
-        if let pollURL = URL(string: pollURLString) {
-            activityItems.append(pollURL)
-        }
-        let activityViewController = UIActivityViewController(
-            activityItems: activityItems,
-            applicationActivities: nil
-        )
-
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first,
-           let rootViewController = window.rootViewController {
-
-            if let popover = activityViewController.popoverPresentationController {
-                popover.sourceView = window
-                popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
-                popover.permittedArrowDirections = []
-            }
-
-            rootViewController.present(activityViewController, animated: true)
-        }
-        #endif
     }
 }
 
