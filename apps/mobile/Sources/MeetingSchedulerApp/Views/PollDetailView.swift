@@ -1,10 +1,6 @@
 import SwiftUI
 import Shared
 
-#if os(iOS)
-import UIKit
-#endif
-
 struct PollDetailView: View {
     let pollId: UUID
     @Environment(\.authService) private var authService
@@ -28,6 +24,8 @@ private struct PollDetailScreen: View {
     @State private var finalTimeOption: PollTimeOption?
     @State private var selectedTimeOption: PollTimeOption?
     @State private var conflictOption: PollTimeOption?
+    @State private var showParticipants = false
+    @State private var showShareCode = false
 
     init(model: PollDetailModel) {
         _model = State(initialValue: model)
@@ -71,35 +69,19 @@ private struct PollDetailScreen: View {
                 }
             }
         }
+        // The system draws the large title and collapses it into the inline title as the list
+        // scrolls under the bar.
         .navigationTitle(model.displaysCurrentAccount ? (poll?.title ?? "Poll") : "Poll")
         #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
+        // The bottom toolbar holds this screen's actions, so the tab bar would stack under it.
+        .toolbarVisibility(.hidden, for: .tabBar)
         #endif
-        .toolbar {
-
-            ToolbarItem(placement: .principal) {
-                HStack {
-                    Text(model.displaysCurrentAccount ? (poll?.title ?? "Poll") : "Poll")
-                    if model.displaysCurrentAccount { StatusBadge(status: poll?.status ?? .archived) }
-                }
-            }
-
-            if model.displaysCurrentAccount, let poll = poll, poll.status == .active,
-               let pollURL = URL(string: "\(Config.webURL)/polls/\(poll.id)") {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    // ShareLink presents the share sheet from whichever window shows this button.
-                    ShareLink(
-                        item: pollURL,
-                        message: Text("Join my poll: \(poll.title)\n\nShare Code: \(poll.shareCode)")
-                    ) {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
-                }
-            }
-        }
+        .toolbar { toolbarContent }
         .task(id: model.currentAccountId) {
             finalTimeOption = nil; selectedTimeOption = nil
             showClosePollAlert = false; showSelectFinalDateAlert = false
+            showParticipants = false; showShareCode = false
             await model.load()
         }
         .onDisappear { model.suspend() }
@@ -130,6 +112,114 @@ private struct PollDetailScreen: View {
         .navigationDestination(item: $selectedTimeOption) { timeOption in
             TimeOptionResponsesView(pollId: pollId, timeOption: timeOption, pollTimeZone: poll?.timezone ?? "UTC")
         }
+        .sheet(isPresented: $showParticipants) {
+            // Built inside this body, so the sheet follows the model as participants join.
+            ParticipantsSheet(participants: model.participants, isCurrentUser: model.isCurrentUser)
+        }
+        .sheet(isPresented: $showShareCode) {
+            if let poll { ShareCodeSheet(shareCode: poll.shareCode) }
+        }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if model.displaysCurrentAccount, let poll {
+            // The large title shows the pill under it; once the title collapses inline, the
+            // subtitle placement shows it under the inline title instead.
+            ToolbarItem(placement: .largeSubtitle) {
+                StatusBadge(status: poll.status)
+            }
+            ToolbarItem(placement: .subtitle) {
+                StatusBadge(status: poll.status)
+            }
+
+            if poll.status == .active {
+                ToolbarItem(placement: .primaryAction) {
+                    shareMenu(poll)
+                }
+            }
+
+            ToolbarItem(placement: .bottomBar) {
+                participantsButton
+            }
+
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+
+            if model.myParticipant != nil {
+                ToolbarItem(placement: .bottomBar) {
+                    submitButton
+                }
+            } else if poll.status == .active {
+                ToolbarItem(placement: .bottomBar) {
+                    joinButton
+                }
+            }
+        }
+    }
+
+    private func shareMenu(_ poll: Poll) -> some View {
+        Menu {
+            if let pollURL = URL(string: "\(Config.webURL)/polls/\(poll.id)") {
+                // The URL is the only shared item, so AirDrop hands the receiver a link that
+                // opens the poll. ShareLink presents from whichever window shows this button.
+                ShareLink(item: pollURL, subject: Text(poll.title)) {
+                    Label("Share Link", systemImage: "link")
+                }
+            }
+            Button("Show Share Code", systemImage: "number") {
+                showShareCode = true
+            }
+        } label: {
+            Label("Share", systemImage: "square.and.arrow.up")
+        }
+    }
+
+    private var participantsButton: some View {
+        let count = model.participants.count
+        return Button {
+            showParticipants = true
+        } label: {
+            HStack(spacing: 4) {
+                Text(count, format: .number)
+                    .monospacedDigit()
+                Image(systemName: "person.fill")
+            }
+        }
+        .accessibilityLabel(Text("Participants"))
+        .accessibilityValue(Text("\(count)"))
+    }
+
+    private var joinButton: some View {
+        Button {
+            model.join()
+        } label: {
+            if model.isChangingPoll {
+                ProgressView()
+            } else {
+                Label("Join Poll", systemImage: "person.badge.plus")
+            }
+        }
+        .accessibilityLabel(Text("Join Poll"))
+        .disabled(!model.canMutatePoll)
+    }
+
+    private var submitButton: some View {
+        let title: LocalizedStringKey = editor.errorMessage == nil ? "Submit Response" : "Retry Submit"
+        return Button {
+            model.save()
+        } label: {
+            if editor.isSaving {
+                ProgressView()
+            } else {
+                Label(title, systemImage: "arrow.up")
+            }
+        }
+        .accessibilityLabel(Text(title))
+        // Prominent, so the bar draws it in the accent tint.
+        .buttonStyle(.borderedProminent)
+        .disabled(!model.canSave)
     }
 
     // MARK: - Main Content
@@ -137,6 +227,7 @@ private struct PollDetailScreen: View {
     @ViewBuilder
     private func pollContent(_ poll: Poll) -> some View {
         List {
+            descriptionRow(poll)
             if let error = model.loadError {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
@@ -146,13 +237,10 @@ private struct PollDetailScreen: View {
             calendarCoverageSection
             responseFeedbackSection
             pollInfoSection(poll)
-            shareCodeSection(poll)
-            joinButtonSection(poll)
             finalDateSection(poll)
             timeOptionsSection(poll)
             commentSection
-            saveButtonSection
-            participantsSection
+            closedNoticeSection
             closePollButtonSection(poll)
         }
         .scrollDismissesKeyboard(.immediately)
@@ -161,12 +249,26 @@ private struct PollDetailScreen: View {
 
     // MARK: - Sections
 
+    /// Plain text under the large title: no row background, and no inset beyond the list's
+    /// margin, so it lines up with the title.
+    @ViewBuilder
+    private func descriptionRow(_ poll: Poll) -> some View {
+        if let description = poll.description, !description.isEmpty {
+            // Its own section, so the rows after it keep their own rounded group.
+            Section {
+                Text(description)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
+        }
+    }
+
     private func pollInfoSection(_ poll: Poll) -> some View {
         Section {
-            if let description = poll.description {
-                Text(description)
-                    .font(.subheadline)
-            }
             if let location = poll.location {
                 Label(location, systemImage: "mappin")
                     .font(.subheadline)
@@ -191,69 +293,6 @@ private struct PollDetailScreen: View {
                     Text("Closes soon!")
                         .font(.caption)
                         .foregroundStyle(.orange)
-                }
-            }
-        }
-    }
-
-
-    @ViewBuilder
-    private func shareCodeSection(_ poll: Poll) -> some View {
-        if poll.status == .active {
-            Section("Share") {
-                VStack(spacing: 12) {
-                    // Share Link
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Share Link")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            CopyButton {
-                                #if os(iOS)
-                                let pollURL = "\(Config.webURL)/polls/\(poll.id)"
-                                UIPasteboard.general.string = pollURL
-                                #endif
-                            }
-                        }
-
-                        Text("\(Config.webURL)/polls/\(poll.id)")
-                            .font(.system(.caption, design: .monospaced))
-                            .foregroundStyle(.blue)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(Color.blue.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-
-                    Divider()
-
-                    // Share Code
-                    VStack(spacing: 8) {
-                        HStack {
-                            Text("Share Code")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            CopyButton {
-                                #if os(iOS)
-                                UIPasteboard.general.string = poll.shareCode
-                                #endif
-                            }
-                        }
-
-                        Text(poll.shareCode)
-                            .font(.system(.title2, design: .monospaced, weight: .bold))
-                            .foregroundStyle(.blue)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                            .background(Color.blue.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                        Text("Share this code for others to join")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
         }
@@ -371,25 +410,12 @@ private struct PollDetailScreen: View {
         }
     }
 
+    /// The submit button lives in the toolbar; this explains why it stays disabled.
     @ViewBuilder
-    private var saveButtonSection: some View {
-        if model.myParticipant != nil {
+    private var closedNoticeSection: some View {
+        if model.myParticipant != nil && !model.acceptsResponses {
             Section {
-                Button(action: { model.save() }) {
-                    HStack {
-                        Spacer()
-                        if editor.isSaving {
-                            ProgressView()
-                        } else {
-                            Text(editor.errorMessage == nil ? "Save Responses" : "Retry Save")
-                        }
-                        Spacer()
-                    }
-                }
-                .disabled(!model.canSave)
-                if !model.acceptsResponses {
-                    Text("This poll is closed. Your draft is retained.").font(.caption).foregroundStyle(.secondary)
-                }
+                Text("This poll is closed. Your draft is retained.").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -412,35 +438,6 @@ private struct PollDetailScreen: View {
         }
         if editor.didSave && editor.isSaved {
             Section { Label("Responses saved", systemImage: "checkmark.circle").foregroundStyle(.green) }
-        }
-    }
-
-    @ViewBuilder
-    private func joinButtonSection(_ poll: Poll) -> some View {
-        if model.myParticipant == nil && poll.status == .active {
-            Section {
-                Button("Join This Poll") {
-                    model.join()
-                }
-                .disabled(!model.canMutatePoll)
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    private var participantsSection: some View {
-        Section("Participants (\(model.participants.count))") {
-            if model.participants.isEmpty {
-                Text("No participants yet")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(model.participants) { participant in
-                    ParticipantRow(
-                        participant: participant,
-                        isCurrentUser: model.isCurrentUser(participant)
-                    )
-                }
-            }
         }
     }
 
