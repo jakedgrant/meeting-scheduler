@@ -1,17 +1,18 @@
-import CoreImage.CIFilterBuiltins
 import SwiftUI
 import Shared
 
 /// The final screen of the new-poll flow: the created poll's code, link and QR code.
 struct PollSharingStep: View {
     let poll: Poll
-    @State private var qrImage: UIImage?
+    private let qrCode: QRCodeImage?
 
     private var link: String { "\(Config.webURL)/polls/\(poll.id)" }
 
     init(poll: Poll) {
         self.poll = poll
-        _qrImage = State(initialValue: Self.qrImage(for: "\(Config.webURL)/polls/\(poll.id)"))
+        qrCode = URL(string: "\(Config.webURL)/polls/\(poll.id)").map {
+            QRCodeImage(url: $0, accessibilityLabel: Text("QR code that opens \(poll.title)"))
+        }
     }
 
     var body: some View {
@@ -116,17 +117,9 @@ struct PollSharingStep: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let qrImage {
-                    Image(uiImage: qrImage)
-                        .interpolation(.none)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 200, height: 200)
-                        .padding(14)
-                        // Scanners expect dark modules on a light background in every appearance.
-                        .background(.white, in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.quaternary))
-                        .accessibilityLabel("QR code that opens \(poll.title)")
+                if let qrCode, let qrImage = qrCode.uiImage {
+                    qrCode
+                        .frame(width: 228, height: 228)
 
                     ShareLink(
                         item: Image(uiImage: qrImage),
@@ -141,18 +134,5 @@ struct PollSharingStep: View {
             }
             .padding(.vertical, 4)
         }
-    }
-
-    // MARK: - QR code
-
-    /// A QR code for `text`, scaled up by whole pixels so its modules stay sharp.
-    private static func qrImage(for text: String) -> UIImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(text.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage else { return nil }
-        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
-        guard let image = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
-        return UIImage(cgImage: image)
     }
 }
