@@ -3,13 +3,14 @@ import Shared
 
 struct ContentView: View {
     @Environment(\.authService) var authService
+    @Binding var pendingPollLink: PollLink?
 
     var body: some View {
         Group {
             if authService.isLoading {
                 loadingView
             } else if authService.isAuthenticated {
-                MainTabView()
+                MainTabView(pendingPollLink: $pendingPollLink)
                     .id(authService.sessionGeneration)
             } else {
                 AuthView()
@@ -27,32 +28,43 @@ struct ContentView: View {
 // MARK: - MainTabView
 
 struct MainTabView: View {
+    private enum MainTab { case meets, settings }
+
+    @Binding var pendingPollLink: PollLink?
+    @State private var selectedTab = MainTab.meets
+
     var body: some View {
-        TabView {
-            PollListView()
+        TabView(selection: $selectedTab) {
+            PollListView(pendingPollLink: $pendingPollLink)
                 .tabItem {
                     Label("Meets", systemImage: "list.bullet")
                 }
+                .tag(MainTab.meets)
 
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
+                .tag(MainTab.settings)
+        }
+        // The Meets tab opens the poll; this only brings that tab forward.
+        .onChange(of: pendingPollLink, initial: true) {
+            if pendingPollLink != nil { selectedTab = .meets }
         }
     }
 }
 
 #Preview("Signed In") {
-    ContentView()
+    ContentView(pendingPollLink: .constant(nil))
         .previewServices(auth: MockAuthService.signedIn)
 }
 
 #Preview("Signed Out") {
-    ContentView()
+    ContentView(pendingPollLink: .constant(nil))
         .previewServices(auth: MockAuthService.signedOut)
 }
 
 #Preview("Loading") {
-    ContentView()
+    ContentView(pendingPollLink: .constant(nil))
         .previewServices(auth: MockAuthService.loading)
 }
