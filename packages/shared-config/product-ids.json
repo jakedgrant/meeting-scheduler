@@ -1,0 +1,35 @@
+{
+  "subscriptions": {
+    "pro": {
+      "monthly": {
+        "ios": "com.meetingscheduler.pro.monthly",
+        "android": "pro_monthly",
+        "web": "pro_monthly"
+      },
+      "yearly": {
+        "ios": "com.meetingscheduler.pro.yearly",
+        "android": "pro_yearly",
+        "web": "pro_yearly"
+      }
+    },
+    "team": {
+      "monthly": {
+        "ios": "com.meetingscheduler.team.monthly",
+        "android": "team_monthly",
+        "web": "team_monthly"
+      },
+      "yearly": {
+        "ios": "com.meetingscheduler.team.yearly",
+        "android": "team_yearly",
+        "web": "team_yearly"
+      }
+    }
+  },
+  "consumables": {
+    "eventPass": {
+      "ios": "com.meetingscheduler.eventpass",
+      "android": "event_pass",
+      "web": "event_pass"
+    }
+  }
+}
