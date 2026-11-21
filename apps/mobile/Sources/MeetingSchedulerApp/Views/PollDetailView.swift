@@ -141,6 +141,10 @@ private struct PollDetailScreen: View {
                 }
             }
 
+            // `axisBehavior` exists only in the iOS 27.1 SDK. `#available` gates it at run time, but an
+            // older SDK, such as CI's Xcode 26.6, can't compile the call at all. Swift 6.4 ships with
+            // Xcode 27, so the compiler check keeps the call out of older builds.
+            #if compiler(>=6.4)
             if #available(iOS 27.1, *) {
                 // Moves into the vertical bar on devices that have one, such as iPhone Duo, beside
                 // the other bar buttons; elsewhere it stays at the leading end of the bottom bar.
@@ -153,6 +157,11 @@ private struct PollDetailScreen: View {
                     participantsButton
                 }
             }
+            #else
+            ToolbarItem(placement: .bottomBar) {
+                participantsButton
+            }
+            #endif
 
             ToolbarSpacer(.flexible, placement: .bottomBar)
 
