@@ -126,11 +126,9 @@ private struct PollDetailScreen: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         if model.displaysCurrentAccount, let poll {
-            // The large title shows the pill under it; once the title collapses inline, the
-            // subtitle placement shows it under the inline title instead.
-            ToolbarItem(placement: .largeSubtitle) {
-                StatusBadge(status: poll.status)
-            }
+            // Shows the pill under the inline title once the large title collapses; the list header
+            // shows it under the large title. Not `.largeSubtitle`: a custom view there makes the
+            // screen open with the title already collapsed.
             ToolbarItem(placement: .subtitle) {
                 StatusBadge(status: poll.status)
             }
@@ -227,7 +225,7 @@ private struct PollDetailScreen: View {
     @ViewBuilder
     private func pollContent(_ poll: Poll) -> some View {
         List {
-            descriptionRow(poll)
+            pollHeader(poll)
             if let error = model.loadError {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
@@ -249,21 +247,24 @@ private struct PollDetailScreen: View {
 
     // MARK: - Sections
 
-    /// Plain text under the large title: no row background, and no inset beyond the list's
-    /// margin, so it lines up with the title.
-    @ViewBuilder
-    private func descriptionRow(_ poll: Poll) -> some View {
-        if let description = poll.description, !description.isEmpty {
-            // Its own section, so the rows after it keep their own rounded group.
-            Section {
-                Text(description)
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+    /// The status pill and description under the large title, with no inset beyond the list's
+    /// margin so both line up with the title. A section header rather than a row: a row clips its
+    /// content to its rounded shape even with a clear background, cutting off the corners.
+    private func pollHeader(_ poll: Poll) -> some View {
+        Section {
+        } header: {
+            VStack(alignment: .leading, spacing: 12) {
+                StatusBadge(status: poll.status)
+                if let description = poll.description, !description.isEmpty {
+                    Text(description)
+                        .font(.body)
+                        // A fixed color: the hierarchical `.secondary` would resolve against the
+                        // header's own secondary style and come out a step lighter.
+                        .foregroundStyle(Color.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets())
         }
     }
 
