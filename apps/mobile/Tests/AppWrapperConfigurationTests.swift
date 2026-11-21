@@ -41,4 +41,13 @@ struct AppWrapperConfigurationTests {
         let entitlements = try Self.propertyList("MeetingScheduler.entitlements")
         #expect(entitlements["com.apple.developer.applesignin"] as? [String] == ["Default"])
     }
+
+    /// Lets the web's poll links open the app. The web serves the matching
+    /// `apple-app-site-association`; `tests/web-apple-app-site-association.test.mjs` checks its app ID.
+    @Test("Claims the web domain for poll links")
+    func claimsWebDomain() throws {
+        let entitlements = try Self.propertyList("MeetingScheduler.entitlements")
+        let host = try #require(URL(string: Config.webURL)?.host)
+        #expect(entitlements["com.apple.developer.associated-domains"] as? [String] == ["applinks:\(host)"])
+    }
 }

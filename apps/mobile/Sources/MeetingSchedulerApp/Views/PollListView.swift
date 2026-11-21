@@ -32,6 +32,8 @@ struct PollListView: View {
     @State var joinError: String?
     @State var isJoining = false
     @State var navigateToPoll: UUID?
+    /// A poll link to open. The list clears it once it starts opening the poll.
+    @Binding var pendingPollLink: PollLink?
 
     var body: some View {
         NavigationStack {
@@ -95,6 +97,7 @@ struct PollListView: View {
             .task {
                 await pollService.loadMyPolls()
             }
+            .onChange(of: pendingPollLink, initial: true) { openPendingPollLink() }
         }
     }
 
@@ -235,6 +238,15 @@ struct PollListView: View {
         )
     }
 
+    private func openPendingPollLink() {
+        guard let link = pendingPollLink else { return }
+        pendingPollLink = nil
+        // The join sheet would hide the poll and holds nothing worth keeping. A poll being
+        // created stays open; the linked poll is waiting behind it.
+        if showJoinByCode { dismissJoinSheet() }
+        navigateToPoll = link.pollId
+    }
+
     private func handleCreatePoll() {
         // The creation transaction authorizes quota and passes; a preflight can
         // become stale or prevent a retained operation from being replayed.
@@ -244,11 +256,11 @@ struct PollListView: View {
 }
 
 #Preview("With Pollss") {
-    PollListView()
+    PollListView(pendingPollLink: .constant(nil))
         .previewServices(polls: MockPollService.withSamplePolls)
 }
 
 #Preview("Empty") {
-    PollListView()
+    PollListView(pendingPollLink: .constant(nil))
         .previewServices(polls: MockPollService.empty)
 }
