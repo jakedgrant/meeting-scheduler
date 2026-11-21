@@ -1,10 +1,6 @@
 import SwiftUI
 import Shared
 
-#if os(iOS)
-import UIKit
-#endif
-
 // MARK: - ParticipantsSheet
 
 /// The poll's participant list, opened from the poll detail toolbar.
@@ -44,14 +40,25 @@ struct ParticipantsSheet: View {
 
 // MARK: - ShareCodeSheet
 
-/// The poll's share code, large enough to read out or copy.
+/// A QR code that opens the poll, and its share code large enough to read out.
 struct ShareCodeSheet: View {
     let shareCode: String
+    private let qrCode: QRCodeImage
     @Environment(\.dismiss) private var dismiss
+
+    /// `pollURL` is the poll's web link, which the QR code encodes so any camera can open it.
+    init(shareCode: String, pollURL: URL) {
+        self.shareCode = shareCode
+        qrCode = QRCodeImage(url: pollURL, accessibilityLabel: Text("QR code that opens the poll"))
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                // Shrinks on shorter iPhones so everything fits the medium detent.
+                qrCode
+                    .frame(maxWidth: 228, maxHeight: 228)
+
                 Text(shareCode)
                     .font(.system(.largeTitle, design: .monospaced, weight: .bold))
                     .foregroundStyle(.tint)
@@ -59,16 +66,10 @@ struct ShareCodeSheet: View {
                     // Read one character at a time rather than as a word.
                     .accessibilityLabel(Text(shareCode.map(String.init).joined(separator: " ")))
 
-                Text("Share this code for others to join")
+                Text("Scan the QR code, or enter this code, to join")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-
-                CopyButton {
-                    #if os(iOS)
-                    UIPasteboard.general.string = shareCode
-                    #endif
-                }
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -99,5 +100,5 @@ struct ShareCodeSheet: View {
 }
 
 #Preview("Share Code") {
-    ShareCodeSheet(shareCode: "ABC123")
+    ShareCodeSheet(shareCode: "ABC123", pollURL: URL(string: "https://example.com/polls/abc")!)
 }

@@ -117,7 +117,9 @@ private struct PollDetailScreen: View {
             ParticipantsSheet(participants: model.participants, isCurrentUser: model.isCurrentUser)
         }
         .sheet(isPresented: $showShareCode) {
-            if let poll { ShareCodeSheet(shareCode: poll.shareCode) }
+            if let poll, let pollURL = URL(string: "\(Config.webURL)/polls/\(poll.id)") {
+                ShareCodeSheet(shareCode: poll.shareCode, pollURL: pollURL)
+            }
         }
     }
 
@@ -139,8 +141,17 @@ private struct PollDetailScreen: View {
                 }
             }
 
-            ToolbarItem(placement: .bottomBar) {
-                participantsButton
+            if #available(iOS 27.1, *) {
+                // Moves into the vertical bar on devices that have one, such as iPhone Duo, beside
+                // the other bar buttons; elsewhere it stays at the leading end of the bottom bar.
+                ToolbarItem(placement: .bottomBar) {
+                    participantsButton
+                }
+                .axisBehavior(.verticalPreferred)
+            } else {
+                ToolbarItem(placement: .bottomBar) {
+                    participantsButton
+                }
             }
 
             ToolbarSpacer(.flexible, placement: .bottomBar)
@@ -179,12 +190,12 @@ private struct PollDetailScreen: View {
         return Button {
             showParticipants = true
         } label: {
-            HStack(spacing: 4) {
-                Text(count, format: .number)
-                    .monospacedDigit()
-                Image(systemName: "person.fill")
-            }
+            // A plain Label with the count as a badge, not a custom HStack: the bar redraws a
+            // standard item when the window resizes, while the HStack came back blank after
+            // iPhone Duo folded or unfolded.
+            Label("Participants", systemImage: "person.2.fill")
         }
+        .badge(count)
         .accessibilityLabel(Text("Participants"))
         .accessibilityValue(Text("\(count)"))
     }
