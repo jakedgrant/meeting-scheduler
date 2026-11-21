@@ -55,11 +55,6 @@
                     android:path="/callback" />
             </intent-filter>
         </activity>
-
-        <!-- RevenueCat API Key (can also be configured in code) -->
-        <meta-data
-            android:name="com.revenuecat.public_api_key"
-            android:value="appl_IjDPPTTLISbUsrRUeNXXBGrlLMt" />
     </application>
 
 </manifest>

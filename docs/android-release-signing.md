@@ -6,7 +6,7 @@ This document describes how Android release builds are signed and how to verify 
 
 | Build | Signing inputs | Result |
 | --- | --- | --- |
-| Debug (`assembleDebug`, `installDebug`) | None needed | Signed with the standard Android debug key, as before. Application ID `com.meetingscheduler.android.debug`. |
+| Debug (`assembleDebug`, `installDebug`) | None needed | Signed with the standard Android debug key, as before. Application ID `com.jacobgrant.MeetingScheduler.debug`. |
 | Release (`assembleRelease`, `bundleRelease`) | All four present, keystore file exists | Signed with the release key. |
 | Release | Any input missing or blank, or the keystore path doesn't exist | The build fails before packaging and lists every missing input. No release artifact is produced, and the build never falls back to the debug key. |
 | Release with `-PallowUnsignedRelease=true` | Incomplete | Explicit opt-in. Produces `app-release-unsigned.apk` (or an unsigned `.aab`) and logs a warning. Use it only when a separate, controlled step signs the artifact. |

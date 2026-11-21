@@ -11,9 +11,11 @@
 
 <svelte:head>
 	<link rel="icon" href={favicon} />
-	<title>Meeting Scheduler</title>
+	<title>Meetful</title>
 </svelte:head>
 
+<!-- authLoading is false on the server, so pages render in full there. The (info) pages
+	ship no client JavaScript and rely on that: they never get a client to clear this. -->
 {#if $authLoading}
 	<div class="loading">
 		<p>Loading...</p>

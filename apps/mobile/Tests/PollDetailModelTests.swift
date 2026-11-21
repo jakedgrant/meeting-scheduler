@@ -247,6 +247,27 @@ final class PollDetailModelTests: XCTestCase {
         XCTAssertEqual(fixture.model.myParticipant?.comment, "Works for me")
     }
 
+    func testSubmitNeedsAnAnswerThatIsNotAlreadySaved() async {
+        let fixture = fixture()
+        await fixture.model.load()
+        XCTAssertTrue(fixture.model.canEditAvailability)
+        XCTAssertFalse(fixture.model.canSave, "Nothing answered yet")
+        XCTAssertNil(fixture.model.save())
+
+        fixture.model.updateComment("Only a comment")
+        XCTAssertFalse(fixture.model.canSave, "A comment alone does not answer any time option")
+
+        fixture.model.setResponse(.available, for: fixture.options[0].id)
+        XCTAssertTrue(fixture.model.canSave)
+
+        await fixture.model.save()?.value
+        XCTAssertTrue(fixture.model.editor.isSaved)
+        XCTAssertFalse(fixture.model.canSave, "The saved draft has nothing new to submit")
+
+        fixture.model.setResponse(.maybe, for: fixture.options[0].id)
+        XCTAssertTrue(fixture.model.canSave)
+    }
+
     func testSaveResultAfterTheScreenLeavesIsNotApplied() async {
         let fixture = fixture()
         await fixture.model.load()

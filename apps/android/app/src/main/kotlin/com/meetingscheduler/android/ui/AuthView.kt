@@ -110,7 +110,7 @@ fun AuthView(authService: SignInAuth) {
                     tint = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = "Meeting Scheduler",
+                    text = "Meetful",
                     fontSize = 28.sp,
                     fontWeight = FontWeight.Bold
                 )

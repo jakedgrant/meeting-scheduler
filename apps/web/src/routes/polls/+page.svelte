@@ -137,7 +137,7 @@
 
 <div class="dashboard">
 	<header>
-		<div class="logo">Meeting Scheduler</div>
+		<div class="logo">Meetful</div>
 		<div class="user-menu">
 			<span>{$profile?.display_name || $user?.email}</span>
 			<a href="/settings" class="settings-link">Settings</a>

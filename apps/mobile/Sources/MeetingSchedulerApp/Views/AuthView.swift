@@ -5,6 +5,7 @@ struct AuthView: View {
     @Environment(\.authService) var authService
 
     @State var email = ""
+    @State var password = ""
     @State var isLoading = false
     @State var errorMessage: String?
     @State var showMagicLinkSent = false
@@ -22,6 +23,7 @@ struct AuthView: View {
                 Spacer()
             }
             .padding()
+            .readableWidth()
             .navigationDestination(isPresented: $showMagicLinkSent) {
                 MagicLinkSentView(email: email) {
                     showMagicLinkSent = false
@@ -82,22 +84,43 @@ struct AuthView: View {
         }
     }
 
+    private var isAppReviewAccount: Bool { Config.isAppReviewAccount(email) }
+
     private var magicLinkSection: some View {
-        CapsuleTextField(placeholder: "Email", text: $email, action: signInWithMagicLink) {
-            if isLoading {
-                ProgressView()
-                    .tint(.white)
-            } else {
-                Image(systemName: "arrow.right")
-                    .fontWeight(.semibold)
+        VStack(spacing: 12) {
+            CapsuleTextField(
+                placeholder: "Email", text: $email,
+                action: isAppReviewAccount ? signInWithPassword : signInWithMagicLink
+            ) {
+                submitButtonContent
+            }
+            .textContentType(.emailAddress)
+            #if os(iOS)
+            .keyboardType(.emailAddress)
+            .autocapitalization(.none)
+            #endif
+
+            if isAppReviewAccount {
+                CapsuleTextField(placeholder: "Password", text: $password, isSecure: true, action: signInWithPassword) {
+                    submitButtonContent
+                }
+                .textContentType(.password)
+                .transition(.opacity)
             }
         }
-        .textContentType(.emailAddress)
-        #if os(iOS)
-        .keyboardType(.emailAddress)
-        .autocapitalization(.none)
-        #endif
+        .animation(.easeInOut(duration: 0.2), value: isAppReviewAccount)
         .disabled(isLoading)
+    }
+
+    @ViewBuilder
+    private var submitButtonContent: some View {
+        if isLoading {
+            ProgressView()
+                .tint(.white)
+        } else {
+            Image(systemName: "arrow.right")
+                .fontWeight(.semibold)
+        }
     }
 
     @ViewBuilder
@@ -142,6 +165,17 @@ struct AuthView: View {
         )
     }
 
+    private func signInWithPassword() {
+        guard !password.isEmpty else { return }
+        isLoading = true
+        errorMessage = nil
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        authService.performSessionTask(
+            operation: { _ in try await authService.signInWithPassword(email: email, password: password) },
+            onFailure: { errorMessage = $0.localizedDescription },
+            onCompletion: { isLoading = false }
+        )
+    }
 }
 
 #Preview {

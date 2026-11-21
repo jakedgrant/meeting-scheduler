@@ -9,7 +9,17 @@ public enum Config {
     public static let revenueCatAPIKey = "appl_IjDPPTTLISbUsrRUeNXXBGrlLMt"
 
     // MARK: - App
-    public static let appName = "Meeting Scheduler"
+    public static let appName = "Meetful"
     public static let appScheme = "meetingscheduler"
-    public static let webURL = "https://meeting-scheduler.app" // TODO: Update with production URL
+    public static let webURL = "https://meetful.app"
+
+    // MARK: - App Review
+    /// The account App Review signs in with. It's the only account with a password, so the
+    /// sign-in screen asks for one only when this email is entered.
+    public static let appReviewEmail = "appreview@meetful.app"
+
+    /// Whether `email` names the App Review account, ignoring case and surrounding whitespace.
+    public static func isAppReviewAccount(_ email: String) -> Bool {
+        email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == appReviewEmail
+    }
 }

@@ -4,8 +4,14 @@ const jwt = require('jsonwebtoken');
 // Configuration
 const TEAM_ID = 'PWBLH7P4Y4';
 const CLIENT_ID = 'com.jacobgrant.MeetingScheduler.web'; // Services ID
-const KEY_ID = 'DFS2B52ZJD';
-const P8_FILE = process.env.HOME + '/Downloads/AuthKey_DFS2B52ZJD.p8';
+// Usage: node generate-apple-secret.js [path/to/AuthKey_<KEY_ID>.p8]
+// The key ID is read from the file name, so a replacement key needs no edit here.
+const P8_FILE = process.argv[2] || process.env.HOME + '/Downloads/AuthKey_DFS2B52ZJD.p8';
+const KEY_ID = (P8_FILE.match(/AuthKey_([A-Z0-9]{10})\.p8$/) || [])[1];
+if (!KEY_ID) {
+  console.error(`Expected a file named AuthKey_<KEY_ID>.p8, got ${P8_FILE}`);
+  process.exit(1);
+}
 
 // Read the .p8 private key
 const privateKey = fs.readFileSync(P8_FILE, 'utf8');

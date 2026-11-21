@@ -11,7 +11,7 @@
 
 <div class="landing">
 	<header>
-		<div class="logo">Meeting Scheduler</div>
+		<div class="logo">Meetful</div>
 		<nav>
 			<a href="/auth">Sign In</a>
 		</nav>
@@ -43,7 +43,7 @@
 	</main>
 
 	<footer>
-		<p>&copy; 2025 Meeting Scheduler</p>
+		<p>&copy; 2026 Meetful · <a href="/about">About</a> · <a href="/privacy">Privacy</a></p>
 	</footer>
 </div>
 
@@ -138,5 +138,9 @@
 		text-align: center;
 		border-top: 1px solid #eee;
 		color: #999;
+	}
+
+	footer a {
+		color: inherit;
 	}
 </style>
