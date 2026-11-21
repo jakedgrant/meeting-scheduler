@@ -122,8 +122,15 @@ public final class PollDetailModel {
 
     public var canMutatePoll: Bool { !isLoading && !isChangingPoll && !editor.isSaving && displaysCurrentAccount }
 
+    /// Whether the draft answers at least one time option and differs from what is saved, so a
+    /// submit would send something new. A save that failed leaves the draft unsaved, so a retry
+    /// stays possible.
+    public var hasResponseToSubmit: Bool {
+        !editor.responses.isEmpty && !editor.isSaved
+    }
+
     public var canSave: Bool {
-        canEditAvailability && !editor.needsConflictReview
+        canEditAvailability && !editor.needsConflictReview && hasResponseToSubmit
     }
 
     /// Nil when the poll has no deadline. The deadline instant itself is past due, and closing
