@@ -55,6 +55,11 @@ test('the about and privacy pages stay reachable', async () => {
   }
 });
 
+test('Apple can fetch the app site association file', async () => {
+  assert.equal(await alphaGate(get('/.well-known/apple-app-site-association'), password), null);
+  assert.equal((await alphaGate(get('/.well-known/apple-app-site-association.json'), password)).status, 401);
+});
+
 test('opening those pages does not open their neighbours', async () => {
   for (const path of ['/about/team', '/about/__data.json', '/privacy-settings', '/%61bout', '/about/../polls']) {
     assert.equal((await alphaGate(get(path), password)).status, 401, path);
