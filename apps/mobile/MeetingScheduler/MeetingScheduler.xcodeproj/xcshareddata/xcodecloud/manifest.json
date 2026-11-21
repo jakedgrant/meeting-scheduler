@@ -1,0 +1,9 @@
+{
+  "id" : "567413f8-8a09-41ae-8de4-51b2ca5202f7",
+  "targets" : [
+    {
+      "id" : "b59a1762-2c0e-42e1-a6c8-ab25c143ee97",
+      "name" : "MeetingScheduler"
+    }
+  ]
+}
