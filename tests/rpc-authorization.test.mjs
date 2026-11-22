@@ -74,6 +74,7 @@ test('F02 migration replay and direct role-based RPC authorization on Postgres',
   }
   assert.ok(calendarBefore, 'F02 migration must be replayed');
 
+  await db.query('UPDATE private.app_settings SET free_active_poll_limit=1');
   // Supply explicit table grants, as the Data API deployment does. The migration
   // must authorize through actual RLS and cannot rely on migration-owner access.
   await db.exec(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public

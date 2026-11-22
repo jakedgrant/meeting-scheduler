@@ -20,6 +20,7 @@ test('F05/F09 independent PostgreSQL creation, redemption and capacity races', {
     WHERE table_schema IN ('public','auth','private','poll_private')`),0,'database must be fresh');
   console.log(await scalar(admin,'SELECT version() AS result'));
   await bootstrapCreationDatabase({exec:sql=>admin.query(sql)});
+  await admin.query('UPDATE private.app_settings SET free_active_poll_limit=1');
   const user=async()=>{const id=randomUUID();await admin.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[id,`${id}@test.invalid`]);return id;};
   const role=async(c,id=null,name='authenticated')=>{
     await c.query('RESET ROLE');await c.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[id??'']);

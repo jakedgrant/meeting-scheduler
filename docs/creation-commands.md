@@ -49,7 +49,7 @@ The owner confirmed these rules for this delivery:
 
 | Funding | Active-poll rule | Participant rows per poll |
 | --- | --- | --- |
-| Free | One ordinary draft/active poll, plus any pass-funded polls | 10 |
+| Free | `private.app_settings.free_active_poll_limit` ordinary draft/active polls (originally 1; unlimited while `NULL`), plus any pass-funded polls | 10 |
 | Current Pro | Unlimited draft/active polls | 50 |
 | Current Team | Unlimited draft/active polls | 100 |
 | Event pass | One additional premium poll per redeemed unit | 50 |
@@ -61,6 +61,8 @@ An event pass is spent only when `use_event_pass` is true and the caller has no 
 `private.poll_pass_funding` records the original creator, poll and redeemed pass ID. It preserves actual historical redemptions when the migration runs. Pass-funded polls stay outside the ordinary free quota if their receipt is later revoked, transferred or deleted. A mutable `is_premium` field or current receipt owner cannot change that quota. Poll deletion removes its funding record; it never restores a spent pass.
 
 Existing active polls retain their saved settings. Reopening a subscription-funded premium poll requires a current tier that supports its saved capacity: a former Team poll with capacity 100 cannot reopen on Pro. Reopening a pass-funded poll keeps its historical funding even after refund/revocation or receipt transfer and spends no additional pass. Free reactivation uses the same ordinary-slot quota as creation.
+
+The free account's ordinary-poll cap is a database setting. Migration `20261121000000_free_poll_limit_setting` leaves it `NULL` (no cap) for the alpha. `UPDATE private.app_settings SET free_active_poll_limit = 1;` restores the original cap immediately, with no deploy; the creation, reactivation and `can_create_poll` checks all read it. Clients still describe the free plan from `entitlements.json`, so update the plan copy when the cap returns.
 
 ## Retry and error behavior
 
