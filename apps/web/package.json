@@ -22,7 +22,7 @@
 		"vite": "^7.3.8"
 	},
 	"dependencies": {
-		"@revenuecat/purchases-js": "^1.74.0",
+		"@revenuecat/purchases-js": "^1.76.0",
 		"@supabase/supabase-js": "^2.89.0",
 		"qrcode": "^1.5.4"
 	}
