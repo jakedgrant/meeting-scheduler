@@ -17,6 +17,8 @@ test('F05/F09 atomic creation, retry identity and server limits', async t => {
     legacyPass=(await db.query(`INSERT INTO public.event_passes(user_id,transaction_id,store,purchased_at,redeemed_at,poll_id,revoked_at)
       VALUES($1,'historical-redeemed-pass','APP_STORE',now(),now(),$2,now()) RETURNING id`,[legacyReceiptOwner,legacyPoll])).rows[0].id;
   });
+  // The migrations leave the cap off for alpha; these tests cover the original cap.
+  await db.query('UPDATE private.app_settings SET free_active_poll_limit=1');
   const scalar=async(sql,params=[]) => (await db.query(sql,params)).rows[0].result;
   const user=async()=>{
     const id=randomUUID(); await db.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[id,`${id}@test.invalid`]); return id;
@@ -246,6 +248,20 @@ test('F05/F09 atomic creation, retry identity and server limits', async t => {
     for(const expression of ["is_premium=true","max_participants=100","share_code='FORGED'",`creator_id='${await user()}'`]){
       await assert.rejects(as(id,()=>db.query(`UPDATE public.polls SET ${expression} WHERE id=$1`,[r.poll.id])),code('42501'));
     }
+  });
+  await t.test('a NULL free poll limit removes the cap and a number restores it',async()=>{
+    const id=await user();
+    try{
+      await db.query('UPDATE private.app_settings SET free_active_poll_limit=NULL');
+      const first=(await create(id)).poll;await create(id);await create(id);
+      assert.equal(await as(id,()=>scalar('SELECT public.can_create_poll() AS result')),true);
+      await as(id,()=>db.query("UPDATE public.polls SET status='closed' WHERE id=$1",[first.id]));
+      await as(id,()=>db.query("UPDATE public.polls SET status='active' WHERE id=$1",[first.id]));
+      await db.query('UPDATE private.app_settings SET free_active_poll_limit=2');
+      assert.equal(await as(id,()=>scalar('SELECT public.can_create_poll() AS result')),false);
+      await assert.rejects(create(id),code('P0001'));
+      assert.equal((await create(await user())).entitlement,'free');
+    }finally{await db.query('UPDATE private.app_settings SET free_active_poll_limit=1');}
   });
   await t.test('closed poll reactivation consumes quota under the creation owner lock',async()=>{
     const id=await user();const first=(await create(id)).poll;
