@@ -112,7 +112,7 @@ test('the share link carries the code, not the poll id', async () => {
   assert.equal(joinPath('BFZZ7J'), '/join/BFZZ7J');
   const detail = await readFile(join(routes, 'polls/[id]/+page.svelte'), 'utf8');
   assert.match(detail, /joinPath\(\$currentPoll\.share_code\)/);
-  assert.doesNotMatch(detail, /window\.location\.href/, 'the page address is not shareable: non-members cannot open it');
+  assert.doesNotMatch(detail, /window\.location\.href/, 'web sharing keeps the code-based preview link');
 });
 
 test('a signed-in visitor of a share link joins through join_poll', async t => {

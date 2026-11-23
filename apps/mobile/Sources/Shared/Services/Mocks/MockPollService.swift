@@ -12,6 +12,8 @@ public final class MockPollService: PollServiceProtocol {
     public var listTotalCount: Int? { myPolls.count }
     public var listLoadError: String?
     public var pollDetailErrors: [UUID: String] = [:]
+    public var pollsRequiringMembership: Set<UUID> = []
+    public var joiner: (@MainActor (UUID) async throws -> PollParticipant)?
     public func loadMorePolls() async {}
     public func retryPollLoad() async {}
     public var isLoading: Bool
@@ -226,7 +228,8 @@ public final class MockPollService: PollServiceProtocol {
     }
 
     public func joinPoll(pollId: UUID, anonymousName: String?) async throws -> PollParticipant {
-        PollParticipant(pollId: pollId, anonymousName: anonymousName ?? "You")
+        if let joiner { return try await joiner(pollId) }
+        return PollParticipant(pollId: pollId, anonymousName: anonymousName ?? "You")
     }
 
     public func loadResponses(participantIds: [UUID]) async -> [AvailabilityResponse] {

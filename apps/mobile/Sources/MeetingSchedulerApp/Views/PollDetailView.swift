@@ -59,6 +59,14 @@ private struct PollDetailScreen: View {
                 ProgressView("Loading poll...")
             } else if let poll = poll {
                 pollContent(poll)
+            } else if model.requiresMembership {
+                ContentUnavailableView {
+                    Label("Join poll", systemImage: "person.badge.plus")
+                } description: {
+                    Text(model.actionError ?? String(localized: "Join this poll to view it and submit your availability."))
+                } actions: {
+                    joinButton
+                }
             } else {
                 ContentUnavailableView {
                     Label("Poll unavailable", systemImage: "exclamationmark.triangle")

@@ -14,6 +14,8 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     var listTotalCount: Int? { get }
     var listLoadError: String? { get }
     var pollDetailErrors: [UUID: String] { get }
+    /// Detail denied by the server; joining may grant access if the poll still accepts members.
+    var pollsRequiringMembership: Set<UUID> { get }
 
     /// Participant counts keyed by poll ID — populated as part of loadMyPolls().
     var pollParticipantCounts: [UUID: Int] { get }

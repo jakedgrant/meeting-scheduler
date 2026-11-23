@@ -45,6 +45,7 @@ public final class PollDetailModel {
     public private(set) var calendarAdd = CalendarAddState.idle
     public private(set) var calendarCheck = CalendarCheckResult.none
     public private(set) var isCheckingCalendar = false
+    public private(set) var requiresMembership = false
     public private(set) var isLoading = true
     public private(set) var isSelectingFinalDate = false
     public private(set) var isChangingPoll = false
@@ -174,6 +175,7 @@ public final class PollDetailModel {
     public func load(forceRefresh: Bool = false) async {
         guard !displaysCurrentAccount || (!isChangingPoll && !editor.isSaving) else { return }
         isChangingPoll = false
+        requiresMembership = false
         generation &+= 1
         let generation = generation
         let account = auth.currentUserId
@@ -189,6 +191,7 @@ public final class PollDetailModel {
         let detail = await polls.loadPollDetail(id: pollId, forceRefresh: forceRefresh)
         guard isCurrent(generation, account) else { return }
         guard let detail else {
+            requiresMembership = polls.pollsRequiringMembership.contains(pollId)
             poll = nil; timeOptions = []; participants = []; responses = []; myParticipantId = nil
             return
         }
@@ -267,17 +270,34 @@ public final class PollDetailModel {
             operation: { scope in
                 let participant = try await self.polls.joinPoll(pollId: self.pollId, anonymousName: nil)
                 try scope.checkCancellation()
+                let needsDetail = self.poll == nil
+                if needsDetail {
+                    let detail = await self.polls.loadPollDetail(id: self.pollId, forceRefresh: true)
+                    try scope.checkCancellation()
+                    guard let detail else { throw PollError.pollNotFound }
+                    self.applyDetail(detail)
+                    self.requiresMembership = false
+                }
                 if !self.participants.contains(where: { $0.id == participant.id }) {
                     self.participants.append(participant)
                 }
                 self.myParticipantId = participant.id
                 await self.editor.load(pollId: self.pollId, participantId: participant.id, using: self.polls)
+                if needsDetail {
+                    try scope.checkCancellation()
+                    await self.calendar.refreshGoogleCalendarConnection()
+                    try scope.checkCancellation()
+                    await self.checkCalendar(generation: generation, account: self.auth.currentUserId)
+                }
             },
             onSuccess: { _ in
                 self.applySavedSnapshot()
                 self.actionError = nil
             },
-            onFailure: { _ in self.actionError = "The poll could not be joined. Reload the poll and try again." },
+            onFailure: { error in
+                self.actionError = (error as? PollError)?.errorDescription
+                    ?? String(localized: "The poll could not be joined. Reload the poll and try again.")
+            },
             onCompletion: { self.isChangingPoll = false },
             isCurrent: { generation == self.generation }
         )

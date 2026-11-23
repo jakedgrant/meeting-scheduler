@@ -43,6 +43,7 @@ export const pollsLoadError = writable<string | null>(null)
 export const POLL_LIST_PAGE_SIZE = 50
 const RESPONSE_PAGE_SIZE = 1000
 export const currentPoll = writable<Poll | null>(null)
+export const pollRequiresMembership = writable(false)
 export const currentPollTimeOptions = writable<PollTimeOption[]>([])
 export const currentPollParticipants = writable<PollParticipant[]>([])
 export const currentPollResponses = writable<AvailabilityResponse[]>([])
@@ -259,6 +260,7 @@ async function loadGuestPoll(pollId: string, guest: GuestCapability, generation:
 
 // Load a single poll with all related data
 export async function loadPoll(pollId: string) {
+  pollRequiresMembership.set(false)
   stopPollUpdates()
   pollRefreshError.set(null)
   detailAbort.abort()
@@ -300,6 +302,8 @@ export async function loadPoll(pollId: string) {
   } catch (err) {
     if (generation !== loadGeneration) return
     console.error('Failed to load poll')
+    // A UUID link is also an invitation. Keep detail private until the visitor joins.
+    pollRequiresMembership.set((err as RpcError | null)?.code === '42501')
     currentPoll.set(null)
   } finally {
     if (generation === loadGeneration) pollsLoading.set(false)
@@ -625,6 +629,7 @@ export function cleanupPollRealtime() {
   requestedPollId = null
   stopPollUpdates()
   currentPoll.set(null)
+  pollRequiresMembership.set(false)
   currentPollTimeOptions.set([])
   currentPollParticipants.set([])
   currentPollResponses.set([])

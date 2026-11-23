@@ -19,7 +19,7 @@ export type Lookup = { ok: true; poll: { id: string; title: string } } | { ok: f
 
 export type JoinOutcome = { ok: true; pollId: string } | { ok: false; message: string }
 
-/** The path a shared link opens. Non-members cannot open `/polls/<id>`, so links carry the code. */
+/** The code-based invitation path previews the poll before joining. */
 export const joinPath = (shareCode: string) => `/join/${encodeURIComponent(shareCode)}`
 
 /** What the person sees when the server refuses to add them to a poll. */

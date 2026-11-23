@@ -16,6 +16,7 @@ public final class PollService: PollServiceProtocol {
     private var listCursors: Set<String> = []
     private var retryLoadsMore = false
     public private(set) var pollDetailErrors: [UUID: String] = [:]
+    public private(set) var pollsRequiringMembership: Set<UUID> = []
 
     /// Participant counts keyed by poll ID — returned by the bounded summary RPC.
     public private(set) var pollParticipantCounts: [UUID: Int] = [:]
@@ -77,6 +78,7 @@ public final class PollService: PollServiceProtocol {
         listCursors = []
         retryLoadsMore = false
         pollDetailErrors = [:]
+        pollsRequiringMembership = []
         try? persistence.selectAccount(userId)
     }
 
@@ -274,6 +276,7 @@ public final class PollService: PollServiceProtocol {
             detailGenerations[id, default: 0] &+= 1
             let detailGeneration = detailGenerations[id, default: 0]
             pollDetailErrors[id] = nil
+            pollsRequiringMembership.remove(id)
             if !forceRefresh, persistence.isDetailFresh(id, maxAge: 300),
                 let cached = try? persistence.fetchPollDetail(id: id) { return cached }
             do {
@@ -297,6 +300,7 @@ public final class PollService: PollServiceProtocol {
                 guard isCurrent(generation), detailGeneration == detailGenerations[id, default: 0] else { return nil }
                 if let error = error as? PostgrestError, ["PGRST116", "42501"].contains(error.code ?? "") {
                     try? persistence.deletePoll(id: id)
+                    if error.code == "42501", accountId != nil { pollsRequiringMembership.insert(id) }
                     return nil
                 }
                 if error is PollReadError || error is DecodingError || error is PostgrestError {
@@ -544,10 +548,10 @@ public enum PollError: Error, LocalizedError {
     case notAcceptingParticipants
     public var errorDescription: String? {
         switch self {
-        case .notAuthenticated: "Sign in to continue."
-        case .pollNotFound: "This poll could not be found. Reload your polls and try again."
-        case .capacityReached: "This poll has reached its participant limit. Ask the organizer for help."
-        case .notAcceptingParticipants: "This poll is closed and cannot accept new participants."
+        case .notAuthenticated: String(localized: "Sign in to continue.")
+        case .pollNotFound: String(localized: "This poll could not be found. Reload your polls and try again.")
+        case .capacityReached: String(localized: "This poll has reached its participant limit. Ask the organizer for help.")
+        case .notAcceptingParticipants: String(localized: "This poll is closed and cannot accept new participants.")
         }
     }
 }

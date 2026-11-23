@@ -519,3 +519,41 @@ test('late successful join cannot replace a capability acquired after revocation
   await actual.loadPoll(pollId);
   assert.deepEqual(actual.get(actual.currentGuest), newCapability);
 });
+
+for (const member of [true, false]) {
+  test(`UUID invitation offers a join then loads protected detail (${member ? 'signed in' : 'guest'})`, async t => {
+    const { actual, state } = await fixture(t, { member });
+    let joined = false;
+    state.handler = name => {
+      if (name === 'get_poll_detail' && !joined) return { data: null, error: { code: '42501', message: 'Poll access denied' } };
+      if (name === 'join_poll' || name === 'join_poll_as_guest') joined = true;
+    };
+    await actual.loadPoll(pollId);
+    assert.equal(actual.get(actual.currentPoll), null);
+    assert.equal(actual.get(actual.pollRequiresMembership), true);
+    const html = actual.render(actual.Page).body;
+    assert.match(html, /Join Poll/);
+    assert.doesNotMatch(html, /Poll not found/);
+    if (!member) assert.match(html, /Enter your name/);
+    assert.equal(joined, false, 'Opening a private poll does not create membership');
+    await actual.joinPoll(pollId, member ? undefined : 'Sam');
+    await actual.loadPoll(pollId);
+    assert.equal(actual.get(actual.currentPoll)?.id, pollId);
+    assert.equal(actual.get(actual.pollRequiresMembership), false);
+    assert.equal(actual.get(actual.currentPollParticipants).length, 1);
+  });
+}
+
+test('UUID invitation is cleared on account change and not offered on transport or invalid payload errors', async t => {
+  const { actual, state } = await fixture(t, { member: true });
+  state.handler = () => ({ data: null, error: { code: '42501' } });
+  await actual.loadPoll(pollId);
+  assert.equal(actual.get(actual.pollRequiresMembership), true);
+  actual.user.set({ id: '99999999-9999-4999-8999-999999999999' });
+  assert.equal(actual.get(actual.pollRequiresMembership), false);
+  for (const result of [{ data: null, error: { code: 'NETWORK' } }, { data: {}, error: null }]) {
+    state.handler = () => result;
+    await actual.loadPoll(pollId);
+    assert.equal(actual.get(actual.pollRequiresMembership), false);
+  }
+});
