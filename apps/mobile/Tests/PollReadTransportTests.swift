@@ -211,7 +211,7 @@ final class PollReadTransportTests: XCTestCase {
                     await fulfillment(of: [ready], timeout: 5)
                     if finalize {
                         var closed = first; closed.status = .closed
-                        service.acceptFinalizedPoll(closed)
+                        service.acceptUpdatedPoll(closed)
                     } else {
                         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
                         let option = PollTimeOption(pollId: saved.id, startTime: Date(), endTime: Date().addingTimeInterval(3600))

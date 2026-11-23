@@ -41,6 +41,7 @@ public final class PollDetailModel {
     public private(set) var participants: [PollParticipant] = []
     public private(set) var responses: [AvailabilityResponse] = []
     public private(set) var actionError: String?
+    public private(set) var editError: String?
     public private(set) var commentError: String?
     public private(set) var calendarAdd = CalendarAddState.idle
     public private(set) var calendarCheck = CalendarCheckResult.none
@@ -292,6 +293,34 @@ public final class PollDetailModel {
                 await self.editor.save(pollId: self.pollId, participantId: participant.id, using: self.polls)
             },
             onSuccess: { _ in if self.editor.didSave { self.applySavedSnapshot() } },
+            isCurrent: { generation == self.generation }
+        )
+    }
+
+    public func clearEditError() { editError = nil }
+
+    @discardableResult
+    public func updatePoll(_ draft: PollEditDraft, onSaved: @escaping @MainActor () -> Void) -> Task<Void, Never>? {
+        guard canMutatePoll, isCreator, draft.pollId == pollId, draft.creatorId == currentAccountId,
+              draft.hasChanges else { return nil }
+        editError = draft.validationError(now: clock.now)
+        guard editError == nil else { return nil }
+        isChangingPoll = true
+        let generation = generation
+        return auth.performSessionTask(
+            operation: { _ in try await self.polls.updatePoll(draft) },
+            onSuccess: { poll in
+                self.poll = poll
+                if poll.status == .active, poll.closesAt.map({ $0 > self.clock.now }) ?? true {
+                    self.editor.resumeResponses()
+                }
+                self.actionError = nil
+                onSaved()
+            },
+            onFailure: { _ in
+                self.editError = String(localized: "Your changes could not be saved. Try again, or cancel and reload the poll.")
+            },
+            onCompletion: { self.isChangingPoll = false },
             isCurrent: { generation == self.generation }
         )
     }

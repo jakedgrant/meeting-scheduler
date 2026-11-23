@@ -221,6 +221,27 @@ test('F05/F09 atomic creation, retry identity and server limits', async t => {
     await db.exec('DROP TRIGGER fail_creation_receipt ON private.poll_creation_requests;DROP FUNCTION public.fail_creation_receipt()');
     await create(id,payload,op);assert.equal((await counts(id)).spent,1);
   });
+  await t.test('owners edit details while members and signed-out callers cannot',async()=>{
+    const owner=await user(),member=await user(),unrelated=await user(),r=await create(owner);
+    await as(member,()=>scalar('SELECT public.join_poll($1) AS result',[r.poll.id]));
+    const original=(await db.query('SELECT * FROM public.polls WHERE id=$1',[r.poll.id])).rows[0];
+    for(const [id,role]of [[member,'authenticated'],[unrelated,'authenticated'],[null,'anon']]){
+      const result=await as(id,()=>db.query("UPDATE public.polls SET title='Forbidden' WHERE id=$1 RETURNING id",[r.poll.id]),role);
+      assert.equal(result.rows.length,0);
+    }
+    const saved=await as(owner,()=>db.query(`UPDATE public.polls SET title='Edited',description=NULL,
+      location='Room 8',closes_at=now()+interval '2 days' WHERE id=$1 RETURNING *`,[r.poll.id]));
+    assert.equal(saved.rows[0].title,'Edited');assert.equal(saved.rows[0].description,null);
+    assert.equal(saved.rows[0].location,'Room 8');assert.ok(saved.rows[0].closes_at);
+    for(const field of ['id','creator_id','share_code','status','timezone','is_premium','max_participants']){
+      assert.equal(saved.rows[0][field],original[field]);
+    }
+    const options=(await db.query('SELECT id FROM public.poll_time_options WHERE poll_id=$1 ORDER BY id',[r.poll.id])).rows;
+    assert.deepEqual(options.map(o=>o.id),r.time_options.map(o=>o.id).sort());
+    await as(owner,()=>db.query('UPDATE public.polls SET closes_at=NULL,location=NULL WHERE id=$1',[r.poll.id]));
+    const cleared=(await db.query('SELECT closes_at,location FROM public.polls WHERE id=$1',[r.poll.id])).rows[0];
+    assert.deepEqual(cleared,{closes_at:null,location:null});
+  });
   await t.test('direct field validation and inherited API roles cannot bypass updates',async()=>{
     const id=await user(),r=await create(id);
     for(const expression of ["status=NULL","title=' '","timezone='Invalid/Zone'","closes_at='infinity'", "description=repeat('x',10001)"]){
