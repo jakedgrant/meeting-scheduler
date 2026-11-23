@@ -363,6 +363,35 @@ class PollService(
         }
     }
 
+    override suspend fun updatePoll(draft: PollEditDraft): Poll = withDetailMutation(draft.original.id) {
+        val key = creationAccountKey
+        val owner = creationAccountId ?: throw PollError.NotAuthenticated
+        require(draft.original.creatorId == owner) { "Only the poll owner can edit its details." }
+        val credential = requestCredential()
+        val saved = accountPostgrest(supabase, credential).from("polls")
+            .update(draft.changes(kotlin.time.Clock.System.now())) {
+                filter {
+                    eq("id", draft.original.id)
+                    eq("creator_id", owner)
+                }
+                select()
+            }.decodeSingle<Poll>()
+        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+        if (key != creationAccountKey) throw kotlinx.coroutines.CancellationException("Account changed")
+        check(saved.id == draft.original.id && saved.creatorId == owner) { "The saved poll could not be confirmed." }
+        creationRevision += 1
+        if (isLoading && listTotalCount == null) {
+            retryLoadsMore = false
+            listLoadError = "Refresh to load your poll history."
+        }
+        isLoading = false
+        isLoadingMore = false
+        myPolls = myPolls.map { if (it.id == saved.id) saved else it }
+        createdPolls = createdPolls.map { if (it.id == saved.id) saved else it }
+        joinedPolls = joinedPolls.map { if (it.id == saved.id) saved else it }
+        saved
+    }
+
     // MARK: - Poll Status
 
     override suspend fun updatePollStatus(pollId: String, status: PollStatus): Unit = withDetailMutation(pollId) {

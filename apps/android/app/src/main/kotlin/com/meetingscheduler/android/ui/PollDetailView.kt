@@ -107,6 +107,12 @@ fun PollDetailView(
                             Icon(Icons.Default.Share, "Share")
                         }
                     }
+                    if (poll != null && model.isCreator) {
+                        Spacer(Modifier.width(16.dp))
+                        IconButton(onClick = model::beginEditing, enabled = model.canMutatePoll) {
+                            Icon(Icons.Default.Edit, "Edit Poll")
+                        }
+                    }
                 }
             )
         }
@@ -524,6 +530,10 @@ fun PollDetailView(
     }
 
     // Close Poll Dialog
+    if (model.editDraft != null) {
+        EditPollView(model, onSave = { holder.launch { saveDetails() } })
+    }
+
     if (showClosePollDialog) {
         AlertDialog(
             onDismissRequest = { showClosePollDialog = false },

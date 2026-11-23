@@ -42,6 +42,7 @@ class PollDetailModelTest {
         var availability: suspend () -> AvailabilitySnapshot = { error("unexpected availability read") }
         var save: suspend (AvailabilitySaveRequest) -> AvailabilitySnapshot = { error("unexpected save") }
         var join: suspend () -> PollParticipant = { error("unexpected join") }
+        var update: suspend (PollEditDraft) -> Poll = { error("Unexpected edit") }
         var finalize: suspend (String) -> Poll = { error("unexpected finalize") }
         override fun availabilitySession(pollId: String) = session
         var cached: PollDetail? = null
@@ -50,6 +51,7 @@ class PollDetailModelTest {
         override suspend fun joinPoll(pollId: String) = join()
         override suspend fun getAvailability(pollId: String) = availability()
         override suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest) = save(request)
+        override suspend fun updatePoll(draft: PollEditDraft): Poll = update(draft)
         override suspend fun updatePollStatus(pollId: String, status: PollStatus) {}
         override suspend fun finalizePoll(pollId: String, timeOptionId: String) = finalize(timeOptionId)
     }
@@ -63,6 +65,85 @@ class PollDetailModelTest {
             checks += 1
             return checker?.invoke() ?: check
         }
+    }
+
+    @Test fun ownerEditingUpdatesDetailsWithoutReplacingVotesOrTheAvailabilityDraft() = runBlocking<Unit> {
+        val owned = poll.copy(creatorId = "account", location = "Room")
+        val polls = FakePolls({ detail.copy(poll = owned) }).apply {
+            availability = { savedSnapshot }
+            update = { draft -> owned.copy(title = draft.title.trim(), description = draft.description, location = draft.location) }
+        }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load()
+        model.setResponse("first", AvailabilityStatus.AVAILABLE)
+        model.updateComment("Unsaved availability")
+        model.beginEditing()
+        assertEquals("Room", model.editDraft?.location)
+        model.editDetails { it.copy(title = "Updated", location = "New room") }
+        model.saveDetails()
+        assertEquals("Updated", model.poll?.title)
+        assertEquals("New room", model.poll?.location)
+        assertNull(model.editDraft)
+        assertEquals(listOf(first, second), model.timeOptions)
+        assertEquals(AvailabilityStatus.AVAILABLE, model.localResponses["first"])
+        assertEquals("Unsaved availability", model.localComment)
+        assertEquals(3L, polls.session.snapshot?.version)
+        assertEquals(detail.responses.single(), model.responses.first { it.participantId == "other" })
+    }
+
+    @Test fun failedEditsRetainTheirDraftAndCanRetryWhileInvalidOrForeignEditsDoNotDispatch() = runBlocking<Unit> {
+        val owned = poll.copy(creatorId = "account")
+        var calls = 0
+        val polls = FakePolls({ detail.copy(poll = owned) }).apply {
+            availability = { savedSnapshot }
+            update = { calls++; throw java.io.IOException("offline") }
+        }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load(); model.beginEditing()
+        model.editDetails { it.copy(title = " ") }; model.saveDetails()
+        assertEquals(0, calls)
+        model.editDetails { it.copy(title = "Updated") }; model.saveDetails()
+        assertEquals(1, calls)
+        assertEquals("Updated", model.editDraft?.title)
+        assertEquals("Planning", model.poll?.title)
+        assertFalse(model.isEditingPoll); assertNotNull(model.editError)
+        polls.update = { draft -> owned.copy(title = draft.title) }
+        model.saveDetails()
+        assertNull(model.editDraft); assertNull(model.editError)
+        val nonowner = PollDetailModel("poll", FakePolls({ detail }).apply { availability = { savedSnapshot } }, FakeCalendar(), clock)
+        nonowner.load(); nonowner.beginEditing()
+        assertNull(nonowner.editDraft)
+    }
+
+    @Test fun accountChangesDropLateEditSuccessAndFailure() = runBlocking<Unit> {
+        for (fails in listOf(false, true)) {
+            val owned = poll.copy(creatorId = "account")
+            val reply = CompletableDeferred<Poll>()
+            val polls = FakePolls({ detail.copy(poll = owned) }).apply {
+                availability = { savedSnapshot }; update = { reply.await() }
+            }
+            val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+            model.load(); model.beginEditing(); model.editDetails { it.copy(title = "Late") }
+            val saving = async(start = CoroutineStart.UNDISPATCHED) { model.saveDetails() }
+            assertTrue(model.isEditingPoll)
+            polls.generation++
+            if (fails) reply.completeExceptionally(java.io.IOException("late error")) else reply.complete(owned.copy(title = "Late"))
+            saving.await()
+            assertEquals("Planning", model.poll?.title)
+            assertNull(model.editError)
+        }
+    }
+
+    @Test fun editingAClosedFinalizedPollKeepsItClosedAndItsSelectedInterval() = runBlocking<Unit> {
+        val owned = poll.copy(creatorId = "account", status = PollStatus.CLOSED, selectedStartTime = first.startTime, selectedEndTime = first.endTime)
+        val polls = FakePolls({ detail.copy(poll = owned) }).apply {
+            availability = { savedSnapshot }; update = { draft -> owned.copy(title = draft.title) }
+        }
+        val model = PollDetailModel("poll", polls, FakeCalendar(), clock)
+        model.load(); model.beginEditing(); model.editDetails { it.copy(title = "Final meeting") }; model.saveDetails()
+        assertEquals(PollStatus.CLOSED, model.poll?.status)
+        assertEquals(first.startTime, model.poll?.selectedStartTime)
+        assertFalse(model.canRespond)
     }
 
     @Test fun loadPublishesTheDetailAndSuggestsUnavailableOnlyForUnansweredBusyOptions() = runBlocking<Unit> {
