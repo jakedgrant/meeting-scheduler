@@ -29,6 +29,8 @@ struct PollListView: View {
     @State var showCreatePoll = false
     @State var showJoinByCode = false
     @State var joinCode = ""
+    @State private var invitationCode: String?
+    @State private var joinGeneration: UInt64 = 0
     @State var joinError: String?
     @State var isJoining = false
     @State var navigateToPoll: UUID?
@@ -74,16 +76,19 @@ struct PollListView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showCreatePoll) {
+            .sheet(isPresented: $showCreatePoll, onDismiss: openPendingPollLink) {
                 CreatePollView { pollId in
                     navigateToPoll = pollId
                 }
             }
-            .sheet(isPresented: $showJoinByCode) {
+            .sheet(isPresented: $showJoinByCode, onDismiss: {
+                if !showJoinByCode { dismissJoinSheet() }
+            }) {
                 JoinByCodeSheet(
                     joinCode: $joinCode,
                     joinError: $joinError,
                     isJoining: $isJoining,
+                    invitationCode: invitationCode,
                     onJoin: handleJoinByCode,
                     onDismiss: dismissJoinSheet
                 )
@@ -98,6 +103,7 @@ struct PollListView: View {
                 await pollService.loadMyPolls()
             }
             .onChange(of: pendingPollLink, initial: true) { openPendingPollLink() }
+            .onChange(of: authService.sessionGeneration) { dismissJoinSheet() }
         }
     }
 
@@ -201,6 +207,9 @@ struct PollListView: View {
     // MARK: - Actions
 
     private func dismissJoinSheet() {
+        joinGeneration &+= 1
+        isJoining = false
+        invitationCode = nil
         showJoinByCode = false
         joinCode = ""
         joinError = nil
@@ -213,18 +222,23 @@ struct PollListView: View {
             joinError = "Code must be 6 characters"
             return
         }
+        guard !isJoining else { return }
         isJoining = true
+        let generation = joinGeneration
+        let openingInvitation = invitationCode != nil
         authService.performSessionTask(
-            // Only members can open a poll, so the code joins it first.
             operation: { _ in
-                let pollId = try await pollService.joinPoll(code: code)
+                let pollId: UUID
+                if openingInvitation {
+                    pollId = try await pollService.openPollInvitation(code: code, accountId: authService.currentUserId)
+                } else {
+                    pollId = try await pollService.joinPoll(code: code)
+                }
                 await pollService.loadMyPolls()
                 return pollId
             },
             onSuccess: { pollId in
-                showJoinByCode = false
-                joinCode = ""
-                joinError = nil
+                dismissJoinSheet()
                 navigateToPoll = pollId
             },
             onFailure: { error in
@@ -234,17 +248,23 @@ struct PollListView: View {
                 default: "The poll could not be joined. Please try again."
                 }
             },
-            onCompletion: { isJoining = false }
+            onCompletion: { isJoining = false },
+            isCurrent: { generation == joinGeneration }
         )
     }
 
     private func openPendingPollLink() {
-        guard let link = pendingPollLink else { return }
+        guard !showCreatePoll, let link = pendingPollLink else { return }
         pendingPollLink = nil
-        // The join sheet would hide the poll and holds nothing worth keeping. A poll being
-        // created stays open; the linked poll is waiting behind it.
-        if showJoinByCode { dismissJoinSheet() }
-        navigateToPoll = link.pollId
+        dismissJoinSheet()
+        switch link.target {
+        case .poll(let id):
+            navigateToPoll = id
+        case .invitation(let code):
+            invitationCode = code
+            joinCode = code
+            showJoinByCode = true
+        }
     }
 
     private func handleCreatePoll() {

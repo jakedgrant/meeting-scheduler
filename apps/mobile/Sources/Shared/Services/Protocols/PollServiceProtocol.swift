@@ -71,6 +71,16 @@ extension PollServiceProtocol {
         await loadPollDetail(id: id, forceRefresh: false)
     }
 
+    /// Resolves a confirmed invitation. Non-active previews are returned only to existing
+    /// owners/members by the server, so they can open results without creating membership.
+    public func openPollInvitation(code: String, accountId: UUID?) async throws -> UUID {
+        guard let poll = await loadPollByCode(code) else { throw PollError.pollNotFound }
+        if poll.status == .active && poll.creatorId != accountId {
+            _ = try await joinPoll(pollId: poll.id, anonymousName: nil)
+        }
+        return poll.id
+    }
+
     /// Joins the poll a share code names and returns its ID.
     ///
     /// Entering a code is the decision to join. Only a poll's creator and participants can read

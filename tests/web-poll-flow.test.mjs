@@ -143,5 +143,5 @@ test('month cells pad to the weekday and months shift across years', async t => 
   assert.equal(flow.monthCells('2026-12').findIndex(Boolean), 2, 'Dec 1 2026 is a Tuesday');
   assert.equal(flow.shiftMonth('2026-12', 1), '2027-01');
   assert.equal(flow.shiftMonth('2027-01', -1), '2026-12');
-  assert.equal(flow.pollLink('https://example.com', 'abc'), 'https://example.com/polls/abc');
+  assert.equal(flow.pollLink('https://example.com', 'abc123'), 'https://example.com/join/ABC123');
 });

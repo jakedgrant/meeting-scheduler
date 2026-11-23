@@ -125,7 +125,8 @@ private struct PollDetailScreen: View {
             ParticipantsSheet(participants: model.participants, isCurrentUser: model.isCurrentUser)
         }
         .sheet(isPresented: $showShareCode) {
-            if let poll, let pollURL = URL(string: "\(Config.webURL)/polls/\(poll.id)") {
+            if let poll {
+                let pollURL = PollLink.shareURL(code: poll.shareCode)
                 ShareCodeSheet(shareCode: poll.shareCode, pollURL: pollURL)
             }
         }
@@ -187,12 +188,9 @@ private struct PollDetailScreen: View {
 
     private func shareMenu(_ poll: Poll) -> some View {
         Menu {
-            if let pollURL = URL(string: "\(Config.webURL)/polls/\(poll.id)") {
-                // The URL is the only shared item, so AirDrop hands the receiver a link that
-                // opens the poll. ShareLink presents from whichever window shows this button.
-                ShareLink(item: pollURL, subject: Text(poll.title)) {
-                    Label("Share Link", systemImage: "link")
-                }
+            let pollURL = PollLink.shareURL(code: poll.shareCode)
+            ShareLink(item: pollURL, subject: Text(poll.title)) {
+                Label("Share Link", systemImage: "link")
             }
             Button("Show Share Code", systemImage: "number") {
                 showShareCode = true

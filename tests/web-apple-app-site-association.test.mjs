@@ -16,7 +16,7 @@ await build({
   entryPoints: [join(root, 'apps/web/src/lib/apple-app-site-association.ts')],
   outfile: output, bundle: true, platform: 'node', format: 'esm', tsconfigRaw: {}
 });
-const { appleAppSiteAssociation, IOS_APP_ID, POLL_PATH_PATTERN } = await import(pathToFileURL(output));
+const { appleAppSiteAssociation, IOS_APP_ID, POLL_PATH_PATTERN, JOIN_PATH_PATTERN } = await import(pathToFileURL(output));
 test.after(() => rm(directory, { recursive: true, force: true }));
 
 const ios = join(root, 'apps/mobile/MeetingScheduler');
@@ -47,12 +47,14 @@ test('the iOS app claims the domain the file is served from', async () => {
   assert.match(entitlements, /<key>com\.apple\.developer\.associated-domains<\/key>\s*<array>\s*<string>applinks:meetful\.app<\/string>/);
 });
 
-test('only poll pages open the app', () => {
+test('code invitations and legacy poll pages open the app', () => {
   const [{ components }] = appleAppSiteAssociation.applinks.details;
-  assert.deepEqual(components.map(component => component['/']), [POLL_PATH_PATTERN]);
+  assert.deepEqual(components.map(component => component['/']), [JOIN_PATH_PATTERN, POLL_PATH_PATTERN]);
   assert.ok(matches(POLL_PATH_PATTERN, `/polls/${crypto.randomUUID()}`));
+  assert.ok(matches(JOIN_PATH_PATTERN, '/join/ABC123'));
+  assert.ok(matches(JOIN_PATH_PATTERN, '/join/abc123'));
   for (const path of ['/polls', '/polls/', '/polls/new', `/polls/${crypto.randomUUID()}/times/${crypto.randomUUID()}`,
-    `/join/BFZZ7J`, '/auth/callback', `/polls/${crypto.randomUUID()}x`]) {
-    assert.ok(!matches(POLL_PATH_PATTERN, path), path);
+    '/join/ABC12', '/join/ABC1234', '/join/ABC123/extra', '/auth/callback', `/polls/${crypto.randomUUID()}x`]) {
+    assert.ok(!components.some(component => matches(component['/'], path)), path);
   }
 });

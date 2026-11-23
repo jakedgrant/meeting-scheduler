@@ -451,6 +451,30 @@ final class PollReadTransportTests: XCTestCase {
         }
     }
 
+    func testConfirmedInvitationKeepsClosedResultsAccessibleWithoutJoining() async throws {
+        let account = UUID()
+        for owner in [false, true] {
+            let poll = Poll(creatorId: owner ? account : UUID(), title: "Final results", status: .closed)
+            try await withService(account: account) { service, transport, _ in
+                transport.enqueue([.json(try lookup(poll, status: .closed))])
+                let opened = try await service.openPollInvitation(code: "BFZZ7J", accountId: account)
+                XCTAssertEqual(opened, poll.id)
+                XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code"])
+            }
+        }
+    }
+
+    func testConfirmedOwnerInvitationDoesNotNeedMembershipEvenWhenJoiningHasExpired() async throws {
+        let account = UUID()
+        let poll = Poll(creatorId: account, title: "Owner results", status: .active)
+        try await withService(account: account) { service, transport, _ in
+            transport.enqueue([.json(try lookup(poll))])
+            let opened = try await service.openPollInvitation(code: "BFZZ7J", accountId: account)
+            XCTAssertEqual(opened, poll.id)
+            XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code"])
+        }
+    }
+
     func testUnknownShareCodeJoinsNothing() async throws {
         try await withService(account: UUID()) { service, transport, _ in
             transport.enqueue([.json(Data("[]".utf8))])

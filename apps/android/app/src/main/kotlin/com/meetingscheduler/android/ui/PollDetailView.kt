@@ -87,7 +87,7 @@ fun PollDetailView(
                     if (poll?.status == PollStatus.ACTIVE) {
                         IconButton(onClick = {
                             poll?.let {
-                                val pollURL = "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}"
+                                val pollURL = pollShareLink(it.shareCode)
                                 val shareText = """
                                     Join my poll: ${it.title}
 
@@ -244,7 +244,7 @@ fun PollDetailView(
                                         Text("Share Link", style = MaterialTheme.typography.labelMedium)
                                         TextButton(onClick = {
                                             poll?.let {
-                                                val pollURL = "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}"
+                                                val pollURL = pollShareLink(it.shareCode)
                                                 clipboardManager.setText(AnnotatedString(pollURL))
                                             }
                                         }) {
@@ -266,7 +266,7 @@ fun PollDetailView(
                                     ) {
                                         poll?.let {
                                             Text(
-                                                "${com.meetingscheduler.android.Config.WEB_URL}/polls/${it.id}",
+                                                pollShareLink(it.shareCode),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.primary
                                             )

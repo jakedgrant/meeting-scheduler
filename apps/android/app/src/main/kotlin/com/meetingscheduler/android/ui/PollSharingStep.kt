@@ -43,8 +43,8 @@ import com.meetingscheduler.android.Config
 import com.meetingscheduler.android.models.Poll
 import java.io.File
 
-/** The link people open to join [pollId], the same one the poll detail screen shares. */
-fun pollShareLink(pollId: String): String = "${Config.WEB_URL}/polls/$pollId"
+/** Opens a confirmation page for this poll code, shared by every share and QR action. */
+fun pollShareLink(shareCode: String): String = "${Config.WEB_URL}/join/${shareCode.uppercase(java.util.Locale.ROOT)}"
 
 /** A QR code for [text] as a matrix of dark modules, including its quiet zone. */
 fun qrMatrix(text: String): BitMatrix =
@@ -89,7 +89,7 @@ private fun shareQr(context: Context, matrix: BitMatrix, title: String) {
 fun PollSharingStep(poll: Poll, onClose: () -> Unit, onOpenPoll: () -> Unit) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val link = pollShareLink(poll.id)
+    val link = pollShareLink(poll.shareCode)
     val matrix = remember(link) { qrMatrix(link) }
 
     Scaffold(

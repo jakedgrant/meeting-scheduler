@@ -4,15 +4,14 @@ import Shared
 /// The final screen of the new-poll flow: the created poll's code, link and QR code.
 struct PollSharingStep: View {
     let poll: Poll
-    private let qrCode: QRCodeImage?
+    private let qrCode: QRCodeImage
 
-    private var link: String { "\(Config.webURL)/polls/\(poll.id)" }
+    private var link: String { PollLink.shareURL(code: poll.shareCode).absoluteString }
 
     init(poll: Poll) {
         self.poll = poll
-        qrCode = URL(string: "\(Config.webURL)/polls/\(poll.id)").map {
-            QRCodeImage(url: $0, accessibilityLabel: Text("QR code that opens \(poll.title)"))
-        }
+        qrCode = QRCodeImage(url: PollLink.shareURL(code: poll.shareCode),
+                             accessibilityLabel: Text("QR code that opens \(poll.title)"))
     }
 
     var body: some View {
@@ -117,7 +116,7 @@ struct PollSharingStep: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                if let qrCode, let qrImage = qrCode.uiImage {
+                if let qrImage = qrCode.uiImage {
                     qrCode
                         .frame(width: 228, height: 228)
 

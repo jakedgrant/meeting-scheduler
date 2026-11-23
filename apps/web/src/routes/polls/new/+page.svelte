@@ -111,7 +111,7 @@
 			<h1 bind:this={heading} tabindex="-1">Poll created</h1>
 			<p class="lead">{result.poll.title} is live. Share it any way you like.</p>
 		</div>
-		<PollShare pollId={result.poll.id} title={result.poll.title} shareCode={result.poll.share_code} />
+		<PollShare title={result.poll.title} shareCode={result.poll.share_code} />
 		<div class="actions end">
 			<a class="btn-link" href={`/polls/${result.poll.id}`}>Open poll</a>
 		</div>

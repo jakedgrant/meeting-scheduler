@@ -1,34 +1,44 @@
 import Foundation
 
-/// A link to one poll: the web page `https://meetful.app/polls/<UUID>`, which iOS hands to the
-/// app as a universal link, or `meetingscheduler://polls/<UUID>` on the app's own scheme.
-///
-/// The web's `apple-app-site-association` file claims only that path shape, so other pages on
-/// the site keep opening in the browser. Opening a link grants nothing: the poll screen still
-/// loads through the server, which shows the poll only to its creator and participants.
+/// Code invitations require confirmation before joining. Older UUID links still open detail.
 public struct PollLink: Equatable, Sendable {
-    public let pollId: UUID
+    public enum Target: Equatable, Sendable {
+        case poll(UUID)
+        case invitation(String)
+    }
 
-    /// Returns nil for any other URL, including auth callbacks, so the caller can pass it on.
+    public let target: Target
+
+    public static func shareURL(code: String) -> URL {
+        URL(string: Config.webURL)!.appendingPathComponent("join").appendingPathComponent(code.uppercased())
+    }
+
+    /// Returns nil for unrelated or malformed URLs, including authentication callbacks.
     public init?(url: URL) {
         guard url.user == nil, url.password == nil, url.port == nil else { return nil }
         let segments = url.pathComponents.filter { $0 != "/" }
-        let idText: String
+        let route: String
+        let value: String
         switch url.scheme?.lowercased() {
         case "https":
-            guard url.host?.lowercased() == Self.webHost, segments.count == 2, segments[0] == "polls" else {
-                return nil
-            }
-            idText = segments[1]
+            guard url.host?.lowercased() == Self.webHost, segments.count == 2 else { return nil }
+            route = segments[0]
+            value = segments[1]
         case Config.appScheme:
-            guard url.host == "polls", segments.count == 1 else { return nil }
-            idText = segments[0]
+            guard let host = url.host, segments.count == 1 else { return nil }
+            route = host
+            value = segments[0]
         default:
             return nil
         }
-        // Rejects `/polls/new` and any other segment that isn't a UUID.
-        guard let pollId = UUID(uuidString: idText) else { return nil }
-        self.pollId = pollId
+        if route == "polls", let id = UUID(uuidString: value) {
+            target = .poll(id)
+        } else if route == "join", value.utf8.count == 6,
+                  value.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }) {
+            target = .invitation(value.uppercased())
+        } else {
+            return nil
+        }
     }
 
     private static let webHost = URL(string: Config.webURL)!.host!.lowercased()
