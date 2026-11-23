@@ -77,6 +77,84 @@ final class PollCreationTransportTests: XCTestCase {
         return try encoder.encode(result)
     }
 
+    func testOwnerEditPatchesOnlyChangedDetailsAndPublishesTheSavedRow() async throws {
+        let old = Poll(creatorId: account, title: "Before", description: "Agenda", location: "Room",
+                       status: .closed, closesAt: Date(timeIntervalSince1970: 100.123456), shareCode: "SAME")
+        var saved = old
+        saved.title = "After"; saved.description = nil; saved.location = nil
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let cache = InMemoryPersistenceProvider()
+        let service = service(replies: [(200, try encoder.encode(saved))], persistence: cache,
+                              listLoader: { ([old], []) })
+        await service.loadMyPolls()
+        try cache.savePollDetail(PollDetail(poll: old, timeOptions: [], participants: [], responses: []))
+        var draft = PollEditDraft(poll: old)
+        draft.title = " After "; draft.description = ""; draft.location = ""
+        let result = try await service.updatePoll(draft)
+        XCTAssertEqual(result.title, "After")
+        let request = try XCTUnwrap(CreationURLProtocol.requests.withLock { $0.first })
+        XCTAssertEqual(request.httpMethod, "PATCH")
+        XCTAssertEqual(request.url?.path, "/rest/v1/polls")
+        let query = try XCTUnwrap(URLComponents(url: XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems)
+        XCTAssertTrue(query.contains { $0.name == "id" && $0.value == "eq.\(old.id.uuidString)" })
+        XCTAssertTrue(query.contains { $0.name == "creator_id" && $0.value == "eq.\(account.uuidString)" })
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(Set(body.keys), ["title", "description", "location"])
+        XCTAssertEqual(body["title"] as? String, "After")
+        XCTAssertTrue(body["description"] is NSNull)
+        XCTAssertTrue(body["location"] is NSNull)
+        XCTAssertEqual(service.createdPolls.first?.title, "After")
+        XCTAssertEqual(service.myPolls.first?.title, "After")
+        XCTAssertEqual(service.myPolls.first?.status, .closed)
+        XCTAssertEqual(service.myPolls.first?.shareCode, "SAME")
+        XCTAssertNil(service.cachedPollDetail(id: old.id))
+    }
+
+    func testEditingDeadlineCanSetAndClearItWithoutSendingOtherFields() async throws {
+        let old = Poll(creatorId: account, title: "Planning")
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let service = service(replies: [(200, try encoder.encode(old)), (200, try encoder.encode(old))])
+        var draft = PollEditDraft(poll: old)
+        draft.closesAt = Date(timeIntervalSince1970: 1_900_000_000)
+        _ = try await service.updatePoll(draft)
+        var withDeadline = old; withDeadline.closesAt = draft.closesAt
+        draft = PollEditDraft(poll: withDeadline); draft.closesAt = nil
+        _ = try await service.updatePoll(draft)
+        let bodies = try CreationURLProtocol.requests.withLock { $0 }.map {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap($0.httpBody)) as? [String: Any])
+        }
+        XCTAssertEqual(Set(bodies[0].keys), ["closes_at"])
+        XCTAssertEqual(bodies[0]["closes_at"] as? String, "2030-03-17T17:46:40Z")
+        XCTAssertTrue(bodies[1]["closes_at"] is NSNull)
+    }
+
+    func testDeniedEditAndForeignOwnerNeverPublishSuccess() async throws {
+        let old = Poll(creatorId: account, title: "Planning")
+        let service = service(replies: [(406, Data("{\"code\":\"PGRST116\",\"message\":\"No rows\"}".utf8))],
+                              listLoader: { ([old], []) })
+        await service.loadMyPolls()
+        var draft = PollEditDraft(poll: old); draft.title = "Changed"
+        do { _ = try await service.updatePoll(draft); XCTFail("Expected denial") } catch { }
+        XCTAssertEqual(service.createdPolls.first?.title, "Planning")
+        let foreign = Poll(creatorId: UUID(), title: "Foreign")
+        draft = PollEditDraft(poll: foreign); draft.title = "Changed"
+        do { _ = try await service.updatePoll(draft); XCTFail("Expected owner check") } catch { }
+        XCTAssertEqual(CreationURLProtocol.requests.withLock { $0.count }, 1)
+    }
+
+    func testEditReplyFromPreviousAccountCannotUpdateNewAccountsCache() async throws {
+        let saved = Poll(creatorId: account, title: "Saved")
+        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let identity = CreationTestIdentity(account)
+        let service = service(replies: [(200, try encoder.encode(saved))], currentUserId: { identity.read() })
+        CreationURLProtocol.beforeResponse.withLock { $0 = { identity.set(UUID()) } }
+        var draft = PollEditDraft(poll: saved); draft.title = "Changed"
+        do { _ = try await service.updatePoll(draft); XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertTrue(service.myPolls.isEmpty)
+        XCTAssertTrue(service.createdPolls.isEmpty)
+    }
+
     func testOneRpcIncludesCompletePayloadNoClientAuthorityAndAppliesReturnedStateOnce() async throws {
         let saved = result(); let cache = SwiftDataPersistenceProvider(inMemory: true)
         let service = service(replies: [(200, try data(saved)), (200, try data(saved))], persistence: cache)

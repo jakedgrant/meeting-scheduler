@@ -209,6 +209,22 @@ public final class MockPollService: PollServiceProtocol {
         sampleTimeOptions.filter { $0.pollId == pollId }
     }
 
+    public var pollUpdater: (@MainActor (PollEditDraft) async throws -> Poll)?
+
+    public func updatePoll(_ draft: PollEditDraft) async throws -> Poll {
+        if let pollUpdater { return try await pollUpdater(draft) }
+        guard var poll = myPolls.first(where: { $0.id == draft.pollId }) else { throw PollError.pollNotFound }
+        poll.title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        poll.description = draft.description.isEmpty ? nil : draft.description
+        poll.location = draft.location.isEmpty ? nil : draft.location
+        poll.closesAt = draft.closesAt
+        myPolls = myPolls.map { $0.id == poll.id ? poll : $0 }
+        createdPolls = createdPolls.map { $0.id == poll.id ? poll : $0 }
+        joinedPolls = joinedPolls.map { $0.id == poll.id ? poll : $0 }
+        cachedDetails[poll.id] = nil
+        return poll
+    }
+
     public func updatePollStatus(pollId: UUID, status: PollStatus) async throws {}
 
     public func finalizePoll(pollId: UUID, timeOptionId: UUID) async throws -> Poll {

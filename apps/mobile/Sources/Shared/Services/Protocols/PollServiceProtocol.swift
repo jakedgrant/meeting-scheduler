@@ -42,6 +42,9 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
 
     func createPoll(_ request: CreatePollRequest) async throws -> PollCreationResult
 
+    /// Updates only the owner-editable details and returns the saved row.
+    func updatePoll(_ draft: PollEditDraft) async throws -> Poll
+
     // MARK: - Time Options
 
     func loadTimeOptions(pollId: UUID) async -> [PollTimeOption]

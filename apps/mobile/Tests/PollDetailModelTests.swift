@@ -48,6 +48,140 @@ final class PollDetailModelTests: XCTestCase {
             participant: participant)
     }
 
+    func testOwnerEditsDetailsWithoutLosingAvailabilityDraftOrOptions() async throws {
+        let fixture = fixture(creatorId: account)
+        await fixture.model.load()
+        fixture.model.setResponse(.maybe, for: fixture.options[0].id)
+        let responses = fixture.model.editor.responses
+        var draft = PollEditDraft(poll: fixture.poll)
+        draft.title = "Updated planning"
+        draft.description = "New agenda"
+        draft.location = "Room 8"
+        draft.closesAt = now.addingTimeInterval(3_600)
+        var saved = false
+        let task = try XCTUnwrap(fixture.model.updatePoll(draft) { saved = true })
+        XCTAssertTrue(fixture.model.isChangingPoll)
+        XCTAssertNil(fixture.model.close())
+        await task.value
+        XCTAssertTrue(saved)
+        XCTAssertFalse(fixture.model.isChangingPoll)
+        XCTAssertEqual(fixture.model.poll?.title, "Updated planning")
+        XCTAssertEqual(fixture.model.poll?.description, "New agenda")
+        XCTAssertEqual(fixture.model.poll?.location, "Room 8")
+        XCTAssertEqual(fixture.model.poll?.closesAt, draft.closesAt)
+        XCTAssertEqual(fixture.model.timeOptions.map(\.id), fixture.options.map(\.id))
+        XCTAssertEqual(fixture.model.editor.responses, responses)
+        XCTAssertEqual(fixture.model.participants.count, 2)
+    }
+
+    func testExtendingOrRemovingDeadlineRestoresResponsesAfterAClosedSave() async throws {
+        for deadline: Date? in [nil, now.addingTimeInterval(7_200)] {
+            let fixture = fixture(closesAt: now.addingTimeInterval(60), creatorId: account)
+            await fixture.model.load()
+            fixture.model.setResponse(.available, for: fixture.options[0].id)
+            var rejected: SaveAvailabilityRequest?
+            fixture.polls.availabilitySaver = { request in
+                rejected = request
+                throw AvailabilityCommandError.closed
+            }
+            await fixture.model.save()?.value
+            XCTAssertTrue(fixture.model.editor.isClosed)
+            XCTAssertFalse(fixture.model.acceptsResponses)
+            let responses = fixture.model.editor.responses
+            var draft = PollEditDraft(poll: fixture.poll)
+            draft.closesAt = deadline
+            await fixture.model.updatePoll(draft) {}?.value
+            XCTAssertFalse(fixture.model.editor.isClosed)
+            XCTAssertNil(fixture.model.editor.errorMessage)
+            XCTAssertEqual(fixture.model.editor.responses, responses)
+            XCTAssertTrue(fixture.model.canSave)
+            fixture.polls.availabilitySaver = { request in
+                XCTAssertEqual(request.requestId, rejected?.requestId)
+                return AvailabilitySnapshot(participantId: fixture.participant.id, pollId: fixture.poll.id,
+                    version: 1, comment: nil, responses: [])
+            }
+            await fixture.model.save()?.value
+            XCTAssertTrue(fixture.model.editor.didSave)
+        }
+    }
+
+    func testEditingClosedPollDoesNotReopenResponses() async throws {
+        let fixture = fixture(status: .closed, creatorId: account, finalized: true)
+        await fixture.model.load()
+        var draft = PollEditDraft(poll: fixture.poll)
+        draft.title = "Edited final meeting"
+        draft.closesAt = now.addingTimeInterval(7_200)
+        await fixture.model.updatePoll(draft) {}?.value
+        XCTAssertEqual(fixture.model.poll?.title, draft.title)
+        XCTAssertEqual(fixture.model.poll?.status, .closed)
+        XCTAssertEqual(fixture.model.poll?.selectedStartTime, fixture.poll.selectedStartTime)
+        XCTAssertFalse(fixture.model.acceptsResponses)
+        XCTAssertFalse(fixture.model.canSave)
+    }
+
+    func testEditingIsOwnerOnlyAndValidatesBeforeDispatch() async throws {
+        let member = fixture()
+        await member.model.load()
+        var draft = PollEditDraft(poll: member.poll)
+        draft.title = "Changed"
+        XCTAssertNil(member.model.updatePoll(draft) {})
+
+        let owner = fixture(creatorId: account)
+        await owner.model.load()
+        var calls = 0
+        owner.polls.pollUpdater = { _ in calls += 1; return owner.poll }
+        draft = PollEditDraft(poll: owner.poll)
+        XCTAssertNil(owner.model.updatePoll(draft) {})
+        draft.title = "   "
+        XCTAssertNil(owner.model.updatePoll(draft) {})
+        XCTAssertNotNil(owner.model.editError)
+        XCTAssertEqual(calls, 0)
+    }
+
+    func testFailedEditRetainsPollAndAllowsTheSameDraftToRetry() async throws {
+        let fixture = fixture(creatorId: account)
+        await fixture.model.load()
+        var draft = PollEditDraft(poll: fixture.poll)
+        draft.location = "New location"
+        fixture.polls.pollUpdater = { _ in throw URLError(.notConnectedToInternet) }
+        var saved = false
+        await fixture.model.updatePoll(draft) { saved = true }?.value
+        XCTAssertFalse(saved)
+        XCTAssertEqual(fixture.model.poll?.location, fixture.poll.location)
+        XCTAssertNotNil(fixture.model.editError)
+        XCTAssertFalse(fixture.model.isChangingPoll)
+        fixture.polls.pollUpdater = nil
+        await fixture.model.updatePoll(draft) { saved = true }?.value
+        XCTAssertTrue(saved)
+        XCTAssertNil(fixture.model.editError)
+        XCTAssertEqual(fixture.model.poll?.location, "New location")
+    }
+
+    func testLateEditDoesNotPublishAfterAccountChangeOrScreenDeparture() async throws {
+        for leaveScreen in [false, true] {
+            let fixture = fixture(creatorId: account)
+            await fixture.model.load()
+            var draft = PollEditDraft(poll: fixture.poll)
+            draft.title = "Obsolete title"
+            let started = expectation(description: "edit started")
+            var reply: CheckedContinuation<Poll, any Error>?
+            fixture.polls.pollUpdater = { _ in
+                try await withCheckedThrowingContinuation { reply = $0; started.fulfill() }
+            }
+            var saved = false
+            let task = try XCTUnwrap(fixture.model.updatePoll(draft) { saved = true })
+            await fulfillment(of: [started], timeout: 5)
+            if leaveScreen { fixture.model.suspend() }
+            else { fixture.auth.currentUserId = UUID() }
+            var result = fixture.poll
+            result.title = draft.title
+            reply?.resume(returning: result)
+            await task.value
+            XCTAssertFalse(saved)
+            XCTAssertEqual(fixture.model.poll?.title, fixture.poll.title)
+        }
+    }
+
     func testDeadlineAndResponseWindowAreJudgedAgainstTheInjectedClock() async {
         let cases: [(Date?, ResponseDeadlineStatus?, Bool)] = [
             (nil, nil, true),

@@ -49,6 +49,7 @@ interface PollDetailPolls : PollResponsesPolls {
     suspend fun joinPoll(pollId: String): PollParticipant
     suspend fun getAvailability(pollId: String): AvailabilitySnapshot
     suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot
+    suspend fun updatePoll(draft: PollEditDraft): Poll
     suspend fun updatePollStatus(pollId: String, status: PollStatus)
     suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll
 }

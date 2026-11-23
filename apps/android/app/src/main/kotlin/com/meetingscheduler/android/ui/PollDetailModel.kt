@@ -107,8 +107,14 @@ class PollDetailModel(
         private set
     var joinError by mutableStateOf<String?>(null)
         private set
+    var editDraft by mutableStateOf<PollEditDraft?>(null)
+        private set
+    var editError by mutableStateOf<String?>(null)
+        private set
+    var isEditingPoll by mutableStateOf(false)
+        private set
     private var isClosingPoll by mutableStateOf(false)
-    val isMutatingPoll: Boolean get() = isSaving || isJoining || isSelectingFinalDate || isClosingPoll
+    val isMutatingPoll: Boolean get() = isSaving || isJoining || isSelectingFinalDate || isClosingPoll || isEditingPoll
     val canMutatePoll: Boolean get() = !isLoading && !isMutatingPoll && isCurrentAccount()
 
     var isSelectingFinalDate by mutableStateOf(false)
@@ -379,6 +385,47 @@ class PollDetailModel(
 
     fun dismissConflict() {
         conflictSnapshot = null
+    }
+
+    fun beginEditing() {
+        val current = poll ?: return
+        if (!canMutatePoll || !isCreator) return
+        editDraft = PollEditDraft.from(current, clock.now())
+        editError = null
+    }
+
+    fun editDetails(change: (PollEditDraft) -> PollEditDraft) {
+        if (!isEditingPoll) editDraft = editDraft?.let(change)
+    }
+
+    fun cancelEditing() {
+        if (!isEditingPoll) { editDraft = null; editError = null }
+    }
+
+    fun editValidationError(): String? = editDraft?.validationError(clock.now())
+
+    suspend fun saveDetails() {
+        val draft = editDraft ?: return
+        if (!canMutatePoll || !isCreator || draft.original.id != pollId || !draft.hasChanges) return
+        editError = draft.validationError(clock.now())
+        if (editError != null) return
+        isEditingPoll = true
+        val generation = loadGeneration
+        try {
+            val saved = polls.updatePoll(draft)
+            if (generation != loadGeneration || !isCurrentAccount()) return
+            poll = saved
+            editDraft = null
+            editError = null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            if (generation == loadGeneration && isCurrentAccount()) {
+                editError = "Your changes could not be saved. Try again, or cancel and reload the poll."
+            }
+        } finally {
+            if (generation == loadGeneration && isCurrentAccount()) isEditingPoll = false
+        }
     }
 
     suspend fun close() {

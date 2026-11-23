@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
+	import EditPoll from '$lib/components/EditPoll.svelte';
+	import type { Poll } from '$lib/supabase';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { user } from '$lib/stores/auth';
@@ -42,6 +44,7 @@
 
 	// For anonymous users joining
 	let anonymousName = $state('');
+	let editingPoll = $state<Poll | null>(null);
 	let joiningPoll = $state(false);
 	let joinError = $state('');
 
@@ -97,7 +100,7 @@
 			editor.setOwner(value?.id ?? null);
 			pageSession.invalidate();
 			joiningPoll = false; joinError = ''; anonymousName = ''; commentError = '';
-			selectingFinalDate = false; showCalendarDropdown = false;
+			selectingFinalDate = false; showCalendarDropdown = false; editingPoll = null;
 		});
 		mounted = true;
 		clockTimer = setInterval(() => { now = Date.now(); }, 1000);
@@ -115,6 +118,7 @@
 		const identity = $sessionIdentity.generation;
 		if (mounted && pollId) {
 			pageSession.activate();
+			editingPoll = null;
 			joiningPoll = false;
 			joinError = '';
 			void detail?.load(pollId);
@@ -366,6 +370,9 @@
 					<h1>{$currentPoll.title}</h1>
 					<span class="status-badge status-{$currentPoll.status}">{$currentPoll.status}</span>
 				</div>
+				{#if isCreator}
+					<button class="btn secondary edit-poll" onclick={() => { editingPoll = $currentPoll; }} disabled={savingResponses || joiningPoll || selectingFinalDate}>Edit Poll</button>
+				{/if}
 			</div>
 			{#if $currentPoll.description}
 				<p class="description">{$currentPoll.description}</p>
@@ -392,6 +399,12 @@
 				</p>
 			{/if}
 		</header>
+
+		{#if editingPoll && isCreator && editingPoll.id === $currentPoll.id}
+			{#key `${pollId}:${$sessionIdentity.generation}`}
+				<EditPoll poll={editingPoll} onClose={() => { editingPoll = null; }} />
+			{/key}
+		{/if}
 
 		{#if $currentPoll.status === 'active'}
 			<div class="share-section">
@@ -718,8 +731,11 @@
 		align-items: flex-start;
 		margin-top: 0.5rem;
 		gap: 1rem;
-		flex-wrap: wrap;
 	}
+
+	.poll-header > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+	.edit-poll { margin-inline-start: auto; flex-shrink: 0; }
 
 	.poll-header h1 {
 		margin: 0;

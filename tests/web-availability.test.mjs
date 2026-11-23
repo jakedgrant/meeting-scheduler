@@ -71,7 +71,7 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
       b.onResolve({ filter: /^\$lib\// }, args => {
         const relative = args.path.slice(5);
         if (['supabase', 'stores/auth', 'stores/calendar', 'availability-editor'].includes(relative)) return { path: relative, namespace: 'fixture' };
-        return { path: join(lib, `${relative}.ts`) };
+        return { path: join(lib, relative.endsWith('.svelte') ? relative : `${relative}.ts`) };
       });
       b.onResolve({ filter: /\/stores\/auth\.ts$|^\.\/auth$/ }, () => ({ path: 'stores/auth', namespace: 'fixture' }));
       b.onResolve({ filter: /^\$app\// }, args => ({ path: args.path, namespace: 'fixture' }));
@@ -84,7 +84,7 @@ async function fixture(t, { member = false, disk = storage() } = {}) {
           'stores/calendar': `${prefix} export const calendarEnabled=writable(false),calendarConflicts=writable(new Set()),calendarUnchecked=writable(new Set()),calendarCoverage=writable(null),calendarLoading=writable(false),calendarStatusError=writable(null); ${reference}.calendar={calendarEnabled,calendarConflicts,calendarUnchecked,calendarCoverage,calendarStatusError}; export async function checkCalendarConflicts(){}`,
           'availability-editor': `import {createAvailabilityEditor as real} from '${lib}/availability-editor.ts'; export const createAvailabilityEditor=commands=>${reference}.editor ?? real(commands);`,
           '$app/stores': `${prefix} export const page=writable({params:{id:'${pollId}'}});`,
-          '$app/navigation': 'export function goto(){}'
+          '$app/navigation': 'export function goto(){} export function beforeNavigate(){}'
         }[args.path];
         return { contents, loader: 'js', resolveDir: join(root, 'apps/web') };
       });
@@ -518,4 +518,18 @@ test('late successful join cannot replace a capability acquired after revocation
   assert.deepEqual(actual.get(actual.currentGuest), newCapability);
   await actual.loadPoll(pollId);
   assert.deepEqual(actual.get(actual.currentGuest), newCapability);
+});
+
+test('the owner sees Edit Poll in the header while members and guests do not', async t => {
+  const { actual, state, primePage } = await fixture(t, { member: true });
+  primePage(actual.createAvailabilityEditor({ save: actual.saveAvailability, load: actual.loadAvailability }));
+  const ownerHtml = actual.render(actual.Page).body;
+  const header = ownerHtml.slice(ownerHtml.indexOf('<header'), ownerHtml.indexOf('</header>'));
+  assert.match(header, /Edit Poll/);
+  assert.ok(ownerHtml.indexOf('Edit Poll') < ownerHtml.indexOf('share-section'));
+  actual.user.set({ id: '99999999-9999-4999-8999-999999999999' });
+  actual.currentPoll.set(poll); actual.currentPollParticipants.set([state.participant]);
+  assert.doesNotMatch(actual.render(actual.Page).body, />Edit Poll</);
+  actual.user.set(null); actual.currentPoll.set(poll);
+  assert.doesNotMatch(actual.render(actual.Page).body, />Edit Poll</);
 });

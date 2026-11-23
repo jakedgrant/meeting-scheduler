@@ -156,6 +156,14 @@ public final class AvailabilityEditor {
         }
     }
 
+    /// A saved active poll with a future or removed deadline permits another response attempt.
+    /// Keep the draft and retry envelope: the rejected save did not commit responses.
+    public func resumeResponses() {
+        guard isClosed else { return }
+        isClosed = false
+        if errorMessage == AvailabilityCommandError.closed.localizedDescription { errorMessage = nil }
+    }
+
     private func adoptDraft(_ snapshot: AvailabilitySnapshot) {
         responses = Dictionary(uniqueKeysWithValues: snapshot.responses.map { ($0.timeOptionId, $0.status) })
         notes = Dictionary(uniqueKeysWithValues: snapshot.responses.compactMap { value in value.note.map { (value.timeOptionId, $0) } })
