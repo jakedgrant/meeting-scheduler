@@ -97,8 +97,8 @@ public final class PollService: PollServiceProtocol {
         try? persistence.invalidatePollDetail(pollId)
     }
 
-    func acceptFinalizedPoll(_ poll: Poll) {
-        // A list read started before finalization cannot restore the old active row.
+    func acceptUpdatedPoll(_ poll: Poll) {
+        // A list read started before a mutation cannot restore the old row.
         listGeneration &+= 1
         if isLoading && listTotalCount == nil {
             retryLoadsMore = false
@@ -422,6 +422,47 @@ public final class PollService: PollServiceProtocol {
                 guard isCurrent(generation) else { return [] }
                 FailureLog.polls.record("Failed to load time options", error: error)
                 return (try? persistence.fetchTimeOptions(for: pollId)) ?? []
+            }
+        }
+    }
+
+    // MARK: - Edit Poll
+
+    public func updatePoll(_ draft: PollEditDraft) async throws -> Poll {
+        let credentials = AccountRequestContext.credentials ?? requestCredentials()
+        return try await AccountRequestContext.$credentials.withValue(credentials) {
+            let generation = beginRequest()
+            guard let accountId, draft.creatorId == accountId else { throw PollError.pollNotFound }
+            invalidateDetail(draft.pollId)
+            do {
+                // Omit untouched fields, including a past or subsecond deadline. Resending it
+                // could change its precision and make the server reject an unrelated detail edit.
+                var fields: [String: AnyJSON] = [:]
+                if draft.title != draft.originalTitle {
+                    fields["title"] = .string(draft.title.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                if draft.description != draft.originalDescription {
+                    fields["description"] = draft.description.isEmpty ? .null : .string(draft.description)
+                }
+                if draft.location != draft.originalLocation {
+                    fields["location"] = draft.location.isEmpty ? .null : .string(draft.location)
+                }
+                if draft.closesAt != draft.originalClosesAt {
+                    fields["closes_at"] = draft.closesAt.map { .string($0.ISO8601Format()) } ?? .null
+                }
+                let poll: Poll = try await supabase.from("polls")
+                    .update(fields)
+                    .eq("id", value: draft.pollId.uuidString)
+                    .eq("creator_id", value: accountId.uuidString)
+                    .select().single().execute().value
+                guard isCurrent(generation) else { throw CancellationError() }
+                guard poll.id == draft.pollId, poll.creatorId == accountId else { throw PollError.pollNotFound }
+                acceptUpdatedPoll(poll)
+                return poll
+            } catch {
+                guard isCurrent(generation) else { throw CancellationError() }
+                invalidateDetail(draft.pollId)
+                throw error
             }
         }
     }

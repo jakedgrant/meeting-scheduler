@@ -62,6 +62,7 @@ class ScreenViewModelTest {
         override suspend fun joinPoll(pollId: String): PollParticipant = error("unexpected")
         override suspend fun getAvailability(pollId: String): AvailabilitySnapshot = error("unexpected")
         override suspend fun saveAvailability(pollId: String, request: AvailabilitySaveRequest): AvailabilitySnapshot = error("unexpected")
+        override suspend fun updatePoll(draft: PollEditDraft): Poll = error("Unexpected poll edit")
         override suspend fun updatePollStatus(pollId: String, status: PollStatus) {}
         override suspend fun finalizePoll(pollId: String, timeOptionId: String): Poll = error("unexpected")
     }

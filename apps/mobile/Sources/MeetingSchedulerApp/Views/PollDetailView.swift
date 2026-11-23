@@ -26,6 +26,7 @@ private struct PollDetailScreen: View {
     @State private var conflictOption: PollTimeOption?
     @State private var showParticipants = false
     @State private var showShareCode = false
+    @State private var showEditPoll = false
 
     init(model: PollDetailModel) {
         _model = State(initialValue: model)
@@ -89,7 +90,7 @@ private struct PollDetailScreen: View {
         .task(id: model.currentAccountId) {
             finalTimeOption = nil; selectedTimeOption = nil
             showClosePollAlert = false; showSelectFinalDateAlert = false
-            showParticipants = false; showShareCode = false
+            showParticipants = false; showShareCode = false; showEditPoll = false
             await model.load()
         }
         .onDisappear { model.suspend() }
@@ -124,6 +125,11 @@ private struct PollDetailScreen: View {
             // Built inside this body, so the sheet follows the model as participants join.
             ParticipantsSheet(participants: model.participants, isCurrentUser: model.isCurrentUser)
         }
+        .sheet(isPresented: $showEditPoll) {
+            if let poll, model.isCreator, model.displaysCurrentAccount {
+                EditPollView(poll: poll, model: model)
+            }
+        }
         .sheet(isPresented: $showShareCode) {
             if let poll {
                 let pollURL = PollLink.shareURL(code: poll.shareCode)
@@ -145,8 +151,21 @@ private struct PollDetailScreen: View {
             }
 
             if poll.status == .active {
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     shareMenu(poll)
+                }
+            }
+
+            if model.isCreator {
+                if poll.status == .active {
+                    ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit Poll", systemImage: "pencil") {
+                        model.clearEditError()
+                        showEditPoll = true
+                    }
+                    .disabled(!model.canMutatePoll)
                 }
             }
 

@@ -59,7 +59,7 @@ extension PollService {
                     ]
                 ).execute().value
                 guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }
-                acceptFinalizedPoll(poll)
+                acceptUpdatedPoll(poll)
                 return poll
             } catch {
                 guard isCurrent(generation), !Task.isCancelled else { throw CancellationError() }

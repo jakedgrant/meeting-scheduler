@@ -20,6 +20,7 @@ import {
   type RpcError
 } from '$lib/guest-capability'
 import type { AvailabilitySave, AvailabilitySnapshot } from '$lib/availability-editor'
+import { pollEditChanges, type PollEditDraft } from '$lib/poll-edit'
 import type { CreationOperation, CreationResult } from '$lib/poll-creation'
 import { IncompleteReadError, checkedPage, readAllPages, type Page } from '$lib/paged-read'
 import {
@@ -432,6 +433,44 @@ export async function createPoll(operation: CreationOperation): Promise<Creation
   currentPoll.set(result.poll)
   currentPollTimeOptions.set(result.time_options)
   return result
+}
+
+// The saved row is authoritative; options and participant drafts remain on screen.
+export async function updatePollDetails(original: Poll, draft: PollEditDraft): Promise<Poll> {
+  const account = get(user)
+  const scope = captureSession()
+  const generation = loadGeneration
+  if (!account || original.creator_id !== account.id || get(currentPoll)?.id !== original.id) {
+    throw new Error('Only the poll owner can edit its details.')
+  }
+  const changes = pollEditChanges(original, draft)
+  if (!Object.keys(changes).length) return original
+  detailRevision++
+  const isCurrent = () => scope.isCurrent() && get(user)?.id === account.id && generation === loadGeneration
+    && get(currentPoll)?.id === original.id
+  try {
+    const { data, error } = await supabase.from('polls').update(changes)
+      .eq('id', original.id).eq('creator_id', account.id).select().abortSignal(scope.signal).single()
+    if (!isCurrent()) throw new Error('The poll or account changed before saving finished.')
+    if (error) throw error
+    if (!isPoll(data) || data.id !== original.id || data.creator_id !== account.id) {
+      throw new Error('The saved poll could not be confirmed. Please retry.')
+    }
+    listGeneration++
+    if (get(pollsLoading)) pollsLoadError.set('Refresh to load your poll history.')
+    pollsLoading.set(false)
+    pollListSections.update(sections => ({
+      owner: { ...sections.owner, loadingMore: false }, member: { ...sections.member, loadingMore: false }
+    }))
+    for (const store of [polls, createdPolls, joinedPolls]) {
+      store.update(rows => rows.map(row => row.id === data.id ? data : row))
+    }
+    currentPoll.set(data)
+    return data
+  } finally {
+    // Fence reads begun both before dispatch and during an uncertain mutation.
+    if (isCurrent()) detailRevision++
+  }
 }
 
 // Update poll status
