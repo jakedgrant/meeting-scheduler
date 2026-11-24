@@ -525,6 +525,15 @@ struct ParticipantRow: View {
                         .clipShape(Capsule())
                 }
             }
+            Group {
+                if let submittedAt = participant.submittedAt {
+                    Text("Submitted \(submittedAt.formatted(date: .abbreviated, time: .shortened))")
+                } else {
+                    Text("Not submitted")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
             if let comment = participant.comment, !comment.isEmpty {
                 Text(comment)
                     .font(.caption)

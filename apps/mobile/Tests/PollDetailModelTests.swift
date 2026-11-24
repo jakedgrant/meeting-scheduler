@@ -479,6 +479,47 @@ final class PollDetailModelTests: XCTestCase {
         XCTAssertEqual(fixture.model.myParticipant?.comment, "Works for me")
     }
 
+    func testSubmissionTimestampChangesOnlyAfterASuccessfulSave() async throws {
+        let fixture = fixture()
+        await fixture.model.load()
+        XCTAssertNil(fixture.model.myParticipant?.submittedAt)
+        fixture.model.setResponse(.unavailable, for: fixture.options[0].id)
+        fixture.model.updateComment("Cannot attend")
+        XCTAssertNil(fixture.model.myParticipant?.submittedAt, "A local draft is not a submission")
+
+        fixture.polls.availabilitySaver = { _ in throw AvailabilityCommandError.transport }
+        await fixture.model.save()?.value
+        XCTAssertNil(fixture.model.myParticipant?.submittedAt, "A failed save is not a submission")
+
+        let submittedAt = now
+        fixture.polls.availabilitySaver = { request in
+            AvailabilitySnapshot(
+                participantId: request.participantId, pollId: request.pollId, version: 1,
+                comment: request.comment,
+                responses: [SavedAvailabilityAnswer(timeOptionId: request.responses[0].timeOptionId,
+                    status: .unavailable, updatedAt: submittedAt.addingTimeInterval(-60))],
+                submittedAt: submittedAt, savedAt: submittedAt)
+        }
+        await fixture.model.save()?.value
+        XCTAssertEqual(fixture.model.myParticipant?.submittedAt, submittedAt,
+                       "Use the server submission time rather than an individual answer or the client clock")
+        fixture.model.updateComment("Edited locally")
+        XCTAssertEqual(fixture.model.myParticipant?.submittedAt, submittedAt)
+    }
+
+    func testLoadingSavedAvailabilityAppliesItsSubmissionTimestamp() async {
+        let fixture = fixture()
+        let submittedAt = now
+        let optionId = fixture.options[0].id
+        fixture.polls.availabilityLoader = { pollId, participantId, _ in
+            AvailabilitySnapshot(participantId: participantId, pollId: pollId, version: 1, comment: nil,
+                responses: [SavedAvailabilityAnswer(timeOptionId: optionId, status: .maybe)],
+                submittedAt: submittedAt)
+        }
+        await fixture.model.load()
+        XCTAssertEqual(fixture.model.myParticipant?.submittedAt, submittedAt)
+    }
+
     func testSubmitNeedsAnAnswerThatIsNotAlreadySaved() async {
         let fixture = fixture()
         await fixture.model.load()

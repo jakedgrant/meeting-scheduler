@@ -30,15 +30,16 @@ public struct AvailabilitySnapshot: Codable, Sendable {
     public let version: Int64
     public let comment: String?
     public let responses: [SavedAvailabilityAnswer]
+    public let submittedAt: Date?
     public let savedAt: Date?
     public let replayed: Bool?
     enum CodingKeys: String, CodingKey {
         case participantId = "participant_id", pollId = "poll_id", version, comment, responses
-        case savedAt = "saved_at", replayed
+        case submittedAt = "submitted_at", savedAt = "saved_at", replayed
     }
-    public init(participantId: UUID, pollId: UUID, version: Int64, comment: String?, responses: [SavedAvailabilityAnswer], savedAt: Date? = nil, replayed: Bool? = nil) {
+    public init(participantId: UUID, pollId: UUID, version: Int64, comment: String?, responses: [SavedAvailabilityAnswer], submittedAt: Date? = nil, savedAt: Date? = nil, replayed: Bool? = nil) {
         self.participantId = participantId; self.pollId = pollId; self.version = version; self.comment = comment
-        self.responses = responses; self.savedAt = savedAt; self.replayed = replayed
+        self.responses = responses; self.submittedAt = submittedAt; self.savedAt = savedAt; self.replayed = replayed
     }
     public var availabilityResponses: [AvailabilityResponse] {
         responses.map { AvailabilityResponse(id: $0.id, participantId: participantId, timeOptionId: $0.timeOptionId,

@@ -6,6 +6,12 @@ Previously opened polls show the current account's complete cached detail before
 
 The existing SwiftData account store supplies persistence across app launches. Pull down on poll content to force a refresh. Successful saves, joins, status changes and finalization invalidate cached detail; subsequent loads revalidate with the backend. Account transitions clear the previous account's cache. This cache does not queue offline writes.
 
+## Participant submissions
+
+The participants sheet shows how many people have submitted availability and each person's latest submission date and time, formatted in the device's locale and time zone. Joining alone stays “Not submitted.” Local drafts and failed saves do not change this status. Clearing all saved answers returns it to “Not submitted.”
+
+Deploy `20261124013234_participant_submission_timestamps.sql` before shipping this UI. The authorized detail and availability reads expose `submitted_at` from the existing private response-version timestamp, which changes when saved answers or their comment change, including guest submissions and legacy direct writes. Replaying the same command or saving identical availability preserves the timestamp. Existing submissions already have version timestamps; rows predating version tracking use the latest saved answer time as a historical estimate. SwiftData retains the field with cached poll detail, so the existing five-minute cache and pull-to-refresh behavior also apply to submission status.
+
 ## Service composition
 
 The app wrapper calls `AppServices.live()` once at launch, and `AppRootView(services:)` places the services in the SwiftUI environment through `appServices(_:)`. Views read them through `@Environment(\.authService)` and its siblings. There are no service singletons.

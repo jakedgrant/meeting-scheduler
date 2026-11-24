@@ -10,6 +10,7 @@ public final class PersistedParticipant {
     public var anonymousEmail: String?
     public var accessToken: UUID
     public var comment: String?
+    public var submittedAt: Date?
     public var createdAt: Date
     public var updatedAt: Date
     public var profileDisplayName: String?
@@ -28,6 +29,7 @@ public final class PersistedParticipant {
         anonymousEmail: String?,
         accessToken: UUID,
         comment: String?,
+        submittedAt: Date? = nil,
         createdAt: Date,
         updatedAt: Date,
         profileDisplayName: String?,
@@ -40,6 +42,7 @@ public final class PersistedParticipant {
         self.anonymousEmail = anonymousEmail
         self.accessToken = accessToken
         self.comment = comment
+        self.submittedAt = submittedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.profileDisplayName = profileDisplayName
@@ -59,6 +62,7 @@ public final class PersistedParticipant {
             anonymousEmail: anonymousEmail,
             accessToken: accessToken,
             comment: comment,
+            submittedAt: submittedAt,
             createdAt: createdAt,
             updatedAt: updatedAt,
             profiles: profile
@@ -72,6 +76,7 @@ public final class PersistedParticipant {
         anonymousEmail = participant.anonymousEmail
         accessToken = participant.accessToken
         comment = participant.comment
+        submittedAt = participant.submittedAt
         createdAt = participant.createdAt
         updatedAt = participant.updatedAt
         profileDisplayName = participant.profiles?.displayName
@@ -87,6 +92,7 @@ public final class PersistedParticipant {
             anonymousEmail: participant.anonymousEmail,
             accessToken: participant.accessToken,
             comment: participant.comment,
+            submittedAt: participant.submittedAt,
             createdAt: participant.createdAt,
             updatedAt: participant.updatedAt,
             profileDisplayName: participant.profiles?.displayName,
