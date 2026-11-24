@@ -205,6 +205,49 @@ final class PersistenceProviderTests: XCTestCase {
         }
     }
 
+    func testParticipantSubmissionTimestampSurvivesCachingUpdatesAndClearing() throws {
+        for provider in makeProviders() {
+            let poll = makeSamplePoll()
+            try provider.savePolls([poll])
+            var participant = PollParticipant(pollId: poll.id, anonymousName: "Guest",
+                updatedAt: Date(timeIntervalSince1970: 1_000))
+            try provider.saveParticipants([participant], for: poll.id)
+            XCTAssertNil(try provider.fetchParticipants(for: poll.id).first?.submittedAt)
+
+            participant.submittedAt = Date(timeIntervalSince1970: 2_000)
+            participant.updatedAt = Date(timeIntervalSince1970: 2_000)
+            try provider.saveParticipants([participant], for: poll.id)
+            XCTAssertEqual(try provider.fetchParticipants(for: poll.id).first?.submittedAt, participant.submittedAt)
+
+            participant.submittedAt = nil
+            participant.updatedAt = Date(timeIntervalSince1970: 3_000)
+            try provider.saveParticipants([participant], for: poll.id)
+            XCTAssertNil(try provider.fetchParticipants(for: poll.id).first?.submittedAt)
+        }
+    }
+
+    func testParticipantDecodingAcceptsHistoricalPayloadsAndSubmissionTimestamp() throws {
+        let legacy = Data("""
+            {"id":"00000000-0000-4000-8000-000000000001",
+             "poll_id":"00000000-0000-4000-8000-000000000002",
+             "anonymous_name":"Guest",
+             "access_token":"00000000-0000-4000-8000-000000000001",
+             "created_at":"2026-11-23T10:00:00Z","updated_at":"2026-11-23T10:00:00Z"}
+            """.utf8)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        XCTAssertNil(try decoder.decode(PollParticipant.self, from: legacy).submittedAt)
+
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: legacy) as? [String: Any])
+        json["submitted_at"] = "2026-11-23T12:34:56Z"
+        let data = try JSONSerialization.data(withJSONObject: json)
+        XCTAssertEqual(try decoder.decode(PollParticipant.self, from: data).submittedAt,
+                       ISO8601DateFormatter().date(from: "2026-11-23T12:34:56Z"))
+        json["submitted_at"] = NSNull()
+        let pending = try JSONSerialization.data(withJSONObject: json)
+        XCTAssertNil(try decoder.decode(PollParticipant.self, from: pending).submittedAt)
+    }
+
     // MARK: - Availability Responses
 
     func testSaveAndFetchResponses() throws {

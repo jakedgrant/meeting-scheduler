@@ -9,6 +9,10 @@ struct ParticipantsSheet: View {
     let isCurrentUser: (PollParticipant) -> Bool
     @Environment(\.dismiss) private var dismiss
 
+    private var submittedCount: Int {
+        participants.filter { $0.submittedAt != nil }.count
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -16,11 +20,15 @@ struct ParticipantsSheet: View {
                     Text("No participants yet")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(participants) { participant in
-                        ParticipantRow(
-                            participant: participant,
-                            isCurrentUser: isCurrentUser(participant)
-                        )
+                    Section {
+                        ForEach(participants) { participant in
+                            ParticipantRow(
+                                participant: participant,
+                                isCurrentUser: isCurrentUser(participant)
+                            )
+                        }
+                    } header: {
+                        Text("\(submittedCount) of \(participants.count) submitted")
                     }
                 }
             }
@@ -92,7 +100,7 @@ struct ShareCodeSheet: View {
     let me = UUID()
     ParticipantsSheet(
         participants: [
-            PollParticipant(pollId: pollId, userId: me),
+            PollParticipant(pollId: pollId, userId: me, submittedAt: Date(timeIntervalSince1970: 1_800_000_000)),
             PollParticipant(pollId: pollId, anonymousName: "Guest"),
         ],
         isCurrentUser: { $0.userId == me }

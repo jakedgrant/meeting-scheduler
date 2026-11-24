@@ -437,6 +437,7 @@ public final class PollDetailModel {
         responses += snapshot.availabilityResponses
         if let index = participants.firstIndex(where: { $0.id == snapshot.participantId }) {
             participants[index].comment = snapshot.comment
+            participants[index].submittedAt = snapshot.submittedAt
         }
     }
 

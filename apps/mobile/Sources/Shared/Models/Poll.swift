@@ -142,6 +142,7 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
     public var anonymousEmail: String?
     public let accessToken: UUID
     public var comment: String?
+    public var submittedAt: Date?
     public let createdAt: Date
     public var updatedAt: Date
     public var profiles: ParticipantProfile?
@@ -162,6 +163,7 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
         case anonymousEmail = "anonymous_email"
         case accessToken = "access_token"
         case comment
+        case submittedAt = "submitted_at"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case profiles
@@ -179,6 +181,7 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
         anonymousEmail: String? = nil,
         accessToken: UUID = UUID(),
         comment: String? = nil,
+        submittedAt: Date? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         profiles: ParticipantProfile? = nil
@@ -190,6 +193,7 @@ public struct PollParticipant: Codable, Identifiable, Sendable {
         self.anonymousEmail = anonymousEmail
         self.accessToken = accessToken
         self.comment = comment
+        self.submittedAt = submittedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.profiles = profiles

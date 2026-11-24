@@ -258,20 +258,22 @@ public final class MockPollService: PollServiceProtocol {
             comment: sampleParticipants.first(where: { $0.id == participantId })?.comment,
             responses: sampleResponses.filter { $0.participantId == participantId }.map {
                 SavedAvailabilityAnswer(id: $0.id, timeOptionId: $0.timeOptionId, status: $0.status, note: $0.note, updatedAt: $0.updatedAt)
-            })
+            }, submittedAt: sampleParticipants.first(where: { $0.id == participantId })?.submittedAt)
     }
 
     public func saveAvailability(_ request: SaveAvailabilityRequest) async throws -> AvailabilitySnapshot {
         if let availabilitySaver { return try await availabilitySaver(request) }
         guard request.expectedVersion == responseVersion else { throw AvailabilityCommandError.conflict }
         responseVersion += 1
+        let savedAt = Date()
+        let submittedAt = request.responses.isEmpty ? nil : savedAt
         let snapshot = AvailabilitySnapshot(participantId: request.participantId, pollId: request.pollId,
             version: responseVersion, comment: request.comment,
             responses: request.responses.map { SavedAvailabilityAnswer(timeOptionId: $0.timeOptionId, status: $0.status, note: $0.note) },
-            savedAt: Date(), replayed: false)
+            submittedAt: submittedAt, savedAt: savedAt, replayed: false)
         sampleResponses.removeAll { $0.participantId == request.participantId }
         sampleResponses += snapshot.availabilityResponses
-        if let index = sampleParticipants.firstIndex(where: { $0.id == request.participantId }) { sampleParticipants[index].comment = snapshot.comment }
+        if let index = sampleParticipants.firstIndex(where: { $0.id == request.participantId }) { sampleParticipants[index].comment = snapshot.comment; sampleParticipants[index].submittedAt = snapshot.submittedAt }
         return snapshot
     }
 
