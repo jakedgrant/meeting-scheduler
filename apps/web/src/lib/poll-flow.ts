@@ -1,4 +1,5 @@
 import type { CreationDraft } from './poll-creation'
+import { joinPath } from './join-by-code'
 import { addDays, formatCalendarDate } from './date-time'
 
 /** The screens of the new-poll flow, in order. `share` follows a successful creation. */
@@ -125,7 +126,7 @@ export function shiftMonth(month: string, delta: number): string {
 	return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-/** The link participants open: the site origin and the poll's id. */
-export function pollLink(origin: string, pollId: string): string {
-	return `${origin}/polls/${pollId}`
+/** The public invitation link carries only the share code. */
+export function pollLink(origin: string, shareCode: string): string {
+	return origin + joinPath(shareCode)
 }

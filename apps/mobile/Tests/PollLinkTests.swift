@@ -15,7 +15,26 @@ struct PollLinkTests {
     ])
     func opensPoll(_ text: String) throws {
         let link = try #require(PollLink(url: URL(string: text)!))
-        #expect(link.pollId == Self.id)
+        #expect(link.target == .poll(Self.id))
+    }
+
+    @Test("Code invitations resolve to confirmation, including lowercase codes", arguments: [
+        "https://meetful.app/join/ABC123",
+        "https://meetful.app/join/abc123",
+        "https://MEETFUL.app/join/ABC123?ref=qr",
+        "meetingscheduler://join/ABC123",
+    ])
+    func opensInvitation(_ text: String) throws {
+        let link = try #require(PollLink(url: URL(string: text)!))
+        #expect(link.target == .invitation("ABC123"))
+    }
+
+    @Test("Every new shared URL carries only its code")
+    func shareURL() throws {
+        let url = PollLink.shareURL(code: "abc123")
+        #expect(url.absoluteString == "https://meetful.app/join/ABC123")
+        #expect(PollLink(url: url)?.target == .invitation("ABC123"))
+        #expect(url.query == nil)
     }
 
     @Test("Leaves every other URL alone", arguments: [
@@ -23,7 +42,13 @@ struct PollLinkTests {
         "https://meetful.app/polls/new",
         "https://meetful.app/polls/not-a-uuid",
         "https://meetful.app/polls/3f2504e0-4f89-41d3-9a0c-0305e82c3301/times/3f2504e0-4f89-41d3-9a0c-0305e82c3302",
-        "https://meetful.app/join/BFZZ7J",
+        "https://meetful.app/join/ABCDE",
+        "https://meetful.app/join/ABCDEFG",
+        "https://meetful.app/join/ABC!23",
+        "https://meetful.app/join/ABC123/extra",
+        "https://meetful.app.example/join/ABC123",
+        "https://user@meetful.app/join/ABC123",
+        "http://meetful.app/join/ABC123",
         "https://meetful.app.example/polls/3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         "https://www.meetful.app/polls/3f2504e0-4f89-41d3-9a0c-0305e82c3301",
         "https://meetful.app:8443/polls/3f2504e0-4f89-41d3-9a0c-0305e82c3301",

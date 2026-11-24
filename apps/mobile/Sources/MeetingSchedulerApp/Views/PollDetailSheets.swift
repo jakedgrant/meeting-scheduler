@@ -100,5 +100,5 @@ struct ShareCodeSheet: View {
 }
 
 #Preview("Share Code") {
-    ShareCodeSheet(shareCode: "ABC123", pollURL: URL(string: "https://example.com/polls/abc")!)
+    ShareCodeSheet(shareCode: "ABC123", pollURL: URL(string: "https://meetful.app/join/ABC123")!)
 }

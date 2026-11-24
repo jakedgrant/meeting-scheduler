@@ -8,6 +8,7 @@
 	import { sessionIdentity } from '$lib/session-scope';
 	import {
 		currentPoll,
+		pollRequiresMembership,
 		currentPollTimeOptions,
 		currentPollParticipants,
 		currentPollResponses,
@@ -29,10 +30,11 @@
 	import { createAvailabilityEditor } from '$lib/availability-editor';
 	import { createPollPageSession } from '$lib/poll-page-session';
 	import { generateICS, downloadICS, generateGoogleCalendarUrl } from '$lib/calendar-utils';
-	import { joinPath } from '$lib/join-by-code';
+	import { joinFailureMessage, joinPath } from '$lib/join-by-code';
 	import { allDayDate, formatCalendarDate } from '$lib/date-time';
 
-	const pollId = $derived($page.params.id as string);
+	// Native share links use uppercase UUIDs; Postgres returns lowercase UUID strings.
+	const pollId = $derived(($page.params.id as string).toLowerCase());
 
 	let isCreator = $derived($currentPoll?.creator_id === $user?.id);
 	// Signed-out guests are identified by the participant id stored with their capability.
@@ -206,7 +208,7 @@
 				() => isCurrent() ? (detail?.load(joinedPollId) ?? Promise.resolve()) : Promise.resolve()
 			);
 		} catch (err) {
-			if (isCurrent()) joinError = err instanceof Error ? err.message : 'Failed to join poll';
+			if (isCurrent()) joinError = joinFailureMessage(err, !joinedUserId);
 		} finally {
 			if (isCurrent()) joiningPoll = false;
 		}
@@ -249,7 +251,7 @@
 		}, 2000);
 	}
 
-	// Non-members cannot open this page, so the link carries the share code instead.
+	// Code links include a title preview before joining; UUID links also offer a join action.
 	const shareLink = $derived(
 		typeof window !== 'undefined' && $currentPoll ? window.location.origin + joinPath($currentPoll.share_code) : ''
 	);
@@ -339,6 +341,28 @@
 	}
 </script>
 
+{#snippet joinPrompt()}
+	<div class="join-prompt">
+		<p>Join this poll to submit your availability</p>
+		{#if !$user}
+			<div class="anonymous-join">
+				<input
+					type="text"
+					bind:value={anonymousName}
+					placeholder="Enter your name"
+					disabled={joiningPoll}
+				/>
+			</div>
+		{/if}
+		{#if joinError}
+			<p class="error">{joinError}</p>
+		{/if}
+		<button class="btn primary" onclick={handleJoinPoll} disabled={joiningPoll}>
+			{joiningPoll ? 'Joining...' : 'Join Poll'}
+		</button>
+	</div>
+{/snippet}
+
 <div class="poll-detail">
 	{#if $calendarStatusError}
 		<p role="status">{$calendarStatusError}</p>
@@ -353,6 +377,9 @@
 	{/if}
 	{#if $pollsLoading && !$currentPoll}
 		<div class="loading">Loading poll...</div>
+	{:else if !$currentPoll && ($pollRequiresMembership || joiningPoll)}
+		<h1>Join poll</h1>
+		{@render joinPrompt()}
 	{:else if !$currentPoll}
 		<div class="not-found">
 			<h1>Poll not found</h1>
@@ -434,25 +461,7 @@
 		{/if}
 
 		{#if !myParticipant && pollAcceptsResponses}
-			<div class="join-prompt">
-				<p>Join this poll to submit your availability</p>
-				{#if !$user}
-					<div class="anonymous-join">
-						<input
-							type="text"
-							bind:value={anonymousName}
-							placeholder="Enter your name"
-							disabled={joiningPoll}
-						/>
-					</div>
-				{/if}
-				{#if joinError}
-					<p class="error">{joinError}</p>
-				{/if}
-				<button class="btn primary" onclick={handleJoinPoll} disabled={joiningPoll}>
-					{joiningPoll ? 'Joining...' : 'Join Poll'}
-				</button>
-			</div>
+			{@render joinPrompt()}
 		{/if}
 
 		{#if $currentPoll.selected_start_time && $currentPoll.selected_end_time}

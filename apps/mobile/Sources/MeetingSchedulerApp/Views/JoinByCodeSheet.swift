@@ -4,6 +4,7 @@ struct JoinByCodeSheet: View {
     @Binding var joinCode: String
     @Binding var joinError: String?
     @Binding var isJoining: Bool
+    var invitationCode: String? = nil
     let onJoin: () -> Void
     let onDismiss: () -> Void
 
@@ -11,14 +12,20 @@ struct JoinByCodeSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("ABC123", text: $joinCode)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                        .font(.system(.body, design: .monospaced))
+                    if let invitationCode {
+                        Text(invitationCode)
+                            .font(.system(.body, design: .monospaced))
+                    } else {
+                        TextField("ABC123", text: $joinCode)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .font(.system(.body, design: .monospaced))
+                    }
                 } header: {
                     Text("Share Code")
                 } footer: {
-                    Text("Enter the 6-character code shared by the poll creator")
+                    if invitationCode != nil { Text("Do you want to join this poll?") }
+                    else { Text("Enter the 6-character code shared by the poll creator") }
                 }
 
                 if let error = joinError {
@@ -41,16 +48,18 @@ struct JoinByCodeSheet: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            .navigationTitle("Join by Code")
+            .navigationTitle(invitationCode == nil ? Text("Join by Code") : Text("Join Poll"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", systemImage: "xmark") {
                         onDismiss()
                     }
+                    .disabled(isJoining)
                 }
             }
         }
         .presentationDetents([.medium])
+        .interactiveDismissDisabled(isJoining)
     }
 }

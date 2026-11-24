@@ -1,6 +1,5 @@
-// Entering or following a share code is the decision to join. A share code
-// previews a poll (get_poll_by_code) but does not open it: only members can read
-// the details, so the caller joins first and opens the poll afterwards.
+// A share code previews a poll. Joining requires a separate confirmation; only
+// new members join before opening detail. Existing owners can open it without joining.
 import type { PollParticipant } from './supabase'
 
 export const SHARE_CODE_LENGTH = 6
@@ -8,7 +7,7 @@ export const CLOSED_POLL_MESSAGE = 'This poll is closed and cannot accept new pa
 export const UNKNOWN_CODE_MESSAGE = 'Poll not found. Please check the code.'
 
 // The code preview's columns are all nullable in the generated types.
-export interface PollPreview { id: string | null; title: string | null; status: string | null }
+export interface PollPreview { id: string | null; title: string | null; status: string | null; creator_id?: string | null }
 
 export interface JoinDependencies {
 	loadPollByCode(code: string): Promise<PollPreview | null>
@@ -19,8 +18,8 @@ export type Lookup = { ok: true; poll: { id: string; title: string } } | { ok: f
 
 export type JoinOutcome = { ok: true; pollId: string } | { ok: false; message: string }
 
-/** The path a shared link opens. Non-members cannot open `/polls/<id>`, so links carry the code. */
-export const joinPath = (shareCode: string) => `/join/${encodeURIComponent(shareCode)}`
+/** The code-based invitation path previews the poll before joining. */
+export const joinPath = (shareCode: string) => `/join/${encodeURIComponent(shareCode.toUpperCase())}`
 
 /** What the person sees when the server refuses to add them to a poll. */
 export function joinFailureMessage(error: unknown, asGuest = false): string {
@@ -31,12 +30,23 @@ export function joinFailureMessage(error: unknown, asGuest = false): string {
 	return error instanceof Error && error.message ? error.message : 'Failed to join poll. Please try again.'
 }
 
-/** Resolves a code to an active poll, or says why it cannot be joined. */
-export async function lookUpJoinablePoll(code: string, deps: Pick<JoinDependencies, 'loadPollByCode'>): Promise<Lookup> {
+export type InvitationTarget = { id: string; title: string; requiresJoin: boolean; creatorId: string | null }
+
+/** Non-active previews are returned only when the server recognizes existing access. */
+export async function lookUpPollInvitation(code: string, deps: Pick<JoinDependencies, 'loadPollByCode'>): Promise<
+	{ ok: true; poll: InvitationTarget } | { ok: false; message: string }
+> {
 	const poll = await deps.loadPollByCode(code)
 	if (!poll?.id) return { ok: false, message: UNKNOWN_CODE_MESSAGE }
-	if (poll.status !== 'active') return { ok: false, message: CLOSED_POLL_MESSAGE }
-	return { ok: true, poll: { id: poll.id, title: poll.title ?? '' } }
+	return { ok: true, poll: { id: poll.id, title: poll.title ?? '', requiresJoin: poll.status === 'active', creatorId: poll.creator_id ?? null } }
+}
+
+/** Resolves a code to an active poll, or says why it cannot be joined. */
+export async function lookUpJoinablePoll(code: string, deps: Pick<JoinDependencies, 'loadPollByCode'>): Promise<Lookup> {
+	const found = await lookUpPollInvitation(code, deps)
+	if (!found.ok) return found
+	if (!found.poll.requiresJoin) return { ok: false, message: CLOSED_POLL_MESSAGE }
+	return { ok: true, poll: { id: found.poll.id, title: found.poll.title } }
 }
 
 /** Looks the code up, joins an active poll, and returns the id to open. Joins nothing otherwise. */

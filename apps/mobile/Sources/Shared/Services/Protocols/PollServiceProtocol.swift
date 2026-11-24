@@ -14,6 +14,8 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
     var listTotalCount: Int? { get }
     var listLoadError: String? { get }
     var pollDetailErrors: [UUID: String] { get }
+    /// Detail denied by the server; joining may grant access if the poll still accepts members.
+    var pollsRequiringMembership: Set<UUID> { get }
 
     /// Participant counts keyed by poll ID — populated as part of loadMyPolls().
     var pollParticipantCounts: [UUID: Int] { get }
@@ -70,6 +72,16 @@ public protocol PollServiceProtocol: AnyObject, Observable, Sendable {
 extension PollServiceProtocol {
     public func loadPollDetail(id: UUID) async -> PollDetail? {
         await loadPollDetail(id: id, forceRefresh: false)
+    }
+
+    /// Resolves a confirmed invitation. Non-active previews are returned only to existing
+    /// owners/members by the server, so they can open results without creating membership.
+    public func openPollInvitation(code: String, accountId: UUID?) async throws -> UUID {
+        guard let poll = await loadPollByCode(code) else { throw PollError.pollNotFound }
+        if poll.status == .active && poll.creatorId != accountId {
+            _ = try await joinPoll(pollId: poll.id, anonymousName: nil)
+        }
+        return poll.id
     }
 
     /// Joins the poll a share code names and returns its ID.

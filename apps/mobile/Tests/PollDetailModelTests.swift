@@ -48,6 +48,104 @@ final class PollDetailModelTests: XCTestCase {
             participant: participant)
     }
 
+    func testLinkRecipientCanJoinBeforeLoadingProtectedDetail() async {
+        let fixture = fixture()
+        var joined = false
+        var checkedCalendar = false
+        fixture.calendar.conflictChecker = { _, _ in checkedCalendar = true; return .none }
+        fixture.polls.detailLoader = { _ in
+            guard joined else { return nil }
+            return PollDetail(poll: fixture.poll, timeOptions: fixture.options,
+                              participants: [fixture.participant], responses: [])
+        }
+        fixture.polls.pollsRequiringMembership = [fixture.poll.id]
+        fixture.polls.joiner = { id in
+            XCTAssertEqual(id, fixture.poll.id)
+            joined = true
+            return fixture.participant
+        }
+        await fixture.model.load()
+        XCTAssertNil(fixture.model.poll)
+        XCTAssertTrue(fixture.model.requiresMembership)
+        XCTAssertFalse(joined)
+        await fixture.model.join()?.value
+        XCTAssertEqual(fixture.model.poll?.id, fixture.poll.id)
+        XCTAssertEqual(fixture.model.timeOptions.count, fixture.options.count)
+        XCTAssertEqual(fixture.model.myParticipant?.id, fixture.participant.id)
+        XCTAssertNotNil(fixture.model.editor.saved)
+        XCTAssertFalse(fixture.model.requiresMembership)
+        XCTAssertNil(fixture.model.actionError)
+        XCTAssertTrue(checkedCalendar)
+    }
+
+    func testLinkJoinReportsClosedAndFullPollsAndAllowsRetry() async {
+        for error in [PollError.notAcceptingParticipants, .capacityReached] {
+            let fixture = fixture()
+            fixture.polls.detailLoader = { _ in nil }
+            fixture.polls.pollsRequiringMembership = [fixture.poll.id]
+            fixture.polls.joiner = { _ in throw error }
+            await fixture.model.load()
+            await fixture.model.join()?.value
+            XCTAssertNil(fixture.model.poll)
+            XCTAssertTrue(fixture.model.requiresMembership)
+            XCTAssertEqual(fixture.model.actionError, error.errorDescription)
+            XCTAssertFalse(fixture.model.isChangingPoll)
+            XCTAssertTrue(fixture.model.canMutatePoll)
+        }
+    }
+
+    func testAccountChangeWhileLoadingJoinedDetailCannotPublishIt() async {
+        let fixture = fixture()
+        fixture.polls.detailLoader = { _ in nil }
+        fixture.polls.pollsRequiringMembership = [fixture.poll.id]
+        fixture.polls.joiner = { _ in fixture.participant }
+        await fixture.model.load()
+        var release: CheckedContinuation<PollDetail?, Never>?
+        let started = expectation(description: "Joined detail dispatched")
+        fixture.polls.detailLoader = { _ in
+            await withCheckedContinuation { release = $0; started.fulfill() }
+        }
+        let joining = fixture.model.join()
+        await fulfillment(of: [started], timeout: 5)
+        fixture.auth.currentUserId = UUID()
+        release?.resume(returning: PollDetail(poll: fixture.poll, timeOptions: fixture.options,
+                                              participants: [fixture.participant], responses: []))
+        await joining?.value
+        XCTAssertNil(fixture.model.poll)
+        XCTAssertNil(fixture.model.myParticipant)
+        XCTAssertFalse(fixture.model.displaysCurrentAccount)
+    }
+
+    func testOwnerAndExistingParticipantLoadWithoutJoining() async {
+        for owner in [false, true] {
+            let fixture = fixture(creatorId: owner ? account : UUID())
+            fixture.polls.joiner = { _ in XCTFail("A member must not be joined automatically"); return fixture.participant }
+            await fixture.model.load()
+            XCTAssertNotNil(fixture.model.poll)
+            XCTAssertFalse(fixture.model.requiresMembership)
+        }
+    }
+
+    func testLeavingDuringInvitationJoinCannotPublishItsDetail() async {
+        let fixture = fixture()
+        fixture.polls.detailLoader = { _ in nil }
+        fixture.polls.pollsRequiringMembership = [fixture.poll.id]
+        var release: CheckedContinuation<PollParticipant, Error>?
+        let started = expectation(description: "Join dispatched")
+        fixture.polls.joiner = { _ in
+            try await withCheckedThrowingContinuation { release = $0; started.fulfill() }
+        }
+        await fixture.model.load()
+        let joining = fixture.model.join()
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertNil(fixture.model.join(), "A second tap must not dispatch another join")
+        fixture.model.suspend()
+        release?.resume(returning: fixture.participant)
+        await joining?.value
+        XCTAssertNil(fixture.model.poll)
+        XCTAssertNil(fixture.model.myParticipant)
+    }
+
     func testOwnerEditsDetailsWithoutLosingAvailabilityDraftOrOptions() async throws {
         let fixture = fixture(creatorId: account)
         await fixture.model.load()

@@ -2,12 +2,12 @@
 	import { onMount } from 'svelte';
 	import { pollLink } from '$lib/poll-flow';
 
-	let { pollId, title, shareCode }: { pollId: string; title: string; shareCode: string } = $props();
+	let { title, shareCode }: { title: string; shareCode: string } = $props();
 
 	let origin = $state('');
 	let qr = $state('');
 	let status = $state('');
-	const link = $derived(pollLink(origin, pollId));
+	const link = $derived(pollLink(origin, shareCode));
 	const canShare = $derived(typeof navigator !== 'undefined' && typeof navigator.share === 'function');
 
 	onMount(() => { origin = window.location.origin; });

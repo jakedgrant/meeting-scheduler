@@ -3,90 +3,51 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { user } from '$lib/stores/auth';
+	import { sessionIdentity } from '$lib/session-scope';
 	import { loadPollByCode, joinPoll } from '$lib/stores/polls';
-	import { joinFailureMessage, lookUpJoinablePoll } from '$lib/join-by-code';
+	import { createPollInvitation } from '$lib/poll-invitation';
 
-	// Opening a share link is the decision to join: look the code up, join, then open the poll.
-	let status = $state<'looking' | 'ready' | 'joining' | 'failed'>('looking');
-	let message = $state('');
-	let target = $state<{ id: string; title: string } | null>(null);
 	let guestName = $state('');
-
-	// Each start supersedes the last, so a changed code or account never shows or acts on stale results.
-	let run = 0;
-	onDestroy(() => run++);
-
-	function open(id: string) {
-		// Replace the link so Back does not return to a page that joins again.
-		void goto(`/polls/${id}`, { replaceState: true });
-	}
-
-	async function join(id: string, name: string | undefined, current: number) {
-		status = 'joining';
-		message = '';
-		try {
-			await joinPoll(id, name);
-			if (current === run) open(id);
-		} catch (error) {
-			if (current !== run) return;
-			status = name === undefined ? 'failed' : 'ready';
-			message = joinFailureMessage(error, name !== undefined);
-		}
-	}
-
-	async function start(code: string, signedIn: boolean) {
-		const current = ++run;
-		status = 'looking';
-		message = '';
-		target = null;
-		const found = await lookUpJoinablePoll(code, { loadPollByCode });
-		if (current !== run) return;
-		if (!found.ok) {
-			status = 'failed';
-			message = found.message;
-			return;
-		}
-		target = found.poll;
-		if (signedIn) await join(found.poll.id, undefined, current);
-		else status = 'ready';
-	}
+	const invitation = createPollInvitation({
+		loadPollByCode, joinPoll,
+		open: id => { void goto(`/polls/${id}`, { replaceState: true }); }
+	});
+	onDestroy(() => invitation.dispose());
+	const needsMembership = $derived($invitation.target?.requiresJoin && $invitation.target.creatorId !== $user?.id);
 
 	$effect(() => {
 		const code = $page.params.code ?? '';
-		const signedIn = $user !== null;
-		untrack(() => void start(code, signedIn));
+		// Replacing a session also invalidates a pending confirmation or join result.
+		void $sessionIdentity;
+		untrack(() => { guestName = ''; void invitation.prepare(code); });
 	});
 
-	async function handleGuestJoin(event: SubmitEvent) {
+	async function handleConfirm(event: SubmitEvent) {
 		event.preventDefault();
-		const name = guestName.trim();
-		if (!target) return;
-		if (!name) {
-			message = 'Please enter your name';
-			return;
-		}
-		await join(target.id, name, run);
+		await invitation.confirm({ accountId: $user?.id ?? null, name: guestName });
 	}
 </script>
 
 <div class="join-container">
 	<div class="join-card">
-		{#if status === 'looking' || status === 'joining'}
-			<p class="subtitle">{status === 'looking' ? 'Finding poll…' : 'Joining poll…'}</p>
-		{:else if status === 'ready' && target}
-			<h1>{target.title}</h1>
-			<p class="subtitle">Enter your name to join this poll.</p>
-			<form onsubmit={handleGuestJoin}>
-				<input type="text" bind:value={guestName} placeholder="Enter your name" required />
-				{#if message}<p class="error">{message}</p>{/if}
-				<button class="btn primary" type="submit">Join</button>
+		{#if $invitation.status === 'looking' || $invitation.status === 'joining'}
+			<p class="subtitle">{$invitation.status === 'looking' ? 'Finding poll…' : 'Joining poll…'}</p>
+		{:else if $invitation.status === 'ready' && $invitation.target}
+			<h1>{$invitation.target.title}</h1>
+			<p class="subtitle">{needsMembership ? 'Do you want to join this poll?' : 'Open this poll’s results?'}</p>
+			<form onsubmit={handleConfirm}>
+				{#if !$user}
+					<label for="guest-name">Your name</label>
+					<input id="guest-name" type="text" bind:value={guestName} placeholder="Enter your name" required />
+				{/if}
+				{#if $invitation.message}<p class="error" role="alert">{$invitation.message}</p>{/if}
+				<button class="btn primary" type="submit">{needsMembership ? 'Join Poll' : 'Open Poll'}</button>
 			</form>
+			<p class="alt"><a href={$user ? '/polls' : '/'}>Cancel</a></p>
 		{:else}
 			<h1>Can't join this poll</h1>
-			<p class="error">{message}</p>
-			<p class="alt">
-				<a href={$user ? '/polls' : '/'}>Back</a>
-			</p>
+			<p class="error" role="alert">{$invitation.message}</p>
+			<p class="alt"><a href={$user ? '/polls' : '/'}>Back</a></p>
 		{/if}
 	</div>
 </div>

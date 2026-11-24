@@ -112,7 +112,7 @@ test('the share link carries the code, not the poll id', async () => {
   assert.equal(joinPath('BFZZ7J'), '/join/BFZZ7J');
   const detail = await readFile(join(routes, 'polls/[id]/+page.svelte'), 'utf8');
   assert.match(detail, /joinPath\(\$currentPoll\.share_code\)/);
-  assert.doesNotMatch(detail, /window\.location\.href/, 'the page address is not shareable: non-members cannot open it');
+  assert.doesNotMatch(detail, /window\.location\.href/, 'web sharing keeps the code-based preview link');
 });
 
 test('a signed-in visitor of a share link joins through join_poll', async t => {
@@ -147,11 +147,14 @@ test('a guest joins with a name, keeps the capability, and the poll then loads f
   assert.deepEqual(actual.get(actual.currentPoll), poll);
 });
 
-test('the join route uses the shared lookup and the guest form requires a name', async () => {
+test('the join route requires explicit confirmation for signed-in visitors and guests', async () => {
   const route = await readFile(join(routes, 'join/[code]/+page.svelte'), 'utf8');
-  assert.match(route, /lookUpJoinablePoll/);
-  assert.match(route, /joinPoll\(id, name\)/);
-  assert.doesNotMatch(route, /href="\/auth"/, 'the auth page cannot return to the link, so it must not be offered');
+  assert.match(route, /createPollInvitation/);
+  assert.match(route, /invitation\.prepare\(code\)/);
+  assert.match(route, /onsubmit=\{handleConfirm\}/);
+  assert.match(route, /invitation\.confirm\(/);
+  assert.match(route, /Do you want to join this poll/);
+  assert.match(route, />Cancel</);
   assert.match(route, /<input[^>]*bind:value=\{guestName\}[^>]*required/);
   assert.match(route, /goto\(`\/polls\/\$\{id\}`/);
 });

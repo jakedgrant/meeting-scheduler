@@ -129,6 +129,41 @@ final class PollReadTransportTests: XCTestCase {
         try await body(service, transport, { identity = UUID(); service.accountDidChange(to: identity) })
     }
 
+    func testDeniedDetailOffersMembershipWithoutReadingOrJoiningAutomatically() async throws {
+        let account = UUID()
+        let f = Fixture(account: UUID(), people: 1, slots: 1)
+        try await withService(account: account) { service, transport, switchAccount in
+            transport.enqueue([.rejected(403, try json([
+                "code": "42501", "message": "Poll access denied", "details": NSNull(), "hint": NSNull()]))])
+            let detail = await service.loadPollDetail(id: f.poll.id)
+            XCTAssertNil(detail)
+            XCTAssertTrue(service.pollsRequiringMembership.contains(f.poll.id))
+            XCTAssertEqual(transport.requests.map { $0.url!.lastPathComponent }, ["get_poll_detail"])
+            transport.enqueue([.json(try header(f)), .json(try page([], total: 0))])
+            let authorized = await service.loadPollDetail(id: f.poll.id)
+            XCTAssertNotNil(authorized)
+            XCTAssertFalse(service.pollsRequiringMembership.contains(f.poll.id))
+            transport.enqueue([.rejected(403, try json([
+                "code": "42501", "message": "Poll access denied", "details": NSNull(), "hint": NSNull()]))])
+            _ = await service.loadPollDetail(id: f.poll.id, forceRefresh: true)
+            XCTAssertTrue(service.pollsRequiringMembership.contains(f.poll.id))
+            switchAccount()
+            XCTAssertTrue(service.pollsRequiringMembership.isEmpty)
+        }
+    }
+
+    func testMissingOrFailedDetailDoesNotOfferMembership() async throws {
+        for code in ["PGRST116", "XX000"] {
+            try await withService(account: UUID()) { service, transport, _ in
+                let id = UUID()
+                transport.enqueue([.rejected(400, try json([
+                    "code": code, "message": "Read failed", "details": NSNull(), "hint": NSNull()]))])
+                _ = await service.loadPollDetail(id: id)
+                XCTAssertFalse(service.pollsRequiringMembership.contains(id))
+            }
+        }
+    }
+
     func testListUsesOnlySummaryPagesAndAppendsOnDemand() async throws {
         let account = UUID(); let polls = (0..<52).map { _ in Poll(creatorId: account, title: "History") }
         let cache = InMemoryPersistenceProvider()
@@ -413,6 +448,30 @@ final class PollReadTransportTests: XCTestCase {
             XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code", "join_poll"])
             XCTAssertEqual(body(transport.requests[0])["code"] as? String, "BFZZ7J")
             XCTAssertEqual((body(transport.requests[1])["poll_uuid"] as? String)?.lowercased(), poll.id.uuidString.lowercased())
+        }
+    }
+
+    func testConfirmedInvitationKeepsClosedResultsAccessibleWithoutJoining() async throws {
+        let account = UUID()
+        for owner in [false, true] {
+            let poll = Poll(creatorId: owner ? account : UUID(), title: "Final results", status: .closed)
+            try await withService(account: account) { service, transport, _ in
+                transport.enqueue([.json(try lookup(poll, status: .closed))])
+                let opened = try await service.openPollInvitation(code: "BFZZ7J", accountId: account)
+                XCTAssertEqual(opened, poll.id)
+                XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code"])
+            }
+        }
+    }
+
+    func testConfirmedOwnerInvitationDoesNotNeedMembershipEvenWhenJoiningHasExpired() async throws {
+        let account = UUID()
+        let poll = Poll(creatorId: account, title: "Owner results", status: .active)
+        try await withService(account: account) { service, transport, _ in
+            transport.enqueue([.json(try lookup(poll))])
+            let opened = try await service.openPollInvitation(code: "BFZZ7J", accountId: account)
+            XCTAssertEqual(opened, poll.id)
+            XCTAssertEqual(transport.requests.map(rpcName), ["get_poll_by_code"])
         }
     }
 

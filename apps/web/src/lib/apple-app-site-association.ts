@@ -12,12 +12,18 @@ export const IOS_APP_ID = 'PWBLH7P4Y4.com.jacobgrant.MeetingScheduler'
  */
 export const POLL_PATH_PATTERN = '/polls/????????-????-????-????-????????????'
 
+/** Public code invitations open the native confirmation sheet. */
+export const JOIN_PATH_PATTERN = '/join/??????'
+
 export const appleAppSiteAssociation = {
 	applinks: {
 		details: [
 			{
 				appIDs: [IOS_APP_ID],
-				components: [{ '/': POLL_PATH_PATTERN, comment: 'Opens the poll in the app.' }]
+				components: [
+					{ '/': JOIN_PATH_PATTERN, comment: 'Confirms joining by share code in the app.' },
+					{ '/': POLL_PATH_PATTERN, comment: 'Supports older UUID links.' }
+				]
 			}
 		]
 	}
