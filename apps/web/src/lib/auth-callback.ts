@@ -1,11 +1,15 @@
 import type { Session } from '@supabase/supabase-js'
 import { createSessionWork, captureSession } from './session-scope'
+import { HOME, welcomeHref } from './next-destination'
 
 /** Root composition owns SDK initialization; the callback page only navigates. */
 export function createAuthCallback(dependencies: {
   getSession(): Promise<{ data: { session: Session | null }; error: { message: string } | null }>
   navigate(path: string): unknown
+  /** The validated destination the completed sign-in attempt carried. */
+  next?: string
 }) {
+  const next = dependencies.next ?? HOME
   const work = createSessionWork()
   return {
     async run() {
@@ -19,8 +23,8 @@ export function createAuthCallback(dependencies: {
         } else if (!data.session?.user || (data.session.expires_at !== undefined && data.session.expires_at * 1000 <= Date.now())) {
           dependencies.navigate('/auth?error=No%20session')
         } else if (data.session.user.id === scope.accountId) {
-          // /welcome sends an account that has finished onboarding straight on to the app.
-          dependencies.navigate('/welcome')
+          // /welcome sends an account that has finished onboarding straight on to `next`.
+          dependencies.navigate(next === HOME ? '/welcome' : welcomeHref('name', next))
         }
       } catch {
         if (isCurrent()) dependencies.navigate('/auth?error=Sign-in%20could%20not%20be%20verified')

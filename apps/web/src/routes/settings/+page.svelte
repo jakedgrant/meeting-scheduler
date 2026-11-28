@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import { signInHref } from '$lib/next-destination';
 	import { user, profile, updateProfile } from '$lib/stores/auth';
 	import { calendarEnabled, calendarLoading, calendarStatusError, calendarAccountEmail, calendarRequiresReconnect, calendarRevocationPending, initCalendar, enableCalendarIntegration, disableCalendarIntegration } from '$lib/stores/calendar';
 
@@ -62,7 +64,7 @@
 	// Redirect if not logged in
 	$effect(() => {
 		if (!$user) {
-			goto('/auth');
+			goto(signInHref($page.url));
 		}
 	});
 

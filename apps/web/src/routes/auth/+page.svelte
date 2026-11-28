@@ -6,6 +6,10 @@
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import { user, signInWithGoogle, signInWithApple, signInWithMagicLink } from '$lib/stores/auth';
+	import { safeNext } from '$lib/next-destination';
+
+	// Where to return after signing in; anything unsafe falls back to home.
+	const next = $derived(safeNext($page.url.searchParams.get('next')));
 
 	let email = $state('');
 	let loading = $state(false);
@@ -23,7 +27,7 @@
 	// Redirect if already logged in
 	$effect(() => {
 		if ($user) {
-			goto('/polls');
+			goto(next);
 		}
 	});
 
@@ -32,7 +36,7 @@
 		loading = true;
 		errorMessage = '';
 		try {
-			await signInWithGoogle();
+			await signInWithGoogle(next);
 		} catch (err) {
 			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Google';
 		} finally {
@@ -45,7 +49,7 @@
 		loading = true;
 		errorMessage = '';
 		try {
-			await signInWithApple();
+			await signInWithApple(next);
 		} catch (err) {
 			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to sign in with Apple';
 		} finally {
@@ -63,7 +67,7 @@
 		loading = true;
 		errorMessage = '';
 		try {
-			await signInWithMagicLink(email);
+			await signInWithMagicLink(email, next);
 			if (isCurrent()) successMessage = 'Check your email for a sign-in link!';
 		} catch (err) {
 			if (isCurrent()) errorMessage = err instanceof Error ? err.message : 'Failed to send magic link';

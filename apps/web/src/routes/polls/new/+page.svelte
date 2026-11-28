@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import { signInHref } from '$lib/next-destination';
 	import { get } from 'svelte/store';
 	import { user } from '$lib/stores/auth';
 	import { createPoll } from '$lib/stores/polls';
@@ -23,7 +25,7 @@
 	// Redirect if not authenticated
 	$effect(() => {
 		if ($user === null) {
-			goto('/auth');
+			goto(signInHref($page.url));
 		}
 	});
 

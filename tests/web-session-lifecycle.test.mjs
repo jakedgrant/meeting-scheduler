@@ -406,6 +406,16 @@ test('current callback success/error routes use current initialized session', as
   assert.deepEqual(navigation, ['/welcome', '/auth?error=Expired%20link']);
 });
 
+test('callback success carries the attempt destination through /welcome', async t => {
+  const { actual, state, mount } = await fixture(t);
+  mount(); state.emit('SIGNED_IN', sessionFor(accountA)); await flush();
+  const navigation = [];
+  const getSession = async () => ({ data: { session: sessionFor(accountA) }, error: null });
+  await actual.createAuthCallback({ getSession, navigate: path => navigation.push(path), next: '/settings' }).run();
+  await actual.createAuthCallback({ getSession, navigate: path => navigation.push(path), next: '/polls' }).run();
+  assert.deepEqual(navigation, ['/welcome?step=name&next=%2Fsettings', '/welcome']);
+});
+
 for (const outcome of ['success', 'failure']) test(`obsolete poll mutation/detail ${outcome} cannot overwrite B; old route cleanup owns only its lease`, async t => {
   const { actual, state, mount } = await fixture(t);
   mount(); state.emit('SIGNED_IN', sessionFor(accountA)); await flush();
@@ -928,7 +938,8 @@ test('production PKCE initiation/exchange persists exact intent, installs once, 
   await assert.rejects(runtime.complete(url), /expired|another session/);
   const latest = callbackURL(await runtime.start({ provider: 'google' }, null, 'https://web.test.invalid'));
   const result = await runtime.complete(latest); await flush();
-  assert.equal(result.user.id, accountA);
+  assert.equal(result.session.user.id, accountA);
+  assert.equal(result.next, '/polls', 'an attempt started without a destination returns home');
   assert.equal((await client.auth.getSession()).data.session.access_token, jwt(accountA, 'callback-session'));
   assert.equal(actual.get(actual.auth.user).id, accountA);
   await assert.rejects(runtime.complete(latest), /already used/);
@@ -1015,6 +1026,57 @@ test('cold root callback completes owned PKCE before mounting production callbac
   assert.equal(browser.listeners.get('storage').size, 0);
   assert.equal(browser.listeners.get('visibilitychange').size, 0);
   browser.restore();
+});
+
+test('cold callback returns the stored destination of a magic link opened in a new tab', async t => {
+  const { actual, state, mount } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const first = await sdkTransport(t, state, actual);
+  // Only localStorage is shared with the new tab, so the attempt record must carry next.
+  await first.runtime.start({ email: 'test@example.invalid' }, null, 'https://web.test.invalid', '/polls/new?from=settings');
+  const raw = JSON.parse(await state.authStorage.getItem(`${first.runtime.storageKey}:sign-in-attempt`));
+  assert.equal(raw.next, '/polls/new?from=settings');
+  const browser = browserFixture(t, `https://web.test.invalid/auth/callback?attempt=${raw.id}&code=valid-code`);
+  const { client } = await sdkTransport(t, state, actual);
+  const stop = mount(); await flush();
+  assert.equal(actual.get(actual.auth.authCallbackError), null);
+  assert.equal(actual.get(actual.auth.authCallbackNext), '/polls/new?from=settings');
+  const navigation = [];
+  await actual.createAuthCallback({ getSession: () => client.auth.getSession(), navigate: path => navigation.push(path), next: actual.get(actual.auth.authCallbackNext) }).run();
+  assert.deepEqual(navigation, ['/welcome?step=name&next=%2Fpolls%2Fnew%3Ffrom%3Dsettings']);
+  stop(); await client.auth.stopAutoRefresh(); browser.restore();
+});
+
+test('an unsafe destination is refused when stored and again when read back', async t => {
+  const { actual, state } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const { runtime } = await sdkTransport(t, state, actual);
+  const key = `${runtime.storageKey}:sign-in-attempt`;
+  for (const next of ['https://evil.example', '//evil.example', '/welcome', '/auth', '/auth/callback?attempt=1']) {
+    await runtime.start({ provider: 'google' }, null, 'https://web.test.invalid', next);
+    assert.equal(JSON.parse(await state.authStorage.getItem(key)).next, '/polls', next);
+  }
+  const url = callbackURL(await runtime.start({ provider: 'google' }, null, 'https://web.test.invalid', '/settings'));
+  // Storage another script could have written is not trusted on the way back either.
+  const raw = JSON.parse(await state.authStorage.getItem(key));
+  await state.authStorage.setItem(key, JSON.stringify({ ...raw, next: '//evil.example' }));
+  assert.equal((await runtime.complete(url)).next, '/polls');
+});
+
+test('a destination from a failed attempt is never used', async t => {
+  const { actual, state, mount } = await fixture(t);
+  state.authStorage = actual.memoryAuthStorage();
+  const first = await sdkTransport(t, state, actual);
+  const url = callbackURL(await first.runtime.start({ provider: 'google' }, null, 'https://web.test.invalid', '/settings'));
+  const key = `${first.runtime.storageKey}:sign-in-attempt`;
+  const raw = JSON.parse(await state.authStorage.getItem(key));
+  await state.authStorage.setItem(key, JSON.stringify({ ...raw, expires: 1 }));
+  const browser = browserFixture(t, url);
+  const { client } = await sdkTransport(t, state, actual);
+  const stop = mount(); await flush();
+  assert.match(actual.get(actual.auth.authCallbackError), /expired/);
+  assert.equal(actual.get(actual.auth.authCallbackNext), '/polls');
+  stop(); await client.auth.stopAutoRefresh(); browser.restore();
 });
 
 for (const artifact of ['implicit', 'unowned-code', 'obsolete-owned-code']) test(`cold SDK URL initialization preserves persisted B against ${artifact}`, async t => {
