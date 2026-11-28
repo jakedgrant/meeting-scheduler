@@ -1,5 +1,6 @@
 import { AuthClient, createClient, navigatorLock, processLock, type Session, type SupportedStorage, type LockFunc } from '@supabase/supabase-js'
 import type { Database } from './database.types'
+import { safeNext } from './next-destination'
 
 export function memoryAuthStorage(): SupportedStorage {
   const values = new Map<string, string>()
@@ -29,7 +30,9 @@ export function sessionOwner(session: Session | null): string | null {
   return `${session.user.id}:${session.access_token}:${session.refresh_token}`
 }
 
-interface AuthAttempt { id: string; owner: string | null; origin: string; expires: number; verifier: string | null; used: boolean; active?: () => boolean }
+// `next` is where the visitor returns after sign-in. It lives here, not in the redirect URL,
+// so it survives the provider round trip and reaches a magic link opened in another tab.
+interface AuthAttempt { id: string; owner: string | null; origin: string; next?: string; expires: number; verifier: string | null; used: boolean; active?: () => boolean }
 export function createOwnedAuth(options: {
   url: string; key: string; storage: SupportedStorage; lock?: LockFunc; autoRefresh?: boolean; fetch?: typeof fetch
 }) {
@@ -138,10 +141,10 @@ export function createOwnedAuth(options: {
       })
       return { local, remote }
     },
-    start(request: { provider: 'google' | 'apple' } | { email: string }, original: Session | null, origin: string) {
+    start(request: { provider: 'google' | 'apple' } | { email: string }, original: Session | null, origin: string, next?: string) {
       return withHelper(async sdk => {
         if (!(await owns(sessionOwner(original)))) throw new Error('Sign-in session changed')
-        context = { id: crypto.randomUUID(), owner: sessionOwner(original), origin, expires: Date.now() + 10 * 60_000, verifier: null, used: false }
+        context = { id: crypto.randomUUID(), owner: sessionOwner(original), origin, next: safeNext(next), expires: Date.now() + 10 * 60_000, verifier: null, used: false }
         await options.storage.setItem(attemptKey, JSON.stringify(context))
         const redirectTo = `${origin}/auth/callback?attempt=${context.id}`
         if ('provider' in request) {
@@ -168,8 +171,9 @@ export function createOwnedAuth(options: {
         context = { ...attempt, active }
         const { data, error } = await sdk.exchangeCodeForSession(url.searchParams.get('code')!)
         if (error || !data.session) throw error ?? new Error('Sign-in could not be verified')
-        return data.session
-      }).then(session => { publish(); return session })
+        // Read back from storage, so it is checked again before anyone navigates to it.
+        return { session: data.session, next: safeNext(attempt.next) }
+      }).then(result => { publish(); return result })
     }
   }
 }

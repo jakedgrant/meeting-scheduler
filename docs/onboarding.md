@@ -1,16 +1,16 @@
 # Onboarding
 
-After an account's first sign-in, iOS and Android show two optional steps before the Meets tab: a display name, then calendar connections. Both steps can be skipped, and the flow never blocks the app.
+After an account's first sign-in, iOS and Android show two optional steps before the Meets tab: a display name, then calendar connections. The web shows the same steps at `/welcome`. Both steps can be skipped, and the flow never blocks the app.
 
 Migration: [`20261127000000_profile_onboarding.sql`](../supabase/migrations/20261127000000_profile_onboarding.sql). Test: `tests/profile-onboarding.test.mjs`.
 
 ## When it shows
 
-`profiles.onboarding_completed_at` records completion per account, so a reinstall or a second device doesn't show the flow again. `get_my_profile` returns it with the rest of the owner's row; the Data API column grants are unchanged, so poll peers can't read it. `complete_onboarding()` stamps the caller's row with the server time once and returns the stored value, so clients can retry it.
+`profiles.onboarding_completed_at` records completion per account, so a reinstall, a second device, or another client (web or native) doesn't show the flow again. `get_my_profile` returns it with the rest of the owner's row; the Data API column grants are unchanged, so poll peers can't read it. `complete_onboarding()` stamps the caller's row with the server time once and returns the stored value, so clients can retry it.
 
 The migration marks every existing account complete as of its `created_at`, without touching `updated_at`. Only accounts created after it is applied see onboarding.
 
-Each client decides with `onboardingStatus` on its `AuthService`:
+Each native client decides with `onboardingStatus` on its `AuthService`:
 
 | State | When | Shows |
 | --- | --- | --- |
@@ -39,8 +39,12 @@ Android omits the Apple Calendar row; the device calendar stays in Settings ther
 
 The iOS steps hide the navigation bar, which also turns off the system back swipe, so the calendar step goes back on a rightward swipe from the leading edge or VoiceOver's escape gesture. Android uses system back.
 
+## Web
+
+Every web sign-in lands on `/welcome`, which shows the flow or sends the account straight on, as decided by `resolveWelcomeEntry` in `apps/web/src/lib/onboarding.ts`. It reads only the server profile, with no device record, and sends the account on when the profile can't be loaded. The calendar step offers Google Calendar only.
+
+A signed-out visitor to `/polls`, `/polls/new` or `/settings` is sent to `/auth?next=<path and query>` (plain `/auth` for `/polls` itself), and returns there after signing in and, for a new account, after onboarding. `safeNext` in `apps/web/src/lib/next-destination.ts` accepts only a same-origin path that isn't `/welcome` or under `/auth`; anything else falls back to `/polls`. `/auth` passes `next` to the sign-in attempt record that `owned-auth.ts` keeps in `localStorage`, rather than adding it to the redirect URL, so it survives the Google and Apple redirects and reaches a magic link opened in another tab. The callback reads it back only from an attempt that passes its ownership and expiry checks, validates it again, and goes to `/welcome?step=name&next=…`, or plain `/welcome` when `next` is `/polls`. An already-signed-in visitor to `/auth` goes straight to `next`. Shared poll links (`/join/<code>`, `/polls/<id>`) don't need it, because signed-out guests can answer them.
+
 ## Hosted rollout
 
 Apply the migration before releasing either app. Against the old schema, `get_my_profile` has no `onboarding_completed_at`, so every existing account would see onboarding once on each device, and `complete_onboarding` wouldn't exist to record it. The migration adds a nullable column, rewrites every `profiles` row for the backfill, and briefly disables `update_profiles_updated_at` inside its transaction.
-
-Accounts that signed up on the web after the migration see onboarding the first time they sign in to a native app, because the web has no onboarding.

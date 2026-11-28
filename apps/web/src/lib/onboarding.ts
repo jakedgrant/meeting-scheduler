@@ -1,38 +1,15 @@
 // Pure rules for the /welcome flow. The page owns rendering and side effects.
 import { CALENDAR_DECLINED_MESSAGE, parseCalendarResult, type CalendarResult } from './calendar-result'
+import { HOME, safeNext } from './next-destination'
 
 export type OnboardingStep = 'name' | 'calendar'
 export type CalendarState = 'not-connected' | 'connecting' | 'connected' | 'failed' | 'declined'
 
-export const HOME = '/polls'
 export const DISPLAY_NAME_MAX = 40
 export const ANONYMOUS = 'Anonymous'
 const NEXT_KEY = 'meetful:onboarding-next'
 
 export const parseStep = (value: string | null): OnboardingStep => value === 'calendar' ? 'calendar' : 'name'
-
-/**
- * Where to go after onboarding. Only a same-origin path is accepted, never an
- * absolute or protocol-relative URL, and never a page that would loop back here.
- */
-export function safeNext(value: string | null | undefined): string {
-  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return HOME
-  let url: URL
-  try { url = new URL(value, 'https://meetful.invalid') } catch { return HOME }
-  // Check what is returned, not just the input: dot segments can normalize to //host.
-  if (url.origin !== 'https://meetful.invalid' || url.pathname.startsWith('//')) return HOME
-  // The router matches the decoded path and ignores a trailing slash, so compare that form.
-  let routed: string
-  try { routed = decodeURI(url.pathname).replace(/\/+$/, '') } catch { return HOME }
-  if (routed === '/welcome' || routed === '/auth' || routed.startsWith('/auth/')) return HOME
-  return url.pathname + url.search + url.hash
-}
-
-export function welcomeHref(step: OnboardingStep, next: string): string {
-  const query = new URLSearchParams({ step })
-  if (next !== HOME) query.set('next', next)
-  return `/welcome?${query}`
-}
 
 /** The name as it will be saved: trimmed, and null when blank so peers see "Anonymous". */
 export function normalizeName(input: string): string | null {

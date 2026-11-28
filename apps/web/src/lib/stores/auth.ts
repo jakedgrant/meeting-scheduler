@@ -6,6 +6,7 @@ import { browser } from '$app/environment'
 import { captureSession, transitionSession } from '$lib/session-scope'
 import { sessionOwner } from '$lib/owned-auth'
 import { createSessionExpiry } from '$lib/session-expiry'
+import { HOME } from '$lib/next-destination'
 
 // Core auth stores
 export const user = writable<User | null>(null)
@@ -13,6 +14,8 @@ export const session = writable<Session | null>(null)
 export const profile = writable<Profile | null>(null)
 export const authLoading = writable(browser)
 export const authCallbackError = writable<string | null>(null)
+/** Where the completed sign-in callback should end up, already validated. */
+export const authCallbackNext = writable(HOME)
 const signedOutOwners = new Set<string>()
 let callbackPending = false
 
@@ -131,11 +134,14 @@ export function initAuth() {
       ? new URL(window.location.href) : null
     callbackPending = !!callbackURL
     authCallbackError.set(null)
+    authCallbackNext.set(HOME)
     const restoration = async () => {
       if (callbackURL) {
-        try { await ownedAuth.complete(callbackURL, () => mounted === lifetime && owners > 0) }
+        let next = HOME
+        try { ({ next } = await ownedAuth.complete(callbackURL, () => mounted === lifetime && owners > 0)) }
         catch (error) { if (mounted === lifetime && owners) authCallbackError.set(error instanceof Error ? error.message : 'Sign-in could not be verified') }
         if (mounted !== lifetime || !owners) return
+        authCallbackNext.set(next)
         callbackPending = false
         observeSession('CALLBACK_FINISHED', null, mounted)
         return
@@ -231,15 +237,15 @@ export async function completeOnboarding() {
 }
 
 // Auth actions
-export async function signInWithGoogle() { return signInWithProvider('google') }
-export async function signInWithApple() { return signInWithProvider('apple') }
-async function signInWithProvider(provider: 'google' | 'apple') {
+export async function signInWithGoogle(next?: string) { return signInWithProvider('google', next) }
+export async function signInWithApple(next?: string) { return signInWithProvider('apple', next) }
+async function signInWithProvider(provider: 'google' | 'apple', next?: string) {
   const scope = captureSession()
-  const url = await ownedAuth.start({ provider }, get(session), window.location.origin)
+  const url = await ownedAuth.start({ provider }, get(session), window.location.origin, next)
   if (scope.isCurrent() && url) window.location.assign(url)
 }
-export async function signInWithMagicLink(email: string) {
-  await ownedAuth.start({ email }, get(session), window.location.origin)
+export async function signInWithMagicLink(email: string, next?: string) {
+  await ownedAuth.start({ email }, get(session), window.location.origin, next)
 }
 
 export async function signOut() {

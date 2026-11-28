@@ -13,7 +13,7 @@ const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const directory = await mkdtemp(join(tmpdir(), 'web-onboarding-'));
 const output = join(directory, 'bundle.mjs');
 await build({
-  stdin: { contents: `export * from '${join(root, 'apps/web/src/lib/onboarding.ts')}'; export * from '${join(root, 'apps/web/src/lib/calendar-result.ts')}';`, resolveDir: join(root, 'apps/web') },
+  stdin: { contents: `export * from '${join(root, 'apps/web/src/lib/onboarding.ts')}'; export * from '${join(root, 'apps/web/src/lib/next-destination.ts')}'; export * from '${join(root, 'apps/web/src/lib/calendar-result.ts')}';`, resolveDir: join(root, 'apps/web') },
   outfile: output, bundle: true, platform: 'node', format: 'esm', tsconfigRaw: {}
 });
 const onboarding = await import(pathToFileURL(output));
@@ -46,6 +46,18 @@ test('step links keep next only when it is not home', () => {
   assert.equal(onboarding.welcomeHref('name', '/polls/abc?x=1'), '/welcome?step=name&next=%2Fpolls%2Fabc%3Fx%3D1');
   const href = new URL(onboarding.welcomeHref('name', '/polls/abc?x=1'), 'https://meetful.invalid');
   assert.equal(onboarding.safeNext(href.searchParams.get('next')), '/polls/abc?x=1');
+});
+
+test('the sign-in link asks to return only to a safe destination', () => {
+  const at = path => new URL(path, 'https://meetful.invalid');
+  assert.equal(onboarding.signInHref(at('/settings')), '/auth?next=%2Fsettings');
+  assert.equal(onboarding.signInHref(at('/polls/new?from=x#top')), '/auth?next=%2Fpolls%2Fnew%3Ffrom%3Dx');
+  // Home is the default, so it needs no parameter.
+  assert.equal(onboarding.signInHref(at('/polls')), '/auth');
+  for (const path of ['/welcome', '/auth', '/auth/callback?attempt=1']) assert.equal(onboarding.signInHref(at(path)), '/auth', path);
+  // What /auth reads back is the same path.
+  const href = at(onboarding.signInHref(at('/settings')));
+  assert.equal(onboarding.safeNext(href.searchParams.get('next')), '/settings');
 });
 
 test('the saved name is trimmed and blank means Anonymous', () => {

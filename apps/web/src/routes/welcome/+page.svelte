@@ -6,9 +6,10 @@
 	import { calendarEnabled, calendarLoading, initCalendar, enableCalendarIntegration } from '$lib/stores/calendar';
 	import { captureSession, createSessionWork } from '$lib/session-scope';
 	import {
-		CALENDAR_MESSAGES, DISPLAY_NAME_MAX, HOME, calendarState, normalizeName, parseStep, previewOf, rememberNext,
-		resolveWelcomeEntry, retry, welcomeHref, type OnboardingStep
+		CALENDAR_MESSAGES, DISPLAY_NAME_MAX, calendarState, normalizeName, parseStep, previewOf, rememberNext,
+		resolveWelcomeEntry, retry, type OnboardingStep
 	} from '$lib/onboarding';
+	import { HOME, welcomeHref } from '$lib/next-destination';
 	import type { CalendarResult } from '$lib/calendar-result';
 
 	const work = createSessionWork();

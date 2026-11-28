@@ -83,7 +83,8 @@ async function fixture(t) {
         'supabase': `export const supabase=globalThis.${key}.supabase;`,
         'poll-refresh': `import {startPollRefresh as start} from '${lib}/poll-refresh.ts'; export const startPollRefresh=refresh=>start(refresh,globalThis.${key}.clock.environment);`,
         'stores/auth': `import {writable} from 'svelte/store'; export const user=writable(null), profile=writable(null); export async function signOut(){return true;}`,
-        '$app/navigation': 'export function goto(){}'
+        '$app/navigation': 'export function goto(){}',
+        '$app/stores': `import {writable} from 'svelte/store'; export const page=writable({url:new URL('https://meetful.invalid/polls')});`
       }[args.path], loader: 'js', resolveDir: join(root, 'apps/web') }));
       b.onLoad({ filter: /\.svelte$/ }, async args => ({ contents: compile(await readFile(args.path, 'utf8'), { filename: args.path, generate: 'server' }).js.code, loader: 'js', resolveDir: join(root, 'apps/web') }));
     } }]

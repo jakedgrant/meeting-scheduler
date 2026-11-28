@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import { signInHref } from '$lib/next-destination';
 	import { user, profile, signOut } from '$lib/stores/auth';
 	import {
 		createdPolls, joinedPolls, pollsLoading, pollsLoadError, pollSummaries, pollListSections,
@@ -18,7 +20,7 @@
 
 	$effect(() => {
 		if ($user === null) {
-			goto('/auth');
+			goto(signInHref($page.url));
 		}
 	});
 
