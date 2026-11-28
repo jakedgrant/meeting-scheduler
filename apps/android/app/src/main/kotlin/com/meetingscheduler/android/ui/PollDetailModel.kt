@@ -459,7 +459,7 @@ class PollDetailModel(
     private fun applySavedAvailability(saved: AvailabilitySnapshot) {
         hasAvailabilityDraft = true
         responses = responses.filter { it.participantId != saved.participantId } + saved.responseRows()
-        participants = participants.map { if (it.id == saved.participantId) it.copy(comment = saved.comment) else it }
+        participants = participants.map { if (it.id == saved.participantId) it.copy(comment = saved.comment, submittedAt = saved.submittedAt) else it }
         myParticipant = participants.firstOrNull { it.id == saved.participantId }
         localResponses = saveSession.pendingDraft?.responses ?: saved.responses.associate { it.timeOptionId to it.status }
         localComment = saveSession.pendingDraft?.comment ?: saved.comment.orEmpty()

@@ -13,6 +13,7 @@ export interface AvailabilitySnapshot {
 	version: number
 	comment: string | null
 	responses: (AvailabilityEntry & { id: string; updated_at: string })[]
+	submitted_at?: string | null
 	saved_at?: string
 	replayed?: boolean
 }

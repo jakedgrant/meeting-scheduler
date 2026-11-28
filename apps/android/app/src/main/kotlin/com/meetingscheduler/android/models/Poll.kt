@@ -104,7 +104,8 @@ data class PollParticipant(
     val createdAt: Instant,
     @SerialName("updated_at")
     val updatedAt: Instant,
-    val profiles: ParticipantProfile? = null
+    val profiles: ParticipantProfile? = null,
+    @SerialName("submitted_at") val submittedAt: Instant? = null
 ) {
     @Serializable
     data class ParticipantProfile(

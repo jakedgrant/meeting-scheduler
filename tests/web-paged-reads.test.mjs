@@ -547,3 +547,28 @@ test('unchanged background options do not notify the calendar effect; changed op
   assert.equal(notifications, 2);
   assert.equal(actual.get(actual.currentPollTimeOptions)[0].start_time, state.option.start_time);
 });
+
+
+test('participant submission time follows saved snapshots and survives failed saves', async t => {
+  const { actual, state } = await fixture(t);
+  const { participant, option } = memberDetail(state);
+  await actual.loadPoll(pollId);
+  assert.equal(actual.get(actual.currentPollParticipants)[0].submitted_at, undefined);
+  const submittedAt = '2026-11-24T02:00:00Z';
+  const handler = state.handler;
+  state.handler = name => name === 'save_availability' ? { data: {
+    ...state.snapshot, submitted_at: submittedAt, version: 2,
+    responses: [{ id: 'answer', time_option_id: option.id, status: 'unavailable', note: null, updated_at: '2026-11-20T12:00:00Z' }]
+  }, error: null } : handler(name);
+  const request = { pollId, participantId: participant.id, requestId: 'request', expectedVersion: 1,
+    responses: [{ time_option_id: option.id, status: 'unavailable', note: null }], comment: null };
+  await actual.saveAvailability(request);
+  assert.equal(actual.get(actual.currentPollParticipants)[0].submitted_at, submittedAt,
+    'Use the submission timestamp rather than the older individual answer timestamp');
+  state.handler = name => name === 'save_availability' ? { data: null, error: { code: '42501', message: 'Poll is not accepting responses' } } : handler(name);
+  await assert.rejects(actual.saveAvailability({ ...request, requestId: 'failed', expectedVersion: 2 }));
+  assert.equal(actual.get(actual.currentPollParticipants)[0].submitted_at, submittedAt);
+  state.handler = name => name === 'save_availability' ? { data: { ...state.snapshot, submitted_at: null, version: 3, responses: [] }, error: null } : handler(name);
+  await actual.saveAvailability({ ...request, requestId: 'clear', expectedVersion: 2, responses: [] });
+  assert.equal(actual.get(actual.currentPollParticipants)[0].submitted_at, null);
+});

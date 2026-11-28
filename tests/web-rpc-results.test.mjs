@@ -60,6 +60,21 @@ test('column checks enforce nullability, enums, integers and instants', async t 
   assert.equal(isPollParticipant(participantRow({ profiles: {} })), false);
 });
 
+test('submission timestamps accept historical payloads, null, and instants but reject malformed values', async t => {
+  const { isPollParticipant, isAvailabilitySnapshot } = await bundledChecks(t);
+  const participant = participantRow();
+  const snapshot = { participant_id: participant.id, poll_id: participant.poll_id, version: 1, comment: null, responses: [] };
+  for (const [check, value] of [[isPollParticipant, participant], [isAvailabilitySnapshot, snapshot]]) {
+    assert.equal(check(value), true, 'Older payloads omit submitted_at');
+    for (const submitted_at of [null, '2026-11-24T02:00:00Z', '2026-11-24T02:00:00.123456+00:00']) {
+      assert.equal(check({ ...value, submitted_at }), true);
+    }
+    for (const submitted_at of [42, '', 'yesterday', '2026-11-24T02:00:00', '2026-99-99T99:99:99Z']) {
+      assert.equal(check({ ...value, submitted_at }), false);
+    }
+  }
+});
+
 test('result checks cover nested rows and their own fields', async t => {
   const actual = await bundledChecks(t);
   const poll = pollRow(), option = timeOptionRow(), participant = participantRow();
