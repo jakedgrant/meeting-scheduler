@@ -18,6 +18,8 @@ data class CalendarCheck(
     val unchecked: Set<String> = emptySet(),
     val checkedSources: List<CalendarSource> = emptyList(),
     val failedSources: List<CalendarSource> = emptyList(),
+    /** The device events behind each busy option. Google never names its events, so its options have none. */
+    val events: Map<String, List<CalendarConflict>> = emptyMap(),
 ) {
     companion object {
         val NONE = CalendarCheck()
@@ -34,6 +36,15 @@ data class CalendarCheck(
         }
     }
 }
+
+/** A device calendar event that makes a poll option busy. */
+data class CalendarConflict(
+    val title: String,
+    val calendarName: String,
+    val start: Instant,
+    val end: Instant,
+    val isAllDay: Boolean,
+)
 
 /** A period a device calendar event makes busy. */
 sealed interface DeviceBusyPeriod {

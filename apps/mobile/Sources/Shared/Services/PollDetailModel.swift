@@ -5,6 +5,12 @@ public struct ResponseSummary: Equatable, Sendable {
     public let available: Int
     public let maybe: Int
     public let unavailable: Int
+
+    public init(available: Int, maybe: Int, unavailable: Int) {
+        self.available = available
+        self.maybe = maybe
+        self.unavailable = unavailable
+    }
 }
 
 /// How close a poll's response deadline is.
@@ -45,6 +51,8 @@ public final class PollDetailModel {
     public private(set) var commentError: String?
     public private(set) var calendarAdd = CalendarAddState.idle
     public private(set) var calendarCheck = CalendarCheckResult.none
+    /// The device calendar events behind each busy option, for the conflict line under it.
+    public private(set) var conflictEvents: [UUID: [CalendarConflict]] = [:]
     public private(set) var isCheckingCalendar = false
     public private(set) var requiresMembership = false
     public private(set) var isLoading = true
@@ -183,7 +191,7 @@ public final class PollDetailModel {
         displayed = Visit(accountId: account)
         editor.selectAccount(account, pollId: pollId)
         poll = nil; timeOptions = []; participants = []; responses = []; myParticipantId = nil
-        calendarCheck = .none; isCheckingCalendar = false; actionError = nil; commentError = nil
+        calendarCheck = .none; conflictEvents = [:]; isCheckingCalendar = false; actionError = nil; commentError = nil
         calendarAdd = .idle
         isSelectingFinalDate = false
         if let cached = polls.cachedPollDetail(id: pollId) { applyDetail(cached) }
@@ -230,6 +238,9 @@ public final class PollDetailModel {
     public func setResponse(_ status: AvailabilityStatus, for optionId: UUID) {
         editor.responses[optionId] = status
     }
+
+    /// The current time, for labels that depend on it such as a date's year.
+    public var now: Date { clock.now }
 
     /// Keeps the comment within the length limit; a longer value is rejected with an error.
     public func updateComment(_ value: String) {
@@ -426,6 +437,12 @@ public final class PollDetailModel {
         let result = await calendar.checkConflicts(for: timeOptions, pollTimeZone: poll.timezone)
         guard isCurrent(generation, account) else { return }
         calendarCheck = result
+        var conflicts: [UUID: [CalendarConflict]] = [:]
+        for option in timeOptions where result.busySources[option.id]?.contains(.appleCalendar) == true {
+            conflicts[option.id] = await calendar.deviceConflicts(for: option, pollTimeZone: poll.timezone)
+            guard isCurrent(generation, account) else { return }
+        }
+        conflictEvents = conflicts
         for conflictId in result.busyIds where editor.saved != nil && editor.responses[conflictId] == nil {
             editor.responses[conflictId] = .unavailable
         }

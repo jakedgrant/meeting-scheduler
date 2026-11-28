@@ -180,7 +180,7 @@ for (const member of [false, true]) {
     assert.match(failedHtml, /Retry Save/);
     assert.doesNotMatch(failedHtml, /Responses saved\./);
     assert.doesNotMatch(failedHtml, /can.t be saved as a guest/);
-    assert.match(failedHtml, /class="response-btn available/);
+    assert.match(failedHtml, /class="response available/);
     primePage(editor);
     await editor.save();
     const saved = actual.get(editor);
@@ -342,7 +342,7 @@ test('account transition discards an in-flight save result and its editor state'
 });
 
 
-test('calendar badges distinguish busy from unchecked options and name what was checked (F16)', async t => {
+test('calendar lines distinguish busy from unchecked options and name what was checked (F16)', async t => {
   const { actual, state, primePage } = await fixture(t, { member: true });
   const editor = actual.createAvailabilityEditor({ save: actual.saveAvailability, load: actual.loadAvailability });
   editor.initialize(snapshot());
@@ -352,7 +352,7 @@ test('calendar badges distinguish busy from unchecked options and name what was 
   calendar.calendarCoverage.set('primary calendar');
   let html = actual.render(actual.Page).body;
   assert.match(html, /Checked Google Calendar \(primary calendar\)\./);
-  assert.doesNotMatch(html, /Busy|Couldn't check|Retry calendar check/);
+  assert.doesNotMatch(html, /Conflicts with|Couldn't check|Retry calendar check/);
   calendar.calendarCoverage.set(null);
   calendar.calendarUnchecked.set(new Set([optionId]));
   calendar.calendarStatusError.set('Google Calendar couldn\'t be checked.');
@@ -362,8 +362,30 @@ test('calendar badges distinguish busy from unchecked options and name what was 
   assert.doesNotMatch(html, /Checked Google Calendar/);
   calendar.calendarConflicts.set(new Set([optionId]));
   html = actual.render(actual.Page).body;
-  assert.match(html, /Busy/);
-  assert.doesNotMatch(html, /class="calendar-badge unchecked"/);
+  assert.match(html, /Conflicts with an event on your Google Calendar/);
+  assert.match(html, /aria-label="Conflict: an event on your Google Calendar"/);
+  assert.doesNotMatch(html, /class="unchecked/);
+});
+
+test('time option rows show the answer and the tally (time option row spec)', async t => {
+  const { actual, primePage } = await fixture(t, { member: true });
+  const editor = actual.createAvailabilityEditor({ save: actual.saveAvailability, load: actual.loadAvailability });
+  editor.initialize(snapshot());
+  primePage(editor);
+  actual.currentPollResponses.set([
+    { id: 'a', participant_id: participantId, time_option_id: optionId, status: 'available', note: null, updated_at: '2026-10-23T00:00:00Z' },
+    { id: 'b', participant_id: memberId, time_option_id: optionId, status: 'unavailable', note: null, updated_at: '2026-10-23T00:00:00Z' }
+  ]);
+  let html = actual.render(actual.Page).body;
+  assert.match(html, /aria-label="Your response: No response"/);
+  assert.doesNotMatch(html, /aria-pressed="true"/);
+  editor.setResponse(optionId, 'maybe');
+  html = actual.render(actual.Page).body;
+  assert.match(html, /Time options/);
+  assert.match(html, /aria-label="Your response: Maybe"/);
+  assert.match(html, /class="response maybe[^"]* selected[^"]*"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*class="response maybe/);
+  assert.match(html, /role="img" aria-label="1 yes, 0 maybe, 1 no"/);
+  assert.equal((html.match(/class="segment /g) ?? []).length, 2, 'Empty counts get no segment');
 });
 
 test('closed/expired poll hides response controls and load failure offers a retry', async t => {
@@ -374,7 +396,7 @@ test('closed/expired poll hides response controls and load failure offers a retr
     primePage(editor);
     actual.currentPoll.set(closed);
     const html = actual.render(actual.Page).body;
-    assert.doesNotMatch(html, /class="response-btn available/);
+    assert.doesNotMatch(html, /class="response available/);
     assert.doesNotMatch(html, /Save Responses/);
     assert.match(html, /no longer accepting responses/);
   }
@@ -382,13 +404,13 @@ test('closed/expired poll hides response controls and load failure offers a retr
   actual.availabilityLoadError.set('Could not load your saved responses. Retry before editing.');
   const html = actual.render(actual.Page).body;
   assert.match(html, /Retry loading responses/);
-  assert.doesNotMatch(html, /class="response-btn available/);
+  assert.doesNotMatch(html, /class="response available/);
   actual.availabilityLoadError.set(null);
   actual.pollRefreshError.set('Displayed results may be out of date.');
   const stale = actual.render(actual.Page).body;
   assert.match(stale, /Displayed results may be out of date/);
   assert.match(stale, /Retry refreshing poll/);
-  assert.doesNotMatch(stale, /class="response-btn available/);
+  assert.doesNotMatch(stale, /class="response available/);
   assert.doesNotMatch(stale, /Save Responses/);
 });
 

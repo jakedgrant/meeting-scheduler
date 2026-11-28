@@ -1,7 +1,7 @@
 import SwiftUI
 import Shared
 
-/// Shows which calendar events make a poll option busy, from the "Busy" badge.
+/// Shows which calendar events make a poll option busy, from the conflict line under it.
 struct CalendarConflictsView: View {
     let option: PollTimeOption
     let pollTimeZone: String
@@ -62,7 +62,7 @@ struct CalendarConflictsView: View {
             } else {
                 ForEach(conflicts) { conflict in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(conflict.title.isEmpty ? String(localized: "Untitled event") : conflict.title)
+                        Text(TimeOptionLabel.eventTitle(conflict))
                             .font(.headline)
                         Text(timeText(of: conflict))
                             .font(.subheadline)
@@ -79,7 +79,7 @@ struct CalendarConflictsView: View {
     private var timeText: String {
         option.isAllDay
             ? String(localized: "All day")
-            : "\(option.startTime.formatted(date: .omitted, time: .shortened)) - \(option.endTime.formatted(date: .omitted, time: .shortened))"
+            : TimeOptionLabel.timeRange(from: option.startTime, to: option.endTime)
     }
 
     private func timeText(of conflict: CalendarConflict) -> String {

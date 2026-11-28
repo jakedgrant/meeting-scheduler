@@ -168,6 +168,9 @@ class PollDetailModel(
 
     fun isCurrentUser(participant: PollParticipant) = participant.userId == accountId
 
+    /** The current time, for labels that depend on it such as a date's year. */
+    fun now(): Instant = clock.now()
+
     fun responseSummary(optionId: String): ResponseSummary {
         val optionResponses = responses.filter { it.timeOptionId == optionId }
         return ResponseSummary(

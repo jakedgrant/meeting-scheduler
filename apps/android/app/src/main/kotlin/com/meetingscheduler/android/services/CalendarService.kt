@@ -19,6 +19,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import com.meetingscheduler.android.models.CalendarCheck
+import com.meetingscheduler.android.models.CalendarConflict
 import com.meetingscheduler.android.models.DeviceBusyPeriod
 import com.meetingscheduler.android.models.PollTimeOption
 import io.github.jan.supabase.functions.functions
@@ -250,16 +251,19 @@ class CalendarService(
         if (options.isEmpty()) return CalendarCheck.NONE
         val owner = captureOwner() ?: return CalendarCheck.NONE
         val sources = mutableListOf<Pair<CalendarSource, Set<String>?>>()
+        var deviceEvents = emptyMap<String, List<CalendarConflict>>()
         if (appleCalendarEnabled) {
-            val busy = try {
-                readDeviceConflicts?.invoke(options, pollTimeZone) ?: withContext(Dispatchers.IO) { readDeviceBusy(options, pollTimeZone) }
+            val events = try {
+                readDeviceConflicts?.invoke(options, pollTimeZone)?.associateWith { emptyList<CalendarConflict>() }
+                    ?: withContext(Dispatchers.IO) { readDeviceEvents(options, pollTimeZone) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
                 null
             }
             if (!isCurrent(owner)) return CalendarCheck.NONE
-            sources += CalendarSource.APPLE_CALENDAR to busy
+            deviceEvents = events.orEmpty()
+            sources += CalendarSource.APPLE_CALENDAR to events?.keys
         }
         if (googleCalendarEnabled) {
             val busy = try {
@@ -287,11 +291,11 @@ class CalendarService(
             if (!isCurrent(owner)) return CalendarCheck.NONE
             sources += CalendarSource.GOOGLE_CALENDAR to busy
         }
-        return CalendarCheck.combine(options.map { it.id }.toSet(), sources)
+        return CalendarCheck.combine(options.map { it.id }.toSet(), sources).copy(events = deviceEvents)
     }
 
-    /** One Instances query (recurrences expanded) across every device calendar. */
-    private fun readDeviceBusy(options: List<PollTimeOption>, pollTimeZone: String): Set<String> {
+    /** One Instances query (recurrences expanded) across every device calendar: the events behind each busy option. */
+    private fun readDeviceEvents(options: List<PollTimeOption>, pollTimeZone: String): Map<String, List<CalendarConflict>> {
         if (!hasCalendarPermission) throw IllegalStateException("Calendar permission missing")
         val contentResolver: ContentResolver = context?.contentResolver ?: throw IllegalStateException("No calendar provider")
         // All-day instances are stored at UTC midnights and match by date, so pad the window.
@@ -304,24 +308,34 @@ class CalendarService(
             CalendarContract.Events.ALL_DAY,
             CalendarContract.Events.AVAILABILITY,
             CalendarContract.Events.STATUS,
-            CalendarContract.Events.SELF_ATTENDEE_STATUS
+            CalendarContract.Events.SELF_ATTENDEE_STATUS,
+            CalendarContract.Events.TITLE,
+            CalendarContract.Events.CALENDAR_DISPLAY_NAME,
         )
         val cursor: Cursor = CalendarContract.Instances.query(contentResolver, projection, begin, end)
             ?: throw IllegalStateException("Calendar query failed")
-        val periods = mutableListOf<DeviceBusyPeriod>()
+        val deviceZone = kotlinx.datetime.TimeZone.currentSystemDefault()
+        val events = mutableMapOf<String, MutableList<CalendarConflict>>()
         cursor.use {
             while (it.moveToNext()) {
-                DeviceBusyPeriod.of(
-                    allDay = it.getInt(2) == 1,
-                    begin = Instant.fromEpochMilliseconds(it.getLong(0)),
-                    end = Instant.fromEpochMilliseconds(it.getLong(1)),
+                val allDay = it.getInt(2) == 1
+                val eventBegin = Instant.fromEpochMilliseconds(it.getLong(0))
+                val eventEnd = Instant.fromEpochMilliseconds(it.getLong(1))
+                val period = DeviceBusyPeriod.of(
+                    allDay = allDay,
+                    begin = eventBegin,
+                    end = eventEnd,
                     free = it.getInt(3) == CalendarContract.Events.AVAILABILITY_FREE,
                     cancelled = it.getInt(4) == CalendarContract.Events.STATUS_CANCELED,
                     declined = it.getInt(5) == CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED,
-                )?.let(periods::add)
+                ) ?: continue
+                val event = CalendarConflict(it.getString(6).orEmpty(), it.getString(7).orEmpty(), eventBegin, eventEnd, allDay)
+                DeviceBusyPeriod.busyOptionIds(options, pollTimeZone, listOf(period), deviceZone).forEach { id ->
+                    events.getOrPut(id) { mutableListOf() } += event
+                }
             }
         }
-        return DeviceBusyPeriod.busyOptionIds(options, pollTimeZone, periods, kotlinx.datetime.TimeZone.currentSystemDefault())
+        return events
     }
 }
 

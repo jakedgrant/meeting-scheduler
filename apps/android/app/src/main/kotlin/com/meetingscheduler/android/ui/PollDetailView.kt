@@ -60,6 +60,7 @@ fun PollDetailView(
     RefreshOnReturn(holder)
     var showClosePollDialog by remember(model) { mutableStateOf(false) }
     var finalTimeOption by remember(model) { mutableStateOf<PollTimeOption?>(null) }
+    var conflictOption by remember(model) { mutableStateOf<PollTimeOption?>(null) }
 
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
@@ -383,26 +384,30 @@ fun PollDetailView(
                     }
                 }
 
-                // Time Options
                 item {
-                    Text("Time Options", style = MaterialTheme.typography.titleMedium)
-                }
-
-                items(model.timeOptions) { option ->
-                    TimeOptionRow(
-                        pollTimeZone = poll?.timezone ?: "UTC",
-                        option = option,
-                        responses = model.responseSummary(option.id),
-                        myResponse = model.localResponses[option.id],
-                        hasCalendarConflict = option.id in model.calendarCheck.busy,
-                        calendarUnchecked = option.id in model.calendarCheck.unchecked,
-                        canRespond = model.canRespond,
-                        onResponseChange = { status -> model.setResponse(option.id, status) },
-                        onClick = {
-                            holder.coverWithChild()
-                            onNavigateToResponses(option.id)
-                        }
-                    )
+                    TimeOptionsCard(model.timeOptions) { option ->
+                        TimeOptionRow(
+                            option = option,
+                            pollTimeZone = poll?.timezone ?: "UTC",
+                            now = model.now(),
+                            calendarStatus = when (option.id) {
+                                in model.calendarCheck.busy -> OptionCalendarStatus.Busy(model.calendarCheck.events[option.id].orEmpty())
+                                in model.calendarCheck.unchecked -> OptionCalendarStatus.Unchecked
+                                else -> OptionCalendarStatus.Free
+                            },
+                            responses = model.responseSummary(option.id),
+                            // No poll setting hides the tally yet, so every viewer sees it as before.
+                            showsResponseTallies = true,
+                            canRespond = model.canRespond,
+                            response = model.localResponses[option.id],
+                            onResponseChange = { status -> model.setResponse(option.id, status) },
+                            onShowResponses = {
+                                holder.coverWithChild()
+                                onNavigateToResponses(option.id)
+                            },
+                            onShowConflicts = { conflictOption = option }
+                        )
+                    }
                 }
 
                 // Comment Field
@@ -569,6 +574,10 @@ fun PollDetailView(
         )
     }
 
+    conflictOption?.let { option ->
+        CalendarConflictsSheet(option, model.calendarCheck.events[option.id].orEmpty(), onDismiss = { conflictOption = null })
+    }
+
     // Select Final Date Dialog
     finalTimeOption?.let { option ->
         val formattedOption = run {
@@ -608,123 +617,6 @@ fun PollDetailView(
 }
 
 @Composable
-fun TimeOptionRow(
-    option: PollTimeOption,
-    pollTimeZone: String,
-    responses: ResponseSummary,
-    myResponse: AvailabilityStatus?,
-    hasCalendarConflict: Boolean,
-    calendarUnchecked: Boolean,
-    canRespond: Boolean,
-    onResponseChange: (AvailabilityStatus) -> Unit,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                            .apply { timeZone = PollDates.displayZone(option.isAllDay, pollTimeZone) }
-                        Text(
-                            dateFormat.format(Date.from(option.startTime.toJavaInstant())),
-                            style = MaterialTheme.typography.titleSmall
-                        )
-
-                        if (hasCalendarConflict) {
-                            Spacer(Modifier.width(8.dp))
-                            Surface(
-                                color = MaterialTheme.colorScheme.errorContainer,
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        Icons.Default.Warning,
-                                        null,
-                                        modifier = Modifier.size(12.dp),
-                                        tint = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        "Busy",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer
-                                    )
-                                }
-                            }
-                        } else if (calendarUnchecked) {
-                            Spacer(Modifier.width(8.dp))
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    "Couldn't check",
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-
-                    if (option.isAllDay) {
-                        Text("All day", style = MaterialTheme.typography.bodySmall)
-                    } else {
-                        val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
-                        val start = timeFormat.format(Date.from(option.startTime.toJavaInstant()))
-                        val end = timeFormat.format(Date.from(option.endTime.toJavaInstant()))
-                        Text("$start - $end", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ResponseCount(responses.available, AvailabilityStatus.AVAILABLE)
-                    ResponseCount(responses.maybe, AvailabilityStatus.MAYBE)
-                    ResponseCount(responses.unavailable, AvailabilityStatus.UNAVAILABLE)
-                }
-            }
-
-            if (canRespond) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    ResponseButton(
-                        AvailabilityStatus.AVAILABLE,
-                        myResponse == AvailabilityStatus.AVAILABLE,
-                        modifier = Modifier.weight(1f)
-                    ) { onResponseChange(AvailabilityStatus.AVAILABLE) }
-                    ResponseButton(
-                        AvailabilityStatus.MAYBE,
-                        myResponse == AvailabilityStatus.MAYBE,
-                        modifier = Modifier.weight(1f)
-                    ) { onResponseChange(AvailabilityStatus.MAYBE) }
-                    ResponseButton(
-                        AvailabilityStatus.UNAVAILABLE,
-                        myResponse == AvailabilityStatus.UNAVAILABLE,
-                        modifier = Modifier.weight(1f)
-                    ) { onResponseChange(AvailabilityStatus.UNAVAILABLE) }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 fun ResponseCount(count: Int, status: AvailabilityStatus) {
     val backgroundColor = when (status) {
         AvailabilityStatus.AVAILABLE -> Color(0xFF2E7D32).copy(alpha = 0.15f)
@@ -749,47 +641,6 @@ fun ResponseCount(count: Int, status: AvailabilityStatus) {
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = foregroundColor
-        )
-    }
-}
-
-@Composable
-fun ResponseButton(
-    status: AvailabilityStatus,
-    isSelected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val icon = when (status) {
-        AvailabilityStatus.AVAILABLE -> Icons.Default.Check
-        AvailabilityStatus.MAYBE -> Icons.Default.HelpOutline
-        AvailabilityStatus.UNAVAILABLE -> Icons.Default.Close
-    }
-
-    val selectedColor = when (status) {
-        AvailabilityStatus.AVAILABLE -> Color(0xFF2E7D32).copy(alpha = 0.2f)
-        AvailabilityStatus.MAYBE -> Color(0xFFE65100).copy(alpha = 0.2f)
-        AvailabilityStatus.UNAVAILABLE -> Color(0xFFC62828).copy(alpha = 0.2f)
-    }
-
-    val foregroundColor = when (status) {
-        AvailabilityStatus.AVAILABLE -> Color(0xFF1B5E20)
-        AvailabilityStatus.MAYBE -> Color(0xFFE65100)
-        AvailabilityStatus.UNAVAILABLE -> Color(0xFFC62828)
-    }
-
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier.height(40.dp),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (isSelected) selectedColor else Color.Transparent
-        )
-    ) {
-        Icon(
-            icon,
-            null,
-            tint = if (isSelected) foregroundColor else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(20.dp)
         )
     }
 }
