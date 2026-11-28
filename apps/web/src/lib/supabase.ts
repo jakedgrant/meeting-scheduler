@@ -23,5 +23,6 @@ export type PollTimeOption = Tables<'poll_time_options'>
 export type AvailabilityResponse = Tables<'availability_responses'>
 // get_poll_detail embeds the participant's display name.
 export type PollParticipant = Tables<'poll_participants'> & {
+  submitted_at?: string | null
   profiles?: { display_name: string | null } | null
 }

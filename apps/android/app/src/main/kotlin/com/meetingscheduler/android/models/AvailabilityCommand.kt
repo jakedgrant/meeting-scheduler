@@ -21,6 +21,7 @@ data class AvailabilitySnapshot(
     val version: Long,
     val comment: String? = null,
     val responses: List<SavedAvailabilityResponse>,
+    @SerialName("submitted_at") val submittedAt: Instant? = null,
 ) {
     fun responseRows() = responses.map {
         AvailabilityResponse(it.id, participantId, it.timeOptionId, it.status, it.note, it.updatedAt, it.updatedAt)
