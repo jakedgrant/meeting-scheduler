@@ -44,5 +44,16 @@ export async function authenticateCalendar(
       session_id: sessionId,
     })
   ) throw failure();
-  return { userId, sessionId };
+  return { userId, sessionId, googleEmail: googleEmail(claims) };
+}
+
+/** Supabase lists every linked sign-in provider in app_metadata.providers. */
+function googleEmail(claims: Record<string, unknown>): string | undefined {
+  const providers = (claims.app_metadata as { providers?: unknown } | undefined)
+    ?.providers;
+  const email = claims.email;
+  return Array.isArray(providers) && providers.includes("google") &&
+      typeof email === "string" && email.length > 0 && email.length <= 320
+    ? email
+    : undefined;
 }

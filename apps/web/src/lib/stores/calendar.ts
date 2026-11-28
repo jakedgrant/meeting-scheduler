@@ -90,7 +90,8 @@ export async function initCalendar() {
   }
 }
 
-export async function enableCalendarIntegration(): Promise<boolean> {
+/** page is where the backend sends the browser after consent: Settings, or the calendar step of onboarding. */
+export async function enableCalendarIntegration(page: 'settings' | 'welcome' = 'settings'): Promise<boolean> {
   if (!get(session)?.user) throw new Error('Sign in before connecting a calendar.')
   if (accountId !== get(session)?.user.id) reset(get(session)?.user.id ?? null)
   const current = ++generation
@@ -103,7 +104,9 @@ export async function enableCalendarIntegration(): Promise<boolean> {
     if (generation !== current) return false
     applyStatus(status)
     if (status.connected) return true
-    const result = await connection<{ authorizationURL: string }>({ action: 'start', target: 'web', origin: window.location.origin })
+    // Settings sends no page, so it keeps working against an edge function that predates the field.
+    const result = await connection<{ authorizationURL: string }>(
+      { action: 'start', target: 'web', origin: window.location.origin, ...(page === 'welcome' ? { page } : {}) })
     if (generation !== current) return false
     const url = new URL(result.authorizationURL)
     if (url.protocol !== 'https:' || url.hostname !== 'accounts.google.com' || url.pathname !== '/o/oauth2/v2/auth') {

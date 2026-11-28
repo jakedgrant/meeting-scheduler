@@ -17,6 +17,13 @@ import {
   verifierPurpose,
 } from "./types.ts";
 
+/** Pages the web can return to after consent; the callback appends ?calendar= or &calendar=. */
+const WEB_RETURN_PATHS = {
+  settings: "/settings",
+  welcome: "/welcome?step=calendar",
+} as const;
+type WebReturnPage = keyof typeof WEB_RETURN_PATHS;
+
 export class CalendarService {
   constructor(
     private repository: Repository,
@@ -47,15 +54,18 @@ export class CalendarService {
     identity: Identity,
     target: unknown,
     origin: unknown,
+    page: unknown = "settings",
   ): Promise<{ authorizationURL: string }> {
     let returnTo: string;
     if (
       target === "web" && typeof origin === "string" &&
-      this.config.webOrigins.includes(origin)
+      this.config.webOrigins.includes(origin) && typeof page === "string" &&
+      Object.hasOwn(WEB_RETURN_PATHS, page)
     ) {
-      returnTo = origin + "/settings";
+      returnTo = origin + WEB_RETURN_PATHS[page as WebReturnPage];
     } else if (
-      (target === "ios" || target === "android") && origin === undefined
+      (target === "ios" || target === "android") && origin === undefined &&
+      page === "settings"
     ) {
       returnTo = this.config.mobileReturnURL;
     } else {
@@ -98,9 +108,12 @@ export class CalendarService {
       return_to: returnTo,
     });
     return {
+      // Only web starts get a hint; mobile starts are unchanged and keep
+      // Google's account picker.
       authorizationURL: this.provider.authorizationURL(
         state,
         await pkceChallenge(verifier),
+        target === "web" ? identity.googleEmail : undefined,
       ),
     };
   }
@@ -137,10 +150,11 @@ export class CalendarService {
     const returnURL = new URL(attempt.return_to);
     if (
       attempt.return_to !== this.config.mobileReturnURL &&
-      !(this.config.webOrigins.includes(returnURL.origin) &&
-        returnURL.pathname === "/settings" &&
-        !returnURL.search && !returnURL.hash && !returnURL.username &&
-        !returnURL.password)
+      !this.config.webOrigins.some((origin) =>
+        Object.values(WEB_RETURN_PATHS).some((path) =>
+          attempt.return_to === origin + path
+        )
+      )
     ) {
       throw new CalendarError(
         "invalid_return_target",
@@ -172,7 +186,18 @@ export class CalendarService {
         );
         const tokens = await this.provider.exchange(code, verifier);
         cleanupToken = tokens.refreshToken ?? tokens.accessToken;
-        if (!tokens.refreshToken || !tokens.scopes?.includes(CALENDAR_SCOPE)) {
+        // Google lets the person untick the calendar permission and still
+        // finish consent. Report that apart from a failure so the client can
+        // ask them to allow it.
+        if (!tokens.scopes?.includes(CALENDAR_SCOPE)) {
+          result = "declined";
+          throw new CalendarError(
+            "calendar_permission_declined",
+            409,
+            "Grant calendar permission and reconnect.",
+          );
+        }
+        if (!tokens.refreshToken) {
           throw new CalendarError(
             "calendar_permission_missing",
             409,

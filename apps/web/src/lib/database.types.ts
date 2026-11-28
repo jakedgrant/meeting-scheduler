@@ -287,6 +287,7 @@ export type Database = {
           display_name: string | null
           email: string
           id: string
+          onboarding_completed_at: string | null
           timezone: string
           updated_at: string
         }
@@ -296,6 +297,7 @@ export type Database = {
           display_name?: string | null
           email: string
           id: string
+          onboarding_completed_at?: string | null
           timezone?: string
           updated_at?: string
         }
@@ -305,6 +307,7 @@ export type Database = {
           display_name?: string | null
           email?: string
           id?: string
+          onboarding_completed_at?: string | null
           timezone?: string
           updated_at?: string
         }
@@ -396,6 +399,10 @@ export type Database = {
           guest_token: string | null
         }
         Returns: Json
+      }
+      complete_onboarding: {
+        Args: Record<PropertyKey, never>
+        Returns: string
       }
       count_active_polls: {
         Args: {

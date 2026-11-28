@@ -5,6 +5,7 @@
 	import { calendarEnabled, calendarLoading, calendarStatusError, calendarAccountEmail, calendarRequiresReconnect, calendarRevocationPending, initCalendar, enableCalendarIntegration, disableCalendarIntegration } from '$lib/stores/calendar';
 
 	import { createSessionWork } from '$lib/session-scope';
+	import { CALENDAR_DECLINED_MESSAGE, parseCalendarResult } from '$lib/calendar-result';
 	const work = createSessionWork();
 	onDestroy(() => work.dispose());
 
@@ -25,9 +26,10 @@
 			displayName = ''; avatarUrl = ''; timezone = 'UTC';
 			loading = false; errorMessage = ''; successMessage = ''; calendarError = '';
 		});
-		const result = new URLSearchParams(window.location.search).get('calendar');
+		const result = parseCalendarResult(new URLSearchParams(window.location.search).get('calendar'));
 		if (result === 'failed') calendarError = 'Google Calendar connection failed. Please try again.';
 		if (result === 'cancelled') calendarError = 'Google Calendar connection was cancelled.';
+		if (result === 'declined') calendarError = CALENDAR_DECLINED_MESSAGE;
 		return stop;
 	});
 

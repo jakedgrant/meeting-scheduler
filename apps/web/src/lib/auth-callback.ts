@@ -19,7 +19,8 @@ export function createAuthCallback(dependencies: {
         } else if (!data.session?.user || (data.session.expires_at !== undefined && data.session.expires_at * 1000 <= Date.now())) {
           dependencies.navigate('/auth?error=No%20session')
         } else if (data.session.user.id === scope.accountId) {
-          dependencies.navigate('/polls')
+          // /welcome sends an account that has finished onboarding straight on to the app.
+          dependencies.navigate('/welcome')
         }
       } catch {
         if (isCurrent()) dependencies.navigate('/auth?error=Sign-in%20could%20not%20be%20verified')

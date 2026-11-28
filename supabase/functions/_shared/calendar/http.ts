@@ -152,11 +152,12 @@ export function calendarHandler(
         onlyKeys(input, ["action"]);
         result = await deps.service.disconnect(identity);
       } else if (input.action === "start") {
-        onlyKeys(input, ["action", "target", "origin"]);
+        onlyKeys(input, ["action", "target", "origin", "page"]);
         result = await deps.service.start(
           identity,
           input.target,
           input.origin,
+          input.page,
         );
       } else {
         throw new CalendarError(
