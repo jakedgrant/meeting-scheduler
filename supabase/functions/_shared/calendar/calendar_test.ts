@@ -255,7 +255,9 @@ class TestProvider implements Provider {
   exchanges: { code: string; verifier: string }[] = [];
   refreshes: string[] = [];
   revoked: string[] = [];
-  authorizationURL(state: string, challenge: string) {
+  loginHints: (string | undefined)[] = [];
+  authorizationURL(state: string, challenge: string, loginHint?: string) {
+    this.loginHints.push(loginHint);
     return `https://accounts.google.com/o/oauth2/v2/auth?state=${state}&code_challenge=${challenge}`;
   }
   async exchange(code: string, verifier: string) {
@@ -488,6 +490,37 @@ Deno.test("verified claims still require issuer, audience, role, expiry, session
   );
 });
 
+Deno.test("identity carries the email only of an account that signed in with Google", async () => {
+  const repository = new MemoryRepository();
+  const valid = {
+    sub: userId,
+    session_id: sessionId,
+    iss: issuer,
+    aud: "authenticated",
+    role: "authenticated",
+    exp: Date.now() / 1000 + 3600,
+    email: "person@example.test",
+  };
+  const email = async (claims: Record<string, unknown>) =>
+    (await authenticateCalendar(
+      request({}),
+      () => Promise.resolve({ ...valid, ...claims }),
+      repository,
+      issuer,
+    )).googleEmail;
+  equal(
+    await email({ app_metadata: { providers: ["apple", "google"] } }),
+    "person@example.test",
+  );
+  equal(await email({ app_metadata: { providers: ["apple"] } }), undefined);
+  equal(await email({ app_metadata: { provider: "google" } }), undefined);
+  equal(await email({}), undefined);
+  equal(
+    await email({ app_metadata: { providers: ["google"] }, email: 7 }),
+    undefined,
+  );
+});
+
 Deno.test("status response contains metadata only and cannot be redirected to another user", async () => {
   const f = await fixture();
   await f.connect();
@@ -573,6 +606,150 @@ Deno.test("cancelled OAuth leaves no connection and never reflects provider erro
     "meetingscheduler://calendar/callback?calendar=cancelled",
   );
   equal((await f.service.status(identity)).connected, false);
+});
+
+Deno.test("the web can return to onboarding; nothing else chooses the return location", async () => {
+  const f = await fixture();
+  const start = await f.service.start(
+    identity,
+    "web",
+    "https://web.example.test",
+    "welcome",
+  );
+  const state = new URL(start.authorizationURL).searchParams.get("state")!;
+  equal(
+    await f.service.callback(
+      new URLSearchParams({ state, code: "server-only-code" }),
+    ),
+    "https://web.example.test/welcome?step=calendar&calendar=connected",
+  );
+  for (
+    const [target, origin, page] of [
+      ["web", "https://web.example.test", "https://evil.example/"],
+      ["web", "https://web.example.test", "toString"],
+      ["web", "https://web.example.test", "/welcome"],
+      ["web", "https://web.example.test", ["welcome"]],
+      ["ios", undefined, "welcome"],
+      ["android", undefined, "welcome"],
+    ]
+  ) {
+    await rejects(
+      () => f.service.start(identity, target, origin, page),
+      "invalid_return_target",
+    );
+  }
+  equal(
+    (await f.handlers("connection")(
+      request({
+        action: "start",
+        target: "web",
+        origin: "https://web.example.test",
+        page: "welcome",
+      }),
+    )).status,
+    200,
+  );
+  equal(
+    (await f.handlers("connection")(
+      request({
+        action: "start",
+        target: "web",
+        origin: "https://web.example.test",
+        page: "polls",
+      }),
+    )).status,
+    400,
+  );
+  // A stored return location outside the allowlist is refused at callback time.
+  const tampered = await f.service.start(
+    identity,
+    "web",
+    "https://web.example.test",
+    "welcome",
+  );
+  const tamperedState = new URL(tampered.authorizationURL).searchParams.get(
+    "state",
+  )!;
+  f.repository.attempts.get(await sha256(tamperedState))!.return_to =
+    "https://web.example.test/welcome?step=calendar&next=https://evil.example";
+  await rejects(
+    () =>
+      f.service.callback(
+        new URLSearchParams({ state: tamperedState, code: "server-only-code" }),
+      ),
+    "invalid_return_target",
+  );
+});
+
+Deno.test("an unticked calendar permission is reported as declined and its grant is revoked", async () => {
+  const f = await fixture();
+  f.provider.exchangeHook = () =>
+    Promise.resolve({ ...tokens, scopes: ["openid", "email"] });
+  const start = await f.service.start(
+    identity,
+    "web",
+    "https://web.example.test",
+    "welcome",
+  );
+  const state = new URL(start.authorizationURL).searchParams.get("state")!;
+  equal(
+    await f.service.callback(
+      new URLSearchParams({ state, code: "server-only-code" }),
+    ),
+    "https://web.example.test/welcome?step=calendar&calendar=declined",
+  );
+  equal((await f.service.status(identity)).connected, false);
+  equal(f.provider.revoked, [tokens.refreshToken]);
+  // A missing refresh token with the scope granted is still a plain failure.
+  f.provider.exchangeHook = () =>
+    Promise.resolve({ ...tokens, refreshToken: undefined });
+  const retry = await f.service.start(identity, "ios", undefined);
+  equal(
+    await f.service.callback(
+      new URLSearchParams({
+        state: new URL(retry.authorizationURL).searchParams.get("state")!,
+        code: "server-only-code",
+      }),
+    ),
+    "meetingscheduler://calendar/callback?calendar=failed",
+  );
+});
+
+Deno.test("only a web start for a Google sign-in sends a login hint", async () => {
+  const f = await fixture();
+  const google = { ...identity, googleEmail: "person@example.test" };
+  await f.service.start(google, "web", "https://web.example.test");
+  await f.service.start(google, "ios", undefined);
+  await f.service.start(identity, "web", "https://web.example.test");
+  equal(f.provider.loginHints, ["person@example.test", undefined, undefined]);
+
+  const provider = new GoogleCalendarProvider(
+    "client",
+    "server-secret",
+    "https://project.example.test/callback",
+  );
+  const hinted = new URL(
+    provider.authorizationURL("state", "challenge", "person@example.test"),
+  ).searchParams;
+  equal(
+    [
+      hinted.get("prompt"),
+      hinted.get("include_granted_scopes"),
+      hinted.get("login_hint"),
+      hinted.get("access_type"),
+    ],
+    ["consent", "true", "person@example.test", "offline"],
+  );
+  const plain = new URL(provider.authorizationURL("state", "challenge"))
+    .searchParams;
+  equal(
+    [
+      plain.get("prompt"),
+      plain.get("include_granted_scopes"),
+      plain.has("login_hint"),
+    ],
+    ["consent select_account", "false", false],
+  );
 });
 
 Deno.test("a callback issued before disconnect cannot reconnect the account", async () => {

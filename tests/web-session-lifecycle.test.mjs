@@ -403,7 +403,7 @@ test('current callback success/error routes use current initialized session', as
   const navigation = [];
   await actual.createAuthCallback({ getSession: async () => ({ data: { session: sessionFor(accountA) }, error: null }), navigate: path => navigation.push(path) }).run();
   await actual.createAuthCallback({ getSession: async () => ({ data: { session: null }, error: { message: 'Expired link' } }), navigate: path => navigation.push(path) }).run();
-  assert.deepEqual(navigation, ['/polls', '/auth?error=Expired%20link']);
+  assert.deepEqual(navigation, ['/welcome', '/auth?error=Expired%20link']);
 });
 
 for (const outcome of ['success', 'failure']) test(`obsolete poll mutation/detail ${outcome} cannot overwrite B; old route cleanup owns only its lease`, async t => {
@@ -1007,7 +1007,7 @@ test('cold root callback completes owned PKCE before mounting production callbac
   const navigation = [];
   const navigator = actual.createAuthCallback({ getSession: () => client.auth.getSession(), navigate: path => navigation.push(path) });
   await navigator.run();
-  assert.deepEqual(navigation, ['/polls']);
+  assert.deepEqual(navigation, ['/welcome']);
   assert.equal(browser.channels.length, 1, 'only main SDK owns BroadcastChannel; helper has virtual empty namespace');
   assert.equal(browser.listeners.get('visibilitychange').size, 1, 'only main SDK retains visibility observer');
   assert.equal(browser.listeners.get('storage').size, 1);

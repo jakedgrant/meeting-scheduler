@@ -26,8 +26,16 @@ export class GoogleCalendarProvider implements Provider {
     private fetcher: typeof fetch = fetch,
   ) {}
 
-  authorizationURL(state: string, challenge: string): string {
+  authorizationURL(
+    state: string,
+    challenge: string,
+    loginHint?: string,
+  ): string {
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    // prompt=consent stays in every case: it is what makes Google issue a
+    // refresh token again. With a hint, Google can skip the account picker,
+    // and earlier grants to this client are kept; see
+    // docs/calendar-credentials.md.
     url.search = new URLSearchParams({
       client_id: this.clientId,
       redirect_uri: this.redirectURI,
@@ -37,8 +45,16 @@ export class GoogleCalendarProvider implements Provider {
       code_challenge: challenge,
       code_challenge_method: "S256",
       access_type: "offline",
-      prompt: "consent select_account",
-      include_granted_scopes: "false",
+      ...(loginHint
+        ? {
+          prompt: "consent",
+          include_granted_scopes: "true",
+          login_hint: loginHint,
+        }
+        : {
+          prompt: "consent select_account",
+          include_granted_scopes: "false",
+        }),
     }).toString();
     return url.toString();
   }

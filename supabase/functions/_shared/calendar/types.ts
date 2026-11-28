@@ -12,6 +12,8 @@ export class CalendarError extends Error {
 export interface Identity {
   userId: string;
   sessionId: string;
+  /** The account's email from the verified JWT, set only when a Google identity is linked; used only as a login hint. */
+  googleEmail?: string;
 }
 export interface Connection {
   user_id: string;
@@ -57,7 +59,11 @@ export type CheckAdmission =
   | { admitted: true; id: string }
   | { admitted: false; retry_after: number };
 export interface Provider {
-  authorizationURL(state: string, challenge: string): string;
+  authorizationURL(
+    state: string,
+    challenge: string,
+    loginHint?: string,
+  ): string;
   exchange(code: string, verifier: string): Promise<TokenSet>;
   userInfo(accessToken: string): Promise<{ subject: string; email: string }>;
   refresh(refreshToken: string): Promise<TokenSet>;

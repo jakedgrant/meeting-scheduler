@@ -196,6 +196,40 @@ async function loadProfile(userId: string) {
   } catch { /* Keep a same-account profile during a transient refresh failure. */ }
 }
 
+/**
+ * The owner's profile now, for a page that cannot wait on the background load.
+ * Throws when it cannot be read for the current account.
+ */
+export async function ensureProfile(): Promise<Profile> {
+  const account = get(user)?.id
+  if (!account) throw new Error('Not authenticated')
+  const current = get(profile)
+  if (current?.id === account) return current
+  // A separate read: the background load may restart meanwhile, and its
+  // cancellation must not fail this one.
+  const scope = captureSession()
+  const { data, error } = await readOwnProfile(scope.signal)
+  if (!scope.isCurrent()) throw new Error('Session changed')
+  if (error) throw error
+  if (data.id !== account) throw new Error('Session changed')
+  if (get(profile)?.id !== account) profile.set(data)
+  return data
+}
+
+/** Stamps onboarding complete on the server, once; repeat calls keep the first time. */
+export async function completeOnboarding() {
+  const account = get(user)?.id
+  const scope = captureSession()
+  if (!account) throw new Error('Not authenticated')
+  // Like updateProfile: a background read answered before this write must not land after it.
+  profileRevision++
+  profileRequest?.abort()
+  const { data, error } = await supabase.rpc('complete_onboarding').abortSignal(scope.signal)
+  if (!scope.isCurrent()) throw new Error('Session changed')
+  if (error) throw error
+  profile.update(current => current?.id === account ? { ...current, onboarding_completed_at: data } : current)
+}
+
 // Auth actions
 export async function signInWithGoogle() { return signInWithProvider('google') }
 export async function signInWithApple() { return signInWithProvider('apple') }
