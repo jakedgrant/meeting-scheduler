@@ -2,6 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import EditPoll from '$lib/components/EditPoll.svelte';
 	import TimeOptionRow from '$lib/components/TimeOptionRow.svelte';
+	import PollParticipants from '$lib/components/PollParticipants.svelte';
 	import type { Poll } from '$lib/supabase';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -611,32 +612,7 @@
 				{/if}
 			</div>
 
-			<div class="participants-section">
-				<h2>Participants ({$currentPollParticipants.length})</h2>
-				{#if $currentPollParticipants.length === 0}
-					<p class="no-participants">No participants yet</p>
-				{:else}
-					<ul class="participants-list">
-						{#each $currentPollParticipants as participant}
-							<li>
-								<div class="participant-info">
-									<div class="participant-header">
-										<span class="participant-name">
-											{participant.profiles?.display_name || participant.anonymous_name || 'Anonymous'}
-										</span>
-										{#if $user ? participant.user_id === $user.id : participant.id === $currentGuest?.participantId}
-											<span class="you-badge">You</span>
-										{/if}
-									</div>
-									{#if participant.comment}
-										<p class="participant-comment">{participant.comment}</p>
-									{/if}
-								</div>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
+			<PollParticipants participants={$currentPollParticipants} currentParticipantId={myParticipant?.id} />
 		</div>
 
 		{#if isCreator && $currentPoll.status === 'active'}
@@ -818,16 +794,14 @@
 		}
 	}
 
-	.availability-section,
-	.participants-section {
+	.availability-section {
 		background: white;
 		border-radius: 8px;
 		padding: 1.5rem;
 		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 	}
 
-	.availability-section h2,
-	.participants-section h2 {
+	.availability-section h2 {
 		margin: 0 0 1rem;
 		font-size: 1.125rem;
 	}
@@ -1003,54 +977,6 @@
 		padding-top: 2rem;
 		border-top: 1px solid #eee;
 		text-align: center;
-	}
-
-	.participants-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-	}
-
-	.participants-list li {
-		padding: 0.75rem 0;
-		border-bottom: 1px solid #eee;
-	}
-
-	.participants-list li:last-child {
-		border-bottom: none;
-	}
-
-	.participant-info {
-		display: flex;
-		flex-direction: column;
-		gap: 0.25rem;
-	}
-
-	.participant-header {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.participant-comment {
-		font-size: 0.8125rem;
-		color: #666;
-		font-style: italic;
-		margin: 0;
-		padding-left: 0;
-	}
-
-	.you-badge {
-		background: #007bff;
-		color: white;
-		padding: 0.125rem 0.375rem;
-		border-radius: 4px;
-		font-size: 0.75rem;
-	}
-
-	.no-participants {
-		color: #666;
-		font-size: 0.875rem;
 	}
 
 	.btn {

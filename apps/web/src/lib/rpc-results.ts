@@ -28,6 +28,8 @@ const integer = check<number>(Number.isSafeInteger)
 // A pattern, not Date.parse: engines differ on fractions beyond milliseconds.
 const ISO_INSTANT = /^\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}(:\d{2}){0,2})( BC)?$/
 const instant = check<string>(value => typeof value === 'string' && ISO_INSTANT.test(value))
+// Submission times are rendered with Date, so they must also be displayable.
+const submissionInstant = check<string>(value => instant(value) && Number.isFinite(Date.parse(value)))
 
 const nullable = <T>(inner: Check<T>) => check<T | null>(value => value === null || inner(value))
 const optional = <T>(inner: Check<T>) => check<T | undefined>(value => value === undefined || inner(value))
@@ -85,6 +87,7 @@ export const isPollParticipant = object<PollParticipant>({
 	poll_id: string,
 	updated_at: instant,
 	user_id: nullable(string),
+	submitted_at: optional(nullable(submissionInstant)),
 	profiles: optional(nullable(object<{ display_name: string | null }>({ display_name: nullable(string) })))
 })
 
@@ -182,6 +185,7 @@ export const isAvailabilitySnapshot = object<AvailabilitySnapshot>({
 		note: nullable(string),
 		updated_at: instant
 	})),
+	submitted_at: optional(nullable(submissionInstant)),
 	saved_at: optional(instant),
 	replayed: optional(boolean)
 })

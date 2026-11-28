@@ -493,7 +493,7 @@ fun PollDetailView(
 
                 // Participants
                 item {
-                    Text("Participants (${model.participants.size})", style = MaterialTheme.typography.titleMedium)
+                    ParticipantsHeading(model.participants)
                 }
 
                 if (model.participants.isEmpty()) {
@@ -642,42 +642,6 @@ fun ResponseCount(count: Int, status: AvailabilityStatus) {
             fontWeight = FontWeight.Medium,
             color = foregroundColor
         )
-    }
-}
-
-@Composable
-fun ParticipantRow(participant: PollParticipant, isCurrentUser: Boolean) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(participant.displayName)
-            if (isCurrentUser) {
-                Spacer(Modifier.width(8.dp))
-                Surface(
-                    color = MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        "You",
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                }
-            }
-        }
-        participant.comment?.let { comment ->
-            if (comment.isNotBlank()) {
-                Text(
-                    comment,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
-                )
-            }
-        }
     }
 }
 

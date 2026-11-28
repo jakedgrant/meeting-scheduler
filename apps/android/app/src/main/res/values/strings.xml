@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Meetful</string>
+    <string name="participants_heading">Participants (%1$d)</string>
+    <string name="participant_submission_count">%1$d of %2$d submitted</string>
+    <string name="participant_submitted_at">Submitted %1$s</string>
+    <string name="participant_not_submitted">Not submitted</string>
 </resources>

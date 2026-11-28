@@ -307,7 +307,7 @@ class PollDetailModelTest {
         model.load()
         model.setResponse("second", AvailabilityStatus.AVAILABLE)
         model.updateComment("  Works for me  ")
-        val result = savedSnapshot.copy(version = 4, comment = "Works for me", responses = listOf(
+        val result = savedSnapshot.copy(version = 4, comment = "Works for me", submittedAt = now, responses = listOf(
             SavedAvailabilityResponse("r3", "second", AvailabilityStatus.AVAILABLE, updatedAt = stamp)))
         var sent: AvailabilitySaveRequest? = null
         polls.save = { sent = it; result }
@@ -319,7 +319,14 @@ class PollDetailModelTest {
         assertEquals(2, model.responseSummary("second").available)
         assertEquals(0, model.responseSummary("first").maybe)
         assertEquals("Works for me", model.participants.first { it.id == "member" }.comment)
+        assertEquals(now, model.participants.first { it.id == "member" }.submittedAt)
         assertNull(model.saveError)
+        model.updateComment("Unsaved edit")
+        assertEquals(now, model.participants.first { it.id == "member" }.submittedAt)
+        polls.save = { throw java.io.IOException("Offline") }
+        model.save()
+        assertNotNull(model.saveError)
+        assertEquals(now, model.participants.first { it.id == "member" }.submittedAt)
         assertFalse(model.isSaving)
     }
 

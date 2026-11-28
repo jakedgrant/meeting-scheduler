@@ -17,7 +17,9 @@ class PollDetailCacheTest {
         if (value == null) values.remove(key) else values[key] = value
     }, clock)
     private val detail = PollDetail(Poll("poll", "A", "Persisted", createdAt = stamp, updatedAt = stamp),
-        listOf(PollTimeOption("slot", "poll", stamp, stamp, createdAt = stamp)), emptyList(), emptyList())
+        listOf(PollTimeOption("slot", "poll", stamp, stamp, createdAt = stamp)),
+        listOf(PollParticipant("member", "poll", anonymousName = "Guest", accessToken = "member",
+            createdAt = stamp, updatedAt = stamp, submittedAt = stamp)), emptyList())
 
     @Test fun completeSnapshotSurvivesCacheRecreationAndStaleSnapshotsRemainReadable() {
         cache().save("A", detail)

@@ -601,7 +601,7 @@ function applyAvailability(snapshot: AvailabilitySnapshot) {
   detailRevision++
   currentAvailability.set(snapshot)
   currentPollParticipants.update(participants => participants.map(participant =>
-    participant.id === snapshot.participant_id ? { ...participant, comment: snapshot.comment } : participant
+    participant.id === snapshot.participant_id ? { ...participant, comment: snapshot.comment, submitted_at: snapshot.submitted_at } : participant
   ))
   currentPollResponses.update(responses => [
     ...responses.filter(response => response.participant_id !== snapshot.participant_id),
