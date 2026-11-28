@@ -277,7 +277,6 @@ private struct PollDetailScreen: View {
             if let error = model.calendarError {
                 Text(error).font(.caption).foregroundStyle(.secondary)
             }
-            calendarCoverageSection
             responseFeedbackSection
             pollInfoSection(poll)
             finalDateSection(poll)
@@ -401,7 +400,7 @@ private struct PollDetailScreen: View {
     }
 
     private func timeOptionsSection(_ poll: Poll) -> some View {
-        Section("Time Options") {
+        Section {
             ForEach(model.timeOptions) { option in
                 Button {
                     selectedTimeOption = option
@@ -422,6 +421,10 @@ private struct PollDetailScreen: View {
                 }
                 .buttonStyle(.plain)
             }
+        } header: {
+            Text("Time Options")
+        } footer: {
+            calendarCoverageSection
         }
     }
 
