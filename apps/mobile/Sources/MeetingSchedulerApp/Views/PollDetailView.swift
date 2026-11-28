@@ -402,30 +402,32 @@ private struct PollDetailScreen: View {
     private func timeOptionsSection(_ poll: Poll) -> some View {
         Section {
             ForEach(model.timeOptions) { option in
-                Button {
-                    selectedTimeOption = option
-                } label: {
-                    TimeOptionRow(
-                        option: option,
-                        pollTimeZone: poll.timezone,
-                        responses: model.responseSummary(for: option.id),
-                        myResponse: editor.responses[option.id],
-                        hasCalendarConflict: model.calendarCheck.busyIds.contains(option.id),
-                        calendarUnchecked: model.calendarCheck.uncheckedIds.contains(option.id),
-                        onShowConflicts: { conflictOption = option },
-                        canRespond: model.canEditAvailability,
-                        onResponseChange: { status in
-                            model.setResponse(status, for: option.id)
-                        }
-                    )
-                }
-                .buttonStyle(.plain)
+                TimeOptionRow(
+                    option: option,
+                    pollTimeZone: poll.timezone,
+                    now: model.now,
+                    calendarStatus: calendarStatus(of: option),
+                    responses: model.responseSummary(for: option.id),
+                    // No poll setting hides the tally yet, so every viewer sees it as before.
+                    showsResponseTallies: true,
+                    response: editor.responses[option.id],
+                    onRespond: model.canEditAvailability ? { model.setResponse($0, for: option.id) } : nil,
+                    onShowResponses: { selectedTimeOption = option },
+                    onShowConflicts: { conflictOption = option }
+                )
+                .listRowInsets(EdgeInsets(top: 0, leading: 14, bottom: 0, trailing: 14))
             }
         } header: {
-            Text("Time Options")
+            Text("Time options")
         } footer: {
             calendarCoverageSection
         }
+    }
+
+    private func calendarStatus(of option: PollTimeOption) -> TimeOptionRow.CalendarStatus {
+        if model.calendarCheck.busyIds.contains(option.id) { return .busy(model.conflictEvents[option.id] ?? []) }
+        if model.calendarCheck.uncheckedIds.contains(option.id) { return .unchecked }
+        return .free
     }
 
     @ViewBuilder
@@ -718,104 +720,6 @@ struct FinalDateOptionRow: View {
     }
 }
 
-// MARK: - TimeOptionRow
-
-struct TimeOptionRow: View {
-    let option: PollTimeOption
-    let pollTimeZone: String
-    let responses: ResponseSummary
-    let myResponse: AvailabilityStatus?
-    let hasCalendarConflict: Bool
-    let calendarUnchecked: Bool
-    let onShowConflicts: () -> Void
-    let canRespond: Bool
-    let onResponseChange: (AvailabilityStatus) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            dateTimeHeader
-            if canRespond {
-                responseButtons
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var dateTimeHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(option.displayDate(pollTimeZone: pollTimeZone), style: .date)
-                        .font(.headline)
-
-                    if hasCalendarConflict {
-                        Button(action: onShowConflicts) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "calendar.badge.exclamationmark")
-                                Text("Busy")
-                            }
-                            .font(.caption2)
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.orange.opacity(0.15))
-                            .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityHint("Shows what conflicts with this time")
-                    } else if calendarUnchecked {
-                        Label("Couldn't check", systemImage: "questionmark.circle")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.15))
-                            .clipShape(Capsule())
-                    }
-                }
-
-                if option.isAllDay {
-                    Text("All day")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("\(option.startTime, style: .time) - \(option.endTime, style: .time)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                ResponseCount(count: responses.available, status: .available)
-                ResponseCount(count: responses.maybe, status: .maybe)
-                ResponseCount(count: responses.unavailable, status: .unavailable)
-            }
-        }
-    }
-
-    private var responseButtons: some View {
-        HStack(spacing: 8) {
-            ResponseButton(
-                status: .available,
-                isSelected: myResponse == .available,
-                action: { onResponseChange(.available) }
-            )
-            ResponseButton(
-                status: .maybe,
-                isSelected: myResponse == .maybe,
-                action: { onResponseChange(.maybe) }
-            )
-            ResponseButton(
-                status: .unavailable,
-                isSelected: myResponse == .unavailable,
-                action: { onResponseChange(.unavailable) }
-            )
-        }
-    }
-}
-
 // MARK: - ResponseCount
 
 struct ResponseCount: View {
@@ -846,49 +750,6 @@ struct ResponseCount: View {
             .background(backgroundColor)
             .foregroundStyle(foregroundColor)
             .clipShape(Circle())
-    }
-}
-
-// MARK: - ResponseButton
-
-struct ResponseButton: View {
-    let status: AvailabilityStatus
-    let isSelected: Bool
-    let action: () -> Void
-
-    private var iconName: String {
-        switch status {
-        case .available: return "checkmark"
-        case .maybe: return "questionmark"
-        case .unavailable: return "xmark"
-        }
-    }
-
-    private var selectedBackground: Color {
-        switch status {
-        case .available: return .green.opacity(0.2)
-        case .maybe: return .orange.opacity(0.2)
-        case .unavailable: return .red.opacity(0.2)
-        }
-    }
-
-    private var selectedForeground: Color {
-        switch status {
-        case .available: return .green
-        case .maybe: return .orange
-        case .unavailable: return .red
-        }
-    }
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: iconName)
-                .frame(width: 44, height: 36)
-                .background(isSelected ? selectedBackground : Color.gray.opacity(0.15))
-                .foregroundStyle(isSelected ? selectedForeground : .secondary)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
     }
 }
 

@@ -441,6 +441,27 @@ final class PollDetailModelTests: XCTestCase {
         XCTAssertEqual(conflicts, [conflict])
     }
 
+    func testBusyDeviceOptionsLoadTheirEventsForTheConflictLine() async {
+        let fixture = fixture()
+        let conflict = CalendarConflict(
+            title: "Dentist", calendarName: "Home", start: Date(), end: Date().addingTimeInterval(3600), isAllDay: false)
+        fixture.calendar.conflictChecker = { options, _ in
+            CalendarCheckResult(optionIds: Set(options.map(\.id)), sources: [
+                (.appleCalendar, [options[0].id]), (.googleCalendar, [options[1].id])])
+        }
+        var loaded: [UUID] = []
+        fixture.calendar.deviceConflictLoader = { option, _ in
+            loaded.append(option.id)
+            return [conflict]
+        }
+
+        await fixture.model.load()
+
+        // Google never names its events, so only the device-busy option is read.
+        XCTAssertEqual(loaded, [fixture.options[0].id])
+        XCTAssertEqual(fixture.model.conflictEvents, [fixture.options[0].id: [conflict]])
+    }
+
     func testCalendarResultAfterAnAccountChangeIsDropped() async {
         let fixture = fixture()
         var release: CheckedContinuation<Void, Never>?

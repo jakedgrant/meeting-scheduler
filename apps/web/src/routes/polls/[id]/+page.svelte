@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import EditPoll from '$lib/components/EditPoll.svelte';
+	import TimeOptionRow from '$lib/components/TimeOptionRow.svelte';
 	import PollParticipants from '$lib/components/PollParticipants.svelte';
 	import type { Poll } from '$lib/supabase';
 	import { page } from '$app/stores';
@@ -535,80 +536,23 @@
 
 		<div class="content-grid">
 			<div class="availability-section">
-				<h2>Time Options</h2>
+				<h2 class="time-options-heading">Time options</h2>
 
-				<div class="time-options-list">
-					{#each $currentPollTimeOptions as option}
-						{@const formatted = formatDateTime(option.start_time, option)}
-						{@const endFormatted = formatDateTime(option.end_time)}
-						{@const stats = getResponsesForTimeOption(option.id)}
-						{@const myResponse = localResponses[option.id]?.status}
-						{@const hasCalendarConflict = $calendarConflicts.has(option.id)}
-						{@const calendarUncertain = !hasCalendarConflict && $calendarUnchecked.has(option.id)}
-
-						<div class="time-option-card">
-							<button
-								class="time-info-button"
-								onclick={() => goto(`/polls/${pollId}/times/${option.id}`)}
-								title="View responses for this time option"
-							>
-								<div class="time-info">
-                  <div class="time-header">
-									  <div class="date">{formatted.date}</div>
-                    {#if hasCalendarConflict}
-										<span class="calendar-badge">📅 Busy</span>
-									  {:else if calendarUncertain}
-										<span class="calendar-badge unchecked">Couldn't check</span>
-									  {/if}
-                  </div>
-									<div class="time">
-										{#if option.is_all_day}
-											All day
-										{:else}
-											{formatted.time} - {endFormatted.time}
-										{/if}
-									</div>
-								</div>
-
-								<div class="response-stats">
-									<span class="stat available" title="Available">{stats.available}</span>
-									<span class="stat maybe" title="Maybe">{stats.maybe}</span>
-									<span class="stat unavailable" title="Unavailable">{stats.unavailable}</span>
-								</div>
-							</button>
-
-							{#if canRespond}
-								<div class="response-buttons">
-									<button
-										class="response-btn available"
-										class:selected={myResponse === 'available'}
-										onclick={() => setResponse(option.id, 'available')}
-										disabled={savingResponses}
-										title="Available"
-									>
-										✓
-									</button>
-									<button
-										class="response-btn maybe"
-										class:selected={myResponse === 'maybe'}
-										onclick={() => setResponse(option.id, 'maybe')}
-										disabled={savingResponses}
-										title="Maybe"
-									>
-										?
-									</button>
-									<button
-										class="response-btn unavailable"
-										class:selected={myResponse === 'unavailable'}
-										onclick={() => setResponse(option.id, 'unavailable')}
-										disabled={savingResponses}
-										title="Unavailable"
-									>
-										✗
-									</button>
-								</div>
-							{/if}
-						</div>
+				<div class="time-options-card">
+					{#each $currentPollTimeOptions as option (option.id)}
+						<TimeOptionRow
+							{option}
+							pollZone={$currentPoll.timezone}
+							now={new Date(now)}
+							calendarStatus={$calendarConflicts.has(option.id) ? 'busy' : $calendarUnchecked.has(option.id) ? 'unchecked' : 'free'}
+							stats={getResponsesForTimeOption(option.id)}
+							showTallies={true /* No poll setting hides the tally yet. */}
+							{canRespond}
+							disabled={savingResponses}
+							response={localResponses[option.id]?.status}
+							onrespond={status => setResponse(option.id, status)}
+							onshowresponses={() => goto(`/polls/${pollId}/times/${option.id}`)}
+						/>
 					{/each}
 				</div>
 
@@ -887,6 +831,25 @@
 		font-size: 0.875rem;
 	}
 
+	.availability-section .time-options-heading {
+		margin: 0 0 0.5rem;
+		font-size: 0.8125rem;
+		font-weight: 400;
+		color: #6c6c70;
+	}
+
+	/* The section is already white, so a hairline sets the card apart. */
+	.time-options-card {
+		padding: 0 14px;
+		border: 0.5px solid #d1d1d6;
+		border-radius: 12px;
+		background: white;
+	}
+
+	.time-options-card > :global(* + *) {
+		border-top: 0.5px solid #d1d1d6;
+	}
+
 	.time-options-list {
 		display: flex;
 		flex-direction: column;
@@ -903,23 +866,6 @@
 		flex-wrap: wrap;
 	}
 
-	.time-info-button {
-		display: flex;
-		align-items: center;
-		gap: 1rem;
-		flex: 1;
-		background: none;
-		border: none;
-		padding: 0;
-		cursor: pointer;
-		text-align: left;
-		transition: opacity 0.15s;
-	}
-
-	.time-info-button:hover {
-		opacity: 0.7;
-	}
-
 	.time-info {
 		flex: 1;
 		min-width: 150px;
@@ -927,26 +873,6 @@
 
 	.time-info .date {
 		font-weight: 500;
-	}
-
-	.time-header {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
-
-	.calendar-badge {
-		background: #fff3cd;
-		color: #856404;
-		font-size: 0.75rem;
-		padding: 0.25rem 0.5rem;
-		border-radius: 4px;
-		white-space: nowrap;
-	}
-
-	.calendar-badge.unchecked {
-		background: #e9ecef;
-		color: #495057;
 	}
 
 	.calendar-coverage {
@@ -987,44 +913,6 @@
 
 	.stat.unavailable {
 		background: #f8d7da;
-		color: #721c24;
-	}
-
-	.response-buttons {
-		display: flex;
-		gap: 0.25rem;
-	}
-
-	.response-btn {
-		width: 36px;
-		height: 36px;
-		border: 2px solid #ddd;
-		border-radius: 6px;
-		background: white;
-		cursor: pointer;
-		font-size: 1rem;
-		transition: all 0.15s;
-	}
-
-	.response-btn:hover {
-		border-color: #999;
-	}
-
-	.response-btn.available.selected {
-		background: #d4edda;
-		border-color: #28a745;
-		color: #155724;
-	}
-
-	.response-btn.maybe.selected {
-		background: #fff3cd;
-		border-color: #ffc107;
-		color: #856404;
-	}
-
-	.response-btn.unavailable.selected {
-		background: #f8d7da;
-		border-color: #dc3545;
 		color: #721c24;
 	}
 
