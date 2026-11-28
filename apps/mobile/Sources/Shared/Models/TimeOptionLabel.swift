@@ -30,10 +30,19 @@ public enum TimeOptionLabel {
     ) -> String {
         let base = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
         let uses12Hour = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: locale)?.contains("a") ?? false
+        let symbols = DateFormatter()
+        symbols.locale = locale
+        symbols.calendar = calendar
         func time(_ date: Date, period: Bool) -> String {
             guard uses12Hour else { return date.formatted(base.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) }
-            let hour = base.hour(.defaultDigits(amPM: period ? .abbreviated : .omitted))
-            return date.formatted(calendar.component(.minute, from: date) == 0 ? hour : hour.minute(.twoDigits))
+            let hour = base.hour(.defaultDigits(amPM: .abbreviated))
+            let text = date.formatted(calendar.component(.minute, from: date) == 0 ? hour : hour.minute(.twoDigits))
+            guard !period else { return text }
+            // `amPM: .omitted` pads the hour ("06") on some OS versions, so the shared AM/PM is removed
+            // from the formatted text instead.
+            let symbol = calendar.component(.hour, from: date) < 12 ? symbols.amSymbol : symbols.pmSymbol
+            guard let symbol, !symbol.isEmpty else { return text }
+            return text.replacingOccurrences(of: symbol, with: "").trimmingCharacters(in: .whitespaces)
         }
         guard calendar.isDate(start, inSameDayAs: end) else {
             let range = "\(time(start, period: true)) – \(time(end, period: true))"
