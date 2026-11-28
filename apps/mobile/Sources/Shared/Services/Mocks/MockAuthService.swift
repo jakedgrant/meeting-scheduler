@@ -10,6 +10,7 @@ public final class MockAuthService: AuthServiceProtocol {
     public var isAuthenticated: Bool
     public var currentUserId: UUID?
     public var currentUserEmail: String?
+    public var onboardingStatus: OnboardingStatus = .notRequired
 
     public init(
         profile: Profile? = nil,
@@ -44,6 +45,13 @@ public final class MockAuthService: AuthServiceProtocol {
         )
     }
 
+    /// Signed in for the first time, with a name from the sign-in provider.
+    public static var onboarding: MockAuthService {
+        let service = signedIn
+        service.onboardingStatus = .required
+        return service
+    }
+
     public static var signedOut: MockAuthService {
         MockAuthService(
             profile: nil,
@@ -74,4 +82,12 @@ public final class MockAuthService: AuthServiceProtocol {
     public func signInWithPassword(email: String, password: String) async throws {}
     public func signOut() async throws {}
     public func updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) async throws {}
+
+    public func saveOnboardingName(_ name: String) {
+        profile?.displayName = DisplayNameInput.stored(name)
+    }
+
+    public func completeOnboarding() {
+        onboardingStatus = .notRequired
+    }
 }

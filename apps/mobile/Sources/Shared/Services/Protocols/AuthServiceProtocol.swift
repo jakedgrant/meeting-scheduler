@@ -35,4 +35,12 @@ public protocol AuthServiceProtocol: AnyObject, Observable, Sendable {
     // MARK: - Profile
 
     func updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) async throws
+
+    // MARK: - Onboarding
+
+    var onboardingStatus: OnboardingStatus { get }
+    /// Shows the name at once and stores it in the background; see `DisplayNameInput.stored(_:)`.
+    func saveOnboardingName(_ name: String)
+    /// Records completion on this device at once and on the server in the background.
+    func completeOnboarding()
 }

@@ -16,5 +16,8 @@ data class Profile(
     @SerialName("created_at")
     val createdAt: Instant,
     @SerialName("updated_at")
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    /** When the account finished or skipped onboarding; null until then. */
+    @SerialName("onboarding_completed_at")
+    val onboardingCompletedAt: Instant? = null,
 )

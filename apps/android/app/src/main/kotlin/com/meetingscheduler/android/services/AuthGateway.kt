@@ -18,6 +18,8 @@ interface AuthGateway {
     val status: Flow<SessionStatus>
     suspend fun loadProfile(userId: String, credential: String): Profile
     suspend fun updateProfile(userId: String, credential: String, updates: kotlinx.serialization.json.JsonObject): Profile = error("Profile updates unavailable")
+    /** Stores the caller's onboarding completion. The server keeps the first time it was stored. */
+    suspend fun completeOnboarding(credential: String): Unit = error("Onboarding completion unavailable")
     suspend fun awaitInitialization()
     suspend fun exchangeCode(code: String, isCurrent: () -> Boolean = { true }): UserSession
     suspend fun googleSession(idToken: String, nonce: String?): UserSession
@@ -49,6 +51,9 @@ class SupabaseAuthGateway(
             filter { eq("id", userId) }
         }
         return loadProfile(userId, credential)
+    }
+    override suspend fun completeOnboarding(credential: String) {
+        accountPostgrest(client, credential).rpc("complete_onboarding")
     }
     override suspend fun awaitInitialization() = client.auth.awaitInitialization()
     // Do not import until the router verifies that the initiating session still owns it.

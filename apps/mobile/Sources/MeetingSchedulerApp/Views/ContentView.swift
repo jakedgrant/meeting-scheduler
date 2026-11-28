@@ -10,7 +10,7 @@ struct ContentView: View {
             if authService.isLoading {
                 loadingView
             } else if authService.isAuthenticated {
-                MainTabView(pendingPollLink: $pendingPollLink)
+                signedInView
                     .id(authService.sessionGeneration)
             } else {
                 AuthView()
@@ -22,6 +22,16 @@ struct ContentView: View {
 
     private var loadingView: some View {
         ProgressView("Loading...")
+    }
+
+    /// Onboarding comes before the Meets tab. A poll link opened meanwhile waits for the tab.
+    @ViewBuilder
+    private var signedInView: some View {
+        switch authService.onboardingStatus {
+        case .undetermined: loadingView
+        case .required: OnboardingView()
+        case .notRequired: MainTabView(pendingPollLink: $pendingPollLink)
+        }
     }
 }
 
@@ -57,6 +67,11 @@ struct MainTabView: View {
 #Preview("Signed In") {
     ContentView(pendingPollLink: .constant(nil))
         .previewServices(auth: MockAuthService.signedIn)
+}
+
+#Preview("First Sign-In") {
+    ContentView(pendingPollLink: .constant(nil))
+        .previewServices(auth: MockAuthService.onboarding)
 }
 
 #Preview("Signed Out") {

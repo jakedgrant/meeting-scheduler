@@ -20,6 +20,8 @@
 		<string>googlechrome</string>
 	</array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>We check your calendar to automatically mark times when you're busy, making it easier to find available meeting times.</string>
+	<string>Meetful checks your calendar on this device to show conflicts with poll times. Event details never leave your device.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Meetful checks your calendar on this device to show conflicts with poll times. Event details never leave your device.</string>
 </dict>
 </plist>
