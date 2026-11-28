@@ -11,12 +11,15 @@ public protocol CalendarServiceProtocol: AnyObject, Observable, Sendable {
     var googleCalendarError: String? { get }
     var googleCalendarAccountEmail: String? { get }
     var isEnabled: Bool { get }
+    /// The device denies calendar access, so only the Settings app can turn Apple Calendar on.
+    var appleCalendarAccessDenied: Bool { get }
 
     // MARK: - Settings
 
     func setAppleCalendarEnabled(_ enabled: Bool) async
     func setGoogleCalendarEnabled(_ enabled: Bool) async
     func refreshGoogleCalendarConnection() async
+    func refreshAppleCalendarAccess()
 
     // MARK: - Conflict Checking
 

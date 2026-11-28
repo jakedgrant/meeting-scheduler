@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meetingscheduler.android.models.OnboardingStatus
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.CalendarService
 import com.meetingscheduler.android.services.PollService
@@ -31,13 +32,18 @@ fun ContentView(
     when {
         authService.isLoading -> LoadingView()
         authService.isAuthenticated -> SessionScope(sessionStores, authService.identityGeneration) {
-            MainTabView(
-                authService = authService,
-                pollService = pollService,
-                calendarService = calendarService,
-                purchaseService = purchaseService,
-                screens = screens,
-            )
+            // Onboarding comes before the tabs, and never blocks them: see OnboardingStatus.
+            when (authService.onboardingStatus) {
+                OnboardingStatus.UNDETERMINED -> LoadingView()
+                OnboardingStatus.REQUIRED -> OnboardingView(authService, calendarService)
+                OnboardingStatus.NOT_REQUIRED -> MainTabView(
+                    authService = authService,
+                    pollService = pollService,
+                    calendarService = calendarService,
+                    purchaseService = purchaseService,
+                    screens = screens,
+                )
+            }
         }
         // The signed-out screen gets the store of the current generation too, so signing in or out ends its model.
         else -> SessionScope(sessionStores, authService.identityGeneration) { AuthView(authService) }

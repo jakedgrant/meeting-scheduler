@@ -19,6 +19,10 @@ public final class CalendarService: CalendarServiceProtocol {
     public private(set) var authorizationStatus: EKAuthorizationStatus = .notDetermined
     public private(set) var appleCalendarEnabled = false
 
+    public var appleCalendarAccessDenied: Bool {
+        authorizationStatus == .denied || authorizationStatus == .restricted
+    }
+
     // Google Calendar properties
     public private(set) var googleCalendarEnabled = false
     public private(set) var googleCalendarLoading = false
@@ -66,6 +70,11 @@ public final class CalendarService: CalendarServiceProtocol {
 
     private func updateAuthorizationStatus() {
         authorizationStatus = EKEventStore.authorizationStatus(for: .event)
+    }
+
+    /// Rereads the device permission, which the person can change in Settings while the app runs.
+    public func refreshAppleCalendarAccess() {
+        updateAuthorizationStatus()
     }
 
     // MARK: - Permission Management
@@ -215,6 +224,8 @@ public final class CalendarService: CalendarServiceProtocol {
                 googleCalendarEnabled = finalStatus.connected
                 googleCalendarAccountEmail = finalStatus.accountEmail
                 if !googleCalendarEnabled { throw CalendarConnectionError.authorizationFailed }
+            } catch CalendarConnectionError.cancelled {
+                // Closing the Google sheet leaves the calendar unconnected, without an error.
             } catch {
                 guard accountId == userId, generation == connectionGeneration, !Task.isCancelled else { return }
                 googleCalendarError =

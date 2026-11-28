@@ -9,6 +9,7 @@ public final class MockCalendarService: CalendarServiceProtocol {
     public var googleCalendarLoading: Bool
     public var googleCalendarError: String?
     public var googleCalendarAccountEmail: String?
+    public var appleCalendarAccessDenied = false
     public var conflictChecker: (@MainActor ([PollTimeOption], String?) async -> CalendarCheckResult)?
     public var deviceConflictLoader: (@MainActor (PollTimeOption, String?) async -> [CalendarConflict])?
     /// Replaces the default add, which records the event in `addedEvents` and reports success.
@@ -54,6 +55,7 @@ public final class MockCalendarService: CalendarServiceProtocol {
     }
 
     public func refreshGoogleCalendarConnection() async {}
+    public func refreshAppleCalendarAccess() {}
 
     public func checkConflicts(for timeOptions: [PollTimeOption], pollTimeZone: String?) async -> CalendarCheckResult {
         if let conflictChecker { return await conflictChecker(timeOptions, pollTimeZone) }

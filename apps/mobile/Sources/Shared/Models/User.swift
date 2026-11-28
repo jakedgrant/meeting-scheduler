@@ -8,6 +8,8 @@ public struct Profile: Codable, Identifiable, Sendable {
     public var timezone: String
     public let createdAt: Date
     public var updatedAt: Date
+    /// When the account finished or skipped onboarding; nil until then.
+    public var onboardingCompletedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, email
@@ -16,6 +18,7 @@ public struct Profile: Codable, Identifiable, Sendable {
         case timezone
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case onboardingCompletedAt = "onboarding_completed_at"
     }
 
     public init(
@@ -25,7 +28,8 @@ public struct Profile: Codable, Identifiable, Sendable {
         avatarUrl: String? = nil,
         timezone: String = "UTC",
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        onboardingCompletedAt: Date? = nil
     ) {
         self.id = id
         self.email = email
@@ -34,5 +38,6 @@ public struct Profile: Codable, Identifiable, Sendable {
         self.timezone = timezone
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.onboardingCompletedAt = onboardingCompletedAt
     }
 }

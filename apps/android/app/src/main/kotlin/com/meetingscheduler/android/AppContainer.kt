@@ -51,9 +51,14 @@ class AppContainer(
     internal val supabase = createAppSupabaseClient()
 
     private val authAttemptPreferences = application.getSharedPreferences("auth_attempt_v1", 0)
+    private val onboardingPreferences = application.getSharedPreferences("onboarding_v1", 0)
     val authService = AuthService(applicationScope, billingIdentity = purchaseService,
         gateway = SupabaseAuthGateway(supabase),
         clock = clock,
+        onboardingMirror = object : com.meetingscheduler.android.services.OnboardingMirror {
+            override fun isComplete(accountId: String) = onboardingPreferences.getBoolean(accountId, false)
+            override fun markComplete(accountId: String) { onboardingPreferences.edit().putBoolean(accountId, true).apply() }
+        },
         attempts = object : com.meetingscheduler.android.services.AuthAttemptStore {
             override fun read(): com.meetingscheduler.android.services.PendingAuthAttempt? =
                 authAttemptPreferences.getString("pending", null)?.let {

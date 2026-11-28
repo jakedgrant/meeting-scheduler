@@ -19,6 +19,15 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     public var currentUserId: UUID? { currentUser?.id }
     public var currentUserEmail: String? { currentUser?.email }
 
+    public var onboardingStatus: OnboardingStatus {
+        if onboardingMirrored || profile?.onboardingCompletedAt != nil { return .notRequired }
+        switch profileSource {
+        case .none: return .undetermined
+        case .server: return .required
+        case .unavailable: return .notRequired
+        }
+    }
+
     private let supabase: SupabaseClient
     private let auth: AuthClient
     private let dependencies: Dependencies
@@ -42,6 +51,19 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     private var initializationWaiters: [CheckedContinuation<Void, Never>] = []
     private var appleSignInContinuation: CheckedContinuation<AppleCredentials, Error>?
     private var appleOperationId: UUID?
+    /// Where `profile` last came from. The cached copy does not decide onboarding: it may
+    /// predate a completion on another device.
+    private var profileSource = ProfileSource.none
+    /// This device recorded the account's onboarding as complete. It lets an offline launch skip
+    /// onboarding and resends a completion the server has not stored yet.
+    private var onboardingMirrored = false
+    private var onboardingTask: Task<Void, Never>?
+    private var nameTask: Task<Void, Never>?
+
+    private enum ProfileSource { case none, server, unavailable }
+
+    /// How many times a fire-and-forget onboarding write is tried before it waits for a later launch.
+    static let onboardingWriteAttempts = 4
 
     struct AppleCredentials: Sendable {
         var identityToken: String
@@ -71,6 +93,14 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         var now: @MainActor () -> Date = { Date() }
         var waitForExpiry: @MainActor (TimeInterval) async throws -> Void = { seconds in
             try await Task.sleep(for: .seconds(seconds))
+        }
+        /// Stores the caller's onboarding completion on the server.
+        var completeOnboarding: @MainActor () async throws -> Void = {}
+        var isOnboardingMirrored: @MainActor (UUID) -> Bool = { _ in false }
+        var mirrorOnboarding: @MainActor (UUID) -> Void = { _ in }
+        /// Waits before retry `attempt` (0 for the first retry) of an onboarding write.
+        var waitForRetry: @MainActor (Int) async throws -> Void = { attempt in
+            try await Task.sleep(for: .seconds(1 << attempt))
         }
 
         static func live(
@@ -105,7 +135,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                 signOut: { try await auth.signOut(scope: .local) },
                 accountChanged: accountChanged, refreshCalendar: refreshCalendar,
                 refreshProviderIdentity: refreshProviderIdentity,
-                isStoredSession: { $0 == auth.currentSession })
+                isStoredSession: { $0 == auth.currentSession },
+                completeOnboarding: { try await client.rpc("complete_onboarding").execute() })
         }
     }
 
@@ -138,6 +169,8 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         dependencies.endAuthAttempt = { adapter.endAuthAttempt($0) }
         dependencies.launchOAuth = { [authBrowser] in try await authBrowser.authenticate(url: $0) }
         dependencies.now = { clock.now }
+        dependencies.isOnboardingMirrored = { preferences.bool(forKey: Self.onboardingKey($0)) }
+        dependencies.mirrorOnboarding = { preferences.set(true, forKey: Self.onboardingKey($0)) }
         self.dependencies = dependencies
         self.persistence = persistence
         super.init()
@@ -153,9 +186,15 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         super.init()
     }
 
+    private static func onboardingKey(_ id: UUID) -> String {
+        "onboarding.\(id.uuidString).completed"
+    }
+
     isolated deinit {
         observerTask?.cancel()
         profileTask?.cancel()
+        onboardingTask?.cancel()
+        nameTask?.cancel()
         calendarTask?.cancel()
         expiryTask?.cancel()
         authBrowser.cancel()
@@ -227,8 +266,7 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         // refresh profile without resetting drafts or enqueuing provider identity work.
         guard let userId = currentUserId else { return }
         if changed || event == .initialSession || event == .signedIn || event == .userUpdated {
-            profileTask?.cancel()
-            profileTask = Task { [weak self] in await self?.loadProfile(userId: userId) }
+            startProfileLoad(userId: userId)
         }
         if !changed { dependencies.refreshProviderIdentity() }
         if changed {
@@ -262,10 +300,20 @@ public final class AuthService: NSObject, AuthServiceProtocol {
         if dependencies.callbackIntents?.matches(session: session) == false { dependencies.callbackIntents?.clear() }
         profileTask?.cancel()
         calendarTask?.cancel()
+        onboardingTask?.cancel()
+        onboardingTask = nil
+        nameTask?.cancel()
         profile = nil
+        profileSource = .none
+        onboardingMirrored = session.map { dependencies.isOnboardingMirrored($0.user.id) } ?? false
         try? persistence.selectAccount(session?.user.id)
         // Provider reconciliation starts synchronously, independently of profile I/O.
         dependencies.accountChanged(session?.user.id)
+    }
+
+    private func startProfileLoad(userId: UUID) {
+        profileTask?.cancel()
+        profileTask = Task { [weak self] in await self?.loadProfile(userId: userId) }
     }
 
     private func loadProfile(userId: UUID) async {
@@ -284,9 +332,11 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                 let response = try await dependencies.loadProfile(userId)
                 guard generation == sessionGeneration, currentUserId == userId, !Task.isCancelled else { return }
                 try? persistence.saveProfile(response)
-                profile = response
+                acceptServerProfile(response)
             } catch {
                 FailureLog.auth.record("Failed to load profile", error: error)
+                guard generation == sessionGeneration, currentUserId == userId, !Task.isCancelled else { return }
+                if profileSource == .none { profileSource = .unavailable }
             }
         }
     }
@@ -475,6 +525,20 @@ public final class AuthService: NSObject, AuthServiceProtocol {
     }
 
     public func updateProfile(displayName: String?, avatarUrl: String?, timezone: String?) async throws {
+        var updates: [String: AnyJSON] = [:]
+        if let displayName = displayName {
+            updates["display_name"] = .string(displayName)
+        }
+        if let avatarUrl = avatarUrl {
+            updates["avatar_url"] = .string(avatarUrl)
+        }
+        if let timezone = timezone {
+            updates["timezone"] = .string(timezone)
+        }
+        try await writeProfile(updates)
+    }
+
+    private func writeProfile(_ updates: [String: AnyJSON]) async throws {
         let credentials = AccountRequestCredentials(
             accountId: currentUserId, generation: sessionGeneration, accessToken: currentSession?.accessToken)
         return try await AccountRequestContext.$credentials.withValue(credentials) {
@@ -485,16 +549,6 @@ public final class AuthService: NSObject, AuthServiceProtocol {
             let generation = sessionGeneration
             // A profile read started before this edit cannot restore its older row.
             profileTask?.cancel()
-            var updates: [String: AnyJSON] = [:]
-            if let displayName = displayName {
-                updates["display_name"] = .string(displayName)
-            }
-            if let avatarUrl = avatarUrl {
-                updates["avatar_url"] = .string(avatarUrl)
-            }
-            if let timezone = timezone {
-                updates["timezone"] = .string(timezone)
-            }
 
             let response: Profile
             do {
@@ -509,12 +563,79 @@ public final class AuthService: NSObject, AuthServiceProtocol {
                 guard generation == sessionGeneration, currentUserId == userId, !Task.isCancelled else {
                     throw CancellationError()
                 }
+                // The cancelled read has to finish deciding whether onboarding is needed.
+                if profileSource == .none { startProfileLoad(userId: userId) }
                 throw error
             }
 
             guard generation == sessionGeneration, currentUserId == userId, !Task.isCancelled else { throw CancellationError() }
             try? persistence.saveProfile(response)
-            profile = response
+            acceptServerProfile(response)
+        }
+    }
+
+    private func acceptServerProfile(_ response: Profile) {
+        profile = response
+        profileSource = .server
+        guard let userId = currentUserId else { return }
+        if response.onboardingCompletedAt != nil {
+            if !onboardingMirrored { dependencies.mirrorOnboarding(userId) }
+            onboardingMirrored = true
+        } else if onboardingMirrored, onboardingTask == nil {
+            // Completed on this device, but the server never stored it.
+            sendOnboardingCompletion(userId: userId)
+        }
+    }
+
+    // MARK: - Onboarding
+
+    /// Shows `name` at once and stores it in the background, retrying failures. A blank name is
+    /// stored as no name, so others see "Anonymous".
+    public func saveOnboardingName(_ name: String) {
+        guard currentUserId != nil else { return }
+        let stored = DisplayNameInput.stored(name)
+        profile?.displayName = stored
+        nameTask?.cancel()
+        nameTask = Task { [weak self] in
+            await self?.retrying("Failed to save onboarding name") {
+                try await self?.writeProfile(["display_name": stored.map(AnyJSON.string) ?? .null])
+            }
+        }
+    }
+
+    /// Records onboarding as complete on this device at once, then on the server in the background.
+    public func completeOnboarding() {
+        guard let userId = currentUserId else { return }
+        dependencies.mirrorOnboarding(userId)
+        onboardingMirrored = true
+        sendOnboardingCompletion(userId: userId)
+    }
+
+    private func sendOnboardingCompletion(userId: UUID) {
+        onboardingTask?.cancel()
+        let credentials = AccountRequestCredentials(
+            accountId: userId, generation: sessionGeneration, accessToken: currentSession?.accessToken)
+        let complete = dependencies.completeOnboarding
+        onboardingTask = Task { [weak self] in
+            await self?.retrying("Failed to store onboarding completion") {
+                try await AccountRequestContext.$credentials.withValue(credentials) { try await complete() }
+            }
+        }
+    }
+
+    /// Runs `operation` until it succeeds, the account changes or the attempts run out.
+    private func retrying(_ failure: StaticString, _ operation: @MainActor () async throws -> Void) async {
+        let generation = sessionGeneration
+        for attempt in 0..<Self.onboardingWriteAttempts {
+            guard generation == sessionGeneration, !Task.isCancelled else { return }
+            do {
+                try await operation()
+                return
+            } catch {
+                FailureLog.auth.record(failure, error: error)
+                guard attempt + 1 < Self.onboardingWriteAttempts else { return }
+                do { try await dependencies.waitForRetry(attempt) } catch { return }
+            }
         }
     }
 
