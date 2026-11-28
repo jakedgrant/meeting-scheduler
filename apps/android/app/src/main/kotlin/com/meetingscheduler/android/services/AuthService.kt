@@ -374,16 +374,17 @@ class AuthService(
         }
     }
 
-    companion object {
-        /** How many times a fire-and-forget onboarding write is tried before it waits for a later launch. */
-        const val ONBOARDING_WRITE_ATTEMPTS = 4
-    }
-
     sealed class AuthError : Exception() {
         object NotAuthenticated : AuthError()
         data class AppleSignInFailed(override val message: String) : AuthError()
     }
 }
+
+/**
+ * How many times a fire-and-forget onboarding write is tried before it waits for a later launch.
+ * Top level because services keep no companion objects (see ServiceLifetimeTest).
+ */
+const val ONBOARDING_WRITE_ATTEMPTS = 4
 
 /** Accounts this device has recorded as having completed onboarding. */
 interface OnboardingMirror {

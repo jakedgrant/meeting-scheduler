@@ -6,6 +6,7 @@ import com.meetingscheduler.android.models.Profile
 import com.meetingscheduler.android.services.AuthGateway
 import com.meetingscheduler.android.services.AuthService
 import com.meetingscheduler.android.services.MemoryOnboardingMirror
+import com.meetingscheduler.android.services.ONBOARDING_WRITE_ATTEMPTS
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.user.UserSession
 import kotlinx.coroutines.CompletableDeferred
@@ -133,8 +134,8 @@ class OnboardingTest {
         gateway.signIn("A")
         gateway.load.complete(profile("A"))
         auth.completeOnboarding()
-        for (attempt in 0 until AuthService.ONBOARDING_WRITE_ATTEMPTS) gateway.completions[attempt].completeExceptionally(Offline())
-        assertEquals(AuthService.ONBOARDING_WRITE_ATTEMPTS, gateway.completions.size)
+        for (attempt in 0 until ONBOARDING_WRITE_ATTEMPTS) gateway.completions[attempt].completeExceptionally(Offline())
+        assertEquals(ONBOARDING_WRITE_ATTEMPTS, gateway.completions.size)
         scope.cancel()
     }
 
